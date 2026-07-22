@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/muesli/termenv"
 
@@ -104,6 +105,87 @@ func TestSelectionUpdatesMain(t *testing.T) {
 
 	if main := m.main.View(); !strings.Contains(main, "committed.txt") {
 		t.Errorf("main should follow selection to the second item, got:\n%s", main)
+	}
+}
+
+func TestFileDiffLoadsIntoMain(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "committed.txt", State: svn.StateModified},
+	})
+	// Before the diff arrives the Main panel shows a loading placeholder.
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "Loading diff") {
+		t.Errorf("expected a loading placeholder, got:\n%s", main)
+	}
+
+	next, _ := m.Update(diffLoadedMsg{path: "committed.txt", diff: "@@ -1 +1 @@\n-old\n+new"})
+	m = next.(*Model)
+	main := stripANSI(m.main.View())
+	if !strings.Contains(main, "committed.txt") || !strings.Contains(main, "+new") {
+		t.Errorf("main should show the file header and diff, got:\n%s", main)
+	}
+}
+
+func TestStaleDiffIgnoredForOtherFile(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "committed.txt", State: svn.StateModified},
+	})
+	// A diff for a file that is no longer selected must not replace Main.
+	next, _ := m.Update(diffLoadedMsg{path: "other.txt", diff: "+stale"})
+	m = next.(*Model)
+	if main := stripANSI(m.main.View()); strings.Contains(main, "+stale") {
+		t.Errorf("main should ignore a diff for an unselected file, got:\n%s", main)
+	}
+}
+
+func TestDiffWithTabsDoesNotOverflowWidth(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "added.txt", State: svn.StateAdded},
+	})
+	// svn diff output is full of tabs; no rendered row may exceed the terminal
+	// width, or it wraps and the whole frame overflows (panes appear to resize).
+	next, _ := m.Update(diffLoadedMsg{
+		path: "added.txt",
+		diff: "Index: added.txt\n--- added.txt\t(nonexistent)\n+++ added.txt\t(working copy)\n@@ -0,0 +1 @@\n+new",
+	})
+	m = next.(*Model)
+
+	for i, line := range strings.Split(m.View(), "\n") {
+		if w := ansi.StringWidth(line); w != 80 {
+			t.Errorf("line %d width = %d, want 80: %q", i, w, stripANSI(line))
+		}
+	}
+}
+
+func TestLogPanelSelectionUpdatesMain(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+		{Revision: "42", Author: "alice", Message: "first commit"},
+		{Revision: "41", Author: "bob", Message: "second commit"},
+	}})
+	m = next.(*Model)
+
+	// The Log panel renders history even while unfocused.
+	if view := stripANSI(m.View()); !strings.Contains(view, "r42") || !strings.Contains(view, "alice") {
+		t.Errorf("view missing log history, got:\n%s", view)
+	}
+
+	// Focusing the Log panel (key "3") points Main at the log selection.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m = next.(*Model)
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "r42") || !strings.Contains(main, "first commit") {
+		t.Errorf("main should show the first revision detail, got:\n%s", main)
+	}
+
+	// Moving down updates Main to the next revision.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	sel, ok := cmd().(uimsg.SelectedMsg)
+	if !ok {
+		t.Fatalf("expected SelectedMsg, got %T", cmd())
+	}
+	next, _ = m.Update(sel)
+	m = next.(*Model)
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "second commit") {
+		t.Errorf("main should follow the log selection, got:\n%s", main)
 	}
 }
 

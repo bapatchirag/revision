@@ -35,6 +35,40 @@ func TestGoldenViewport(t *testing.T) {
 	golden.RequireEqual(t, []byte(v.View()))
 }
 
+func TestGoldenTable(t *testing.T) {
+	tb := component.NewTable[[]string]("log", []component.Column{
+		{Title: "Rev", Width: 6},
+		{Title: "Author", Width: 8},
+		{Title: "Message", Width: 0},
+	}, func(r []string) []string { return r }, testTheme(), testKeys())
+	tb.SetItems([][]string{
+		{"r3", "alice", "Add diff viewport"},
+		{"r2", "bob", "Fix status parsing"},
+		{"r1", "alice", "Initial import"},
+	})
+	tb.SetSize(40, 6)
+	tb.Focus()
+	golden.RequireEqual(t, []byte(tb.View()))
+}
+
+func TestGoldenTableScrolled(t *testing.T) {
+	tb := component.NewTable[[]string]("log", []component.Column{
+		{Title: "Rev", Width: 4},
+		{Title: "Message", Width: 0},
+	}, func(r []string) []string { return r }, testTheme(), testKeys())
+	tb.SetItems([][]string{
+		{"r6", "six"}, {"r5", "five"}, {"r4", "four"},
+		{"r3", "three"}, {"r2", "two"}, {"r1", "one"},
+	})
+	tb.SetSize(20, 4) // header + 3 body rows
+	tb.Focus()
+	// Move the cursor past the bottom of the window to force scrolling.
+	for i := 0; i < 4; i++ {
+		tb.Update(keyDown())
+	}
+	golden.RequireEqual(t, []byte(tb.View()))
+}
+
 func TestGoldenStatusBar(t *testing.T) {
 	b := component.NewStatusBar(testTheme())
 	b.SetLeft("2 files · tab cycle · q quit")

@@ -2,6 +2,8 @@
 // client. It shells out to the system `svn` binary and parses its --xml output.
 package svn
 
+import "time"
+
 // FileState is the working-copy status of a single path, mirroring the values
 // reported by `svn status` in its `wc-status` item attribute.
 type FileState string
@@ -85,6 +87,22 @@ type Info struct {
 	URL             string
 	RepositoryRoot  string
 	Revision        string
+}
+
+// ChangedPath is a single path affected by a revision, as reported by
+// `svn log --verbose`.
+type ChangedPath struct {
+	Action string // "A", "M", "D", "R" as reported by svn
+	Path   string // repository-relative path
+}
+
+// LogEntry is a single revision from `svn log`.
+type LogEntry struct {
+	Revision string
+	Author   string
+	Date     time.Time
+	Message  string
+	Paths    []ChangedPath
 }
 
 // mapState normalizes an svn status string into a FileState.
