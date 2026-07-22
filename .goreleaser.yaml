@@ -1,0 +1,47 @@
+version: 2
+
+project_name: revision
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: revision
+    main: ./cmd/revision
+    binary: revision
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: darwin
+        goarch: amd64
+      - goos: linux
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: binaries
+    formats:
+      - binary
+    name_template: "revision-{{ .Os }}-{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  github:
+    owner: bapatchirag
+    name: revision
+  draft: false
+  prerelease: auto
+
+changelog:
+  use: github

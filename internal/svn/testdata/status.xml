@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<status>
+<target
+   path=".">
+<entry
+   path="committed.txt">
+<wc-status
+   item="modified"
+   revision="1"
+   props="none">
+<commit
+   revision="1">
+<author>alice</author>
+<date>2026-01-01T00:00:00.000000Z</date>
+</commit>
+</wc-status>
+</entry>
+<entry
+   path="untracked.txt">
+<wc-status
+   item="unversioned"
+   props="none">
+</wc-status>
+</entry>
+</target>
+<changelist
+   name="revision:staged">
+<entry
+   path="added.txt">
+<wc-status
+   item="added"
+   revision="-1"
+   props="none">
+</wc-status>
+</entry>
+</changelist>
+</status>

@@ -1,0 +1,65 @@
+{
+  "name": "revision",
+  "displayName": "revision",
+  "description": "Launch the revision TUI — a lazygit-style terminal UI for Subversion (SVN).",
+  "version": "0.0.0",
+  "publisher": "bapatchirag",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "keywords": [
+    "svn",
+    "subversion",
+    "tui",
+    "lazygit",
+    "scm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bapatchirag/revision.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bapatchirag/revision/issues"
+  },
+  "homepage": "https://github.com/bapatchirag/revision#readme",
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "revision.open",
+        "title": "Open",
+        "category": "Revision"
+      }
+    ],
+    "configuration": {
+      "title": "revision",
+      "properties": {
+        "revision.binaryPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Absolute path to the `revision` binary. If empty, the bundled binary is used, falling back to `revision` on your `PATH`."
+        },
+        "revision.workingDirectory": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Working directory to launch `revision` in. Defaults to the first workspace folder."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.4.0"
+  }
+}

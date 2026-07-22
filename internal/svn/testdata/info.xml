@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<info>
+<entry
+   path="."
+   revision="42"
+   kind="dir">
+<url>https://svn.example.com/repo/trunk</url>
+<relative-url>^/trunk</relative-url>
+<repository>
+<root>https://svn.example.com/repo</root>
+<uuid>84fd81d9-d446-45de-8a20-e0e5d60fb721</uuid>
+</repository>
+<wc-info>
+<wcroot-abspath>/home/alice/work/wc</wcroot-abspath>
+<schedule>normal</schedule>
+<depth>infinity</depth>
+</wc-info>
+<commit
+   revision="42">
+<author>alice</author>
+<date>2026-01-01T00:00:00.000000Z</date>
+</commit>
+</entry>
+</info>

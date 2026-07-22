@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "compile-extension",
+      "type": "shell",
+      "command": "npm install && npm run compile",
+      "options": {
+        "cwd": "${workspaceFolder}/extension"
+      },
+      "group": "build",
+      "problemMatcher": "$tsc"
+    }
+  ]
+}

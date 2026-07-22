@@ -32,3 +32,6 @@ extension/README.md
 # OS / editor cruft
 .DS_Store
 *.swp
+
+# Generated Marketplace LICENSE (copied from root at package time)
+extension/LICENSE
