@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<log>
+<logentry
+   revision="42">
+<author>alice</author>
+<date>2026-01-02T10:30:00.000000Z</date>
+<paths>
+<path
+   text-mods="true"
+   kind="file"
+   action="M"
+   prop-mods="false">/trunk/committed.txt</path>
+<path
+   text-mods="true"
+   kind="file"
+   action="A"
+   prop-mods="false">/trunk/added.txt</path>
+</paths>
+<msg>Add feature and tweak existing file</msg>
+</logentry>
+<logentry
+   revision="41">
+<author>bob</author>
+<date>2026-01-01T09:00:00.000000Z</date>
+<paths>
+<path
+   text-mods="true"
+   kind="file"
+   action="A"
+   prop-mods="false">/trunk/committed.txt</path>
+</paths>
+<msg>Initial import</msg>
+</logentry>
+</log>

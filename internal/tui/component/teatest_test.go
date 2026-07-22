@@ -67,6 +67,20 @@ func TestTeatestViewportScroll(t *testing.T) {
 	assertContains(t, finalOutput(t, tm), "L2", "L4")
 }
 
+func TestTeatestTableNavigation(t *testing.T) {
+	tb := component.NewTable[[]string]("log", []component.Column{
+		{Title: "Rev", Width: 5},
+		{Title: "Message", Width: 0},
+	}, func(r []string) []string { return r }, testTheme(), testKeys())
+	tb.SetItems([][]string{{"r3", "alpha"}, {"r2", "bravo"}, {"r1", "charlie"}})
+	tb.SetSize(24, 4)
+	tb.Focus()
+
+	tm := teatest.NewTestModel(t, asModel(tb), teatest.WithInitialTermSize(40, 10))
+	tm.Send(keyDown())
+	assertContains(t, finalOutput(t, tm), "> r2", "bravo")
+}
+
 func TestTeatestMenuNavigation(t *testing.T) {
 	mn := component.NewMenu("actions", "Actions", []component.MenuItem{
 		{Label: "Commit", Key: "c"},

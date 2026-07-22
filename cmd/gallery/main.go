@@ -19,20 +19,22 @@ import (
 	"github.com/bapatchirag/revision/internal/tui/theme"
 )
 
-const sampleText = `revision is a lazygit-style TUI for Subversion.
+const sampleText = `Index: internal/app/app.go
+===================================================================
+--- internal/app/app.go   (revision 128)
++++ internal/app/app.go   (working copy)
+@@ -18,6 +18,7 @@
+ 	status *component.Viewport
+ 	files  *component.List[svn.StatusItem]
++	log    *component.Table[svn.LogEntry]
+ 	main   *component.Viewport
 
-The Viewport component scrolls read-only text such as diffs and
-file detail. Use j/k or the arrow keys to move a line at a time
-and PgUp/PgDn (J/K) to move a page at a time.
+@@ -40,7 +41,7 @@
+-	// diff preview arrives in a later phase
++	m.main.SetContent(m.fileDetail())
 
-Line 1
-Line 2
-Line 3
-Line 4
-Line 5
-Line 6
-Line 7
-Line 8`
+ The Viewport scrolls read-only text such as diffs. Use j/k or the
+ arrow keys to move a line at a time and PgUp/PgDn (J/K) by a page.`
 
 type demo struct {
 	name string
@@ -58,6 +60,20 @@ func newModel() model {
 	vp := component.NewViewport(th, keys)
 	vp.SetContent(sampleText)
 	vp.Focus()
+
+	table := component.NewTable[[]string]("gallery-log", []component.Column{
+		{Title: "Rev", Width: 6},
+		{Title: "Author", Width: 10},
+		{Title: "Date", Width: 10},
+		{Title: "Message", Width: 0},
+	}, func(r []string) []string { return r }, th, keys)
+	table.SetItems([][]string{
+		{"r128", "alice", "2026-07-20", "Add diff viewport + log table"},
+		{"r127", "bob", "2026-07-19", "Fix status xml parsing"},
+		{"r126", "alice", "2026-07-18", "Introduce component gallery"},
+		{"r125", "carol", "2026-07-17", "Initial import"},
+	})
+	table.Focus()
 
 	bar := component.NewStatusBar(th)
 	bar.SetLeft("j/k move · enter select · q quit")
@@ -87,7 +103,8 @@ func newModel() model {
 		keys: keys,
 		demos: []demo{
 			{"List[string]", list},
-			{"Viewport", vp},
+			{"Viewport (diff)", vp},
+			{"Table (log)", table},
 			{"StatusBar", bar},
 			{"Panel + List", panel},
 			{"Modal", modal},
@@ -135,7 +152,7 @@ func (m model) View() string {
 	title := lipgloss.NewStyle().Bold(true).Render("revision component gallery")
 	name := lipgloss.NewStyle().Bold(true).Render(m.demos[m.idx].name)
 	header := fmt.Sprintf("%s — %s (%d/%d)", title, name, m.idx+1, len(m.demos))
-	footer := "tab/[/] switch · 1-7 jump · other keys drive the component · q quit"
+	footer := fmt.Sprintf("tab/[/] switch · 1-%d jump · other keys drive the component · q quit", len(m.demos))
 
 	bodyHeight := m.height - 4
 	if bodyHeight < 3 {

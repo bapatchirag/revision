@@ -23,11 +23,18 @@ const (
 	borderVertical    = "│"
 )
 
-// fitLine pads or truncates s to exactly width display cells.
+// tabSpaces is the fixed-width expansion for a tab (see fitLine).
+const tabSpaces = "    "
+
+// fitLine pads or truncates s to exactly width display cells. Tabs are expanded
+// to spaces first: terminals advance a tab to a variable-width tab stop, which
+// would otherwise push fixed-width content past its cell and wrap the line,
+// corrupting the layout.
 func fitLine(s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
+	s = strings.ReplaceAll(s, "\t", tabSpaces)
 	w := ansi.StringWidth(s)
 	switch {
 	case w > width:

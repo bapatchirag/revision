@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -91,5 +92,39 @@ func TestIntegrationStatusAndInfo(t *testing.T) {
 		if got := byPath[path].State; got != want {
 			t.Errorf("%s state = %s, want %s", path, got, want)
 		}
+	}
+}
+
+func TestIntegrationLogAndDiff(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	writeFile(t, filepath.Join(wc, "committed.txt"), "hello\n")
+	mustRun(t, wc, "svn", "add", "committed.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "initial import")
+	mustRun(t, wc, "svn", "update")
+
+	entries, err := c.Log(ctx, 10)
+	if err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least one log entry")
+	}
+	if entries[0].Message != "initial import" {
+		t.Errorf("latest message = %q, want %q", entries[0].Message, "initial import")
+	}
+	if len(entries[0].Paths) == 0 {
+		t.Error("expected changed paths in verbose log")
+	}
+
+	writeFile(t, filepath.Join(wc, "committed.txt"), "hello\nworld\n")
+	diff, err := c.Diff(ctx, "committed.txt")
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if !strings.Contains(diff, "+world") {
+		t.Errorf("diff missing the added line:\n%s", diff)
 	}
 }

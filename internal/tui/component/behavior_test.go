@@ -1,11 +1,35 @@
 package component_test
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/bapatchirag/revision/internal/tui/component"
 	"github.com/bapatchirag/revision/internal/tui/msg"
 )
+
+// TestFitLineExpandsTabs guards the fixed-width layout against raw tabs: a line
+// containing a tab (as in svn diff output) must render to exactly the cell width
+// with no tab left for the terminal to expand — otherwise the line wraps and the
+// whole frame overflows.
+func TestFitLineExpandsTabs(t *testing.T) {
+	v := component.NewViewport(testTheme(), testKeys())
+	v.SetContent("a\tb")
+	v.SetSize(24, 1)
+
+	out := v.View()
+	if strings.Contains(out, "\t") {
+		t.Fatalf("view must not contain a raw tab: %q", out)
+	}
+	if !strings.Contains(out, "a"+strings.Repeat(" ", 4)+"b") {
+		t.Errorf("tab was not expanded to spaces: %q", out)
+	}
+	if w := ansi.StringWidth(out); w != 24 {
+		t.Errorf("rendered width = %d, want 24", w)
+	}
+}
 
 func TestListEmitsSelected(t *testing.T) {
 	l := component.NewList[string]("files", func(s string) string { return s }, testTheme(), testKeys())
@@ -49,6 +73,58 @@ func TestListIgnoresInputWhenBlurred(t *testing.T) {
 	}
 	if l.Index() != 0 {
 		t.Errorf("cursor moved while blurred: %d", l.Index())
+	}
+}
+
+func newStringTable() *component.Table[[]string] {
+	return component.NewTable[[]string]("log", []component.Column{
+		{Title: "Rev", Width: 4},
+		{Title: "Message", Width: 0},
+	}, func(r []string) []string { return r }, testTheme(), testKeys())
+}
+
+func TestTableEmitsSelected(t *testing.T) {
+	tb := newStringTable()
+	tb.SetItems([][]string{{"r3", "a"}, {"r2", "b"}, {"r1", "c"}})
+	tb.SetSize(20, 4)
+	tb.Focus()
+
+	got := mustCmd(t, tb.Update(keyDown()))
+	sel, ok := got.(msg.SelectedMsg)
+	if !ok {
+		t.Fatalf("expected SelectedMsg, got %T", got)
+	}
+	if sel.ID != "log" || sel.Index != 1 {
+		t.Errorf("got %+v, want {log 1}", sel)
+	}
+}
+
+func TestTableEmitsActivated(t *testing.T) {
+	tb := newStringTable()
+	tb.SetItems([][]string{{"r2", "a"}, {"r1", "b"}})
+	tb.SetSize(20, 4)
+	tb.Focus()
+
+	got := mustCmd(t, tb.Update(keyEnter()))
+	act, ok := got.(msg.ActivatedMsg)
+	if !ok {
+		t.Fatalf("expected ActivatedMsg, got %T", got)
+	}
+	if act.ID != "log" || act.Index != 0 {
+		t.Errorf("got %+v, want {log 0}", act)
+	}
+}
+
+func TestTableIgnoresInputWhenBlurred(t *testing.T) {
+	tb := newStringTable()
+	tb.SetItems([][]string{{"r2", "a"}, {"r1", "b"}})
+	tb.SetSize(20, 4)
+
+	if cmd := tb.Update(keyDown()); cmd != nil {
+		t.Error("blurred table should ignore key input")
+	}
+	if tb.Index() != 0 {
+		t.Errorf("cursor moved while blurred: %d", tb.Index())
 	}
 }
 
