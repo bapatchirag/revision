@@ -1,0 +1,34 @@
+# Build output
+/bin/
+/dist/
+/revision
+revision-darwin-arm64
+revision-linux-amd64
+*.exe
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Go
+vendor/
+
+# Node / VS Code extension
+node_modules/
+extension/node_modules/
+extension/out/
+*.vsix
+
+# Bundled binaries (populated by CI at package time)
+extension/bin/
+
+# Generated Marketplace README (copied from root at package time)
+extension/README.md
+
+# Local-only working docs
+/PLAN.md
+/LOG.md
+
+# OS / editor cruft
+.DS_Store
+*.swp
