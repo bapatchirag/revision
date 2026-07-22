@@ -29,6 +29,9 @@ extension/README.md
 /PLAN.md
 /LOG.md
 
+# Local-only custom agents
+/.github/agents/
+
 # OS / editor cruft
 .DS_Store
 *.swp
