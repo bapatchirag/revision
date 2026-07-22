@@ -1,0 +1,24 @@
+╭─ [1] Status ─────────────────╮╭─ Main ───────────────────────────────────────╮
+│https://svn.example.com/repo/t││added.txt                                     │
+│r42                           ││                                              │
+│3 change(s)                   ││state:      added (A)                         │
+╰──────────────────────────────╯│changelist: revision:staged                   │
+╭─ [2] Files ──────────────────╮│                                              │
+│> A  added.txt                ││(diff preview arrives in a later phase)       │
+│  M  modified.go              ││                                              │
+│  D  gone.txt                 ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+╰──────────────────────────────╯╰──────────────────────────────────────────────╯
+1 status · 2 files · 0 main · tab cycle · R refresh · ? help · q quit           

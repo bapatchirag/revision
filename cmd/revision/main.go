@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/bapatchirag/revision/internal/app"
 	"github.com/bapatchirag/revision/internal/svn"
-	"github.com/bapatchirag/revision/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -64,7 +64,7 @@ func run(path string) error {
 		return fmt.Errorf("%q does not appear to be an SVN working copy: %w", abs, err)
 	}
 
-	program := tea.NewProgram(ui.New(client, info), tea.WithAltScreen())
+	program := tea.NewProgram(app.New(client, info), tea.WithAltScreen())
 	_, err = program.Run()
 	return err
 }

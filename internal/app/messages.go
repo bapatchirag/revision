@@ -1,11 +1,12 @@
-package ui
+package app
 
 import (
 	"context"
 	"time"
 
-	"github.com/bapatchirag/revision/internal/svn"
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/bapatchirag/revision/internal/svn"
 )
 
 // statusLoadedMsg carries the result of a successful status refresh.
