@@ -238,3 +238,141 @@ func TestTextAreaIgnoresInputWhenBlurred(t *testing.T) {
 		t.Errorf("blurred editor should not change, got %q", ta.Value())
 	}
 }
+
+func newStringViews() (*component.Views, *component.List[string], *component.List[string]) {
+	a := component.NewList[string]("changes", func(s string) string { return s }, testTheme(), testKeys())
+	a.SetItems([]string{"a1", "a2"})
+	b := component.NewList[string]("staged", func(s string) string { return s }, testTheme(), testKeys())
+	b.SetItems([]string{"b1"})
+	vs := component.NewViews("views", []component.View{
+		{Name: "Changes", Content: a},
+		{Name: "Staged", Content: b},
+	}, testTheme(), testKeys())
+	vs.SetSize(24, 6)
+	vs.Focus()
+	return vs, a, b
+}
+
+func TestViewsSwitchesWithBrackets(t *testing.T) {
+	vs, a, b := newStringViews()
+	if vs.ActiveIndex() != 0 || vs.ActiveName() != "Changes" {
+		t.Fatalf("expected Changes active, got %d/%q", vs.ActiveIndex(), vs.ActiveName())
+	}
+
+	got := mustCmd(t, vs.Update(runes("]")))
+	sel, ok := got.(msg.ViewSelectedMsg)
+	if !ok {
+		t.Fatalf("expected ViewSelectedMsg, got %T", got)
+	}
+	if sel.ID != "views" || sel.Index != 1 || sel.Name != "Staged" {
+		t.Errorf("got %+v, want {views 1 Staged}", sel)
+	}
+	if vs.ActiveIndex() != 1 {
+		t.Errorf("active view = %d, want 1", vs.ActiveIndex())
+	}
+	if a.Focused() || !b.Focused() {
+		t.Error("switching should blur the old view and focus the new one")
+	}
+
+	// [ wraps back to the first view.
+	mustCmd(t, vs.Update(runes("[")))
+	if vs.ActiveIndex() != 0 {
+		t.Errorf("after [, active view = %d, want 0", vs.ActiveIndex())
+	}
+}
+
+func TestViewsForwardsToActive(t *testing.T) {
+	vs, a, _ := newStringViews()
+	// A navigation key reaches the active view, which emits SelectedMsg.
+	got := mustCmd(t, vs.Update(keyDown()))
+	sel, ok := got.(msg.SelectedMsg)
+	if !ok {
+		t.Fatalf("expected SelectedMsg from the active view, got %T", got)
+	}
+	if sel.ID != "changes" || sel.Index != 1 {
+		t.Errorf("got %+v, want {changes 1}", sel)
+	}
+	if a.Index() != 1 {
+		t.Errorf("active view cursor = %d, want 1", a.Index())
+	}
+}
+
+func TestViewsDrillPushPop(t *testing.T) {
+	vs, _, _ := newStringViews()
+	if vs.Depth() != 0 {
+		t.Fatalf("expected base depth 0, got %d", vs.Depth())
+	}
+
+	sub := component.NewList[string]("detail", func(s string) string { return s }, testTheme(), testKeys())
+	sub.SetItems([]string{"d1", "d2"})
+	vs.Push(sub)
+	if vs.Depth() != 1 {
+		t.Fatalf("after push, depth = %d, want 1", vs.Depth())
+	}
+	if vs.ActiveName() != "Changes" {
+		t.Errorf("drilling should keep the named view active, got %q", vs.ActiveName())
+	}
+	if !sub.Focused() {
+		t.Error("the pushed sub-view should be focused")
+	}
+
+	// esc pops back out and emits SubViewPoppedMsg.
+	got := mustCmd(t, vs.Update(keyEsc()))
+	pop, ok := got.(msg.SubViewPoppedMsg)
+	if !ok {
+		t.Fatalf("expected SubViewPoppedMsg, got %T", got)
+	}
+	if pop.ID != "views" || pop.Depth != 0 {
+		t.Errorf("got %+v, want {views 0}", pop)
+	}
+	if vs.Depth() != 0 {
+		t.Errorf("after pop, depth = %d, want 0", vs.Depth())
+	}
+}
+
+func TestViewsIgnoresInputWhenBlurred(t *testing.T) {
+	vs, a, _ := newStringViews()
+	vs.Blur()
+
+	if cmd := vs.Update(runes("]")); cmd != nil {
+		t.Error("a blurred container should ignore the view-switch key")
+	}
+	if vs.ActiveIndex() != 0 {
+		t.Errorf("active view changed while blurred: %d", vs.ActiveIndex())
+	}
+	if cmd := vs.Update(keyDown()); cmd != nil {
+		t.Error("a blurred container should not forward navigation")
+	}
+	if a.Index() != 0 {
+		t.Errorf("active view cursor moved while blurred: %d", a.Index())
+	}
+}
+
+func TestViewsRendersContentWithoutStrip(t *testing.T) {
+	only := component.NewList[string]("log", func(s string) string { return s }, testTheme(), testKeys())
+	only.SetItems([]string{"r42", "r41"})
+	vs := component.NewViews("log-views", []component.View{{Name: "Log", Content: only}}, testTheme(), testKeys())
+	vs.SetSize(20, 4)
+	vs.Focus()
+
+	// Views renders only the active component; the tab labels live in the host
+	// Panel's border, so the container output is exactly the wrapped view.
+	if got, want := vs.View(), only.View(); got != want {
+		t.Errorf("Views should render only its content:\n got: %q\nwant: %q", got, want)
+	}
+	// [ / ] are inert with a single view.
+	if cmd := vs.Update(runes("]")); cmd != nil {
+		t.Error("a single-view container should not switch on ]")
+	}
+
+	// Drilling swaps the content for the sub-view but still adds no strip.
+	sub := component.NewList[string]("detail", func(s string) string { return s }, testTheme(), testKeys())
+	sub.SetItems([]string{"x"})
+	vs.Push(sub)
+	if got, want := vs.View(), sub.View(); got != want {
+		t.Errorf("a drilled Views should render only the sub-view:\n got: %q\nwant: %q", got, want)
+	}
+	if vs.Depth() != 1 {
+		t.Errorf("expected depth 1 after push, got %d", vs.Depth())
+	}
+}

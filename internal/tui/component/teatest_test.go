@@ -143,3 +143,22 @@ func TestTeatestTextAreaEditing(t *testing.T) {
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello")})
 	assertContains(t, finalOutput(t, tm), "Commit message", "hello")
 }
+
+func TestTeatestViewsSwitch(t *testing.T) {
+	a := component.NewList[string]("changes", func(s string) string { return s }, testTheme(), testKeys())
+	a.SetItems([]string{"alpha"})
+	b := component.NewList[string]("staged", func(s string) string { return s }, testTheme(), testKeys())
+	b.SetItems([]string{"bravo"})
+	vs := component.NewViews("views", []component.View{
+		{Name: "Changes", Content: a},
+		{Name: "Staged", Content: b},
+	}, testTheme(), testKeys())
+	p := component.NewPanel("Files", 2, vs, testTheme())
+	p.SetSize(30, 6)
+	p.Focus()
+
+	tm := teatest.NewTestModel(t, asModel(p), teatest.WithInitialTermSize(40, 10))
+	tm.Send(runes("]"))
+	// After ] the Staged view is active (border tab) and shows its item.
+	assertContains(t, finalOutput(t, tm), "Staged", "bravo")
+}
