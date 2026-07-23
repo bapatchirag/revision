@@ -21,4 +21,4 @@
 │                              ││                                              │
 │                              ││                                              │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-space stage · c commit · tab cycle · R refresh · q quit                         
+space stage · c commit · r revert · d delete · u update · R refresh · q quit    

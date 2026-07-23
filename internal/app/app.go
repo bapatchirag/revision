@@ -36,6 +36,9 @@ const stagedChangelist = "revision:staged"
 // commitEditorID identifies the commit-message editor on emitted messages.
 const commitEditorID = "commit"
 
+// confirmModalID identifies the shared confirmation modal on emitted messages.
+const confirmModalID = "confirm"
+
 // mainSource selects which side panel's selection drives the Main viewport.
 type mainSource int
 
@@ -62,14 +65,18 @@ type Model struct {
 	panels []*component.Panel
 	bar    *component.StatusBar
 	editor *component.TextArea
+	modal  *component.Modal
+	toast  *component.Toast
 	focus  *focus.Manager
 
-	source   mainSource
-	diffPath string
-	diffText string
-	logErr   error
-	notice   string
-	editing  bool
+	source       mainSource
+	diffPath     string
+	diffText     string
+	logErr       error
+	editing      bool
+	confirming   bool
+	pending      tea.Cmd
+	showingToast bool
 
 	width   int
 	height  int
@@ -108,6 +115,8 @@ func New(client *svn.Client, info *svn.Info) *Model {
 		panels:  panels,
 		bar:     component.NewStatusBar(th),
 		editor:  component.NewTextArea(commitEditorID, "Commit message", "Enter a commit message…", th, keys),
+		modal:   component.NewModal(confirmModalID, "", "", th, keys),
+		toast:   component.NewToast(th),
 		source:  sourceFiles,
 		loading: true,
 	}
@@ -132,6 +141,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 		if m.editing {
 			m.sizeEditor()
+		}
+		if m.confirming {
+			m.sizeModal()
 		}
 		return m, nil
 
@@ -171,8 +183,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case stagedMsg:
 		if msg.err != nil {
-			m.notice = "stage failed: " + msg.err.Error()
-			m.updateBar()
+			m.showToast("stage failed: "+msg.err.Error(), component.LevelError)
 			return m, nil
 		}
 		// Reload status so the changelist grouping (and staged marker) refresh.
@@ -181,17 +192,50 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case committedMsg:
 		if msg.err != nil {
 			m.loading = false
-			m.notice = "commit failed: " + msg.err.Error()
+			m.showToast("commit failed: "+msg.err.Error(), component.LevelError)
 			m.refreshChrome()
 			return m, nil
 		}
 		if msg.revision != "" {
-			m.notice = "committed r" + msg.revision
+			m.showToast("committed r"+msg.revision, component.LevelSuccess)
 		} else {
-			m.notice = "commit complete"
+			m.showToast("commit complete", component.LevelSuccess)
 		}
 		m.diffPath, m.diffText = "", ""
 		m.refreshChrome()
+		return m, tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client))
+
+	case revertedMsg:
+		if msg.err != nil {
+			m.showToast("revert failed: "+msg.err.Error(), component.LevelError)
+			return m, nil
+		}
+		m.showToast("reverted "+msg.path, component.LevelSuccess)
+		m.diffPath, m.diffText = "", ""
+		return m, loadStatusCmd(m.client)
+
+	case deletedMsg:
+		if msg.err != nil {
+			m.showToast("delete failed: "+msg.err.Error(), component.LevelError)
+			return m, nil
+		}
+		m.showToast("deleted "+msg.path, component.LevelSuccess)
+		m.diffPath, m.diffText = "", ""
+		return m, loadStatusCmd(m.client)
+
+	case updatedMsg:
+		if msg.err != nil {
+			m.loading = false
+			m.showToast("update failed: "+msg.err.Error(), component.LevelError)
+			m.refreshChrome()
+			return m, nil
+		}
+		if msg.revision != "" {
+			m.showToast("updated to r"+msg.revision, component.LevelSuccess)
+		} else {
+			m.showToast("update complete", component.LevelSuccess)
+		}
+		m.diffPath, m.diffText = "", ""
 		return m, tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client))
 
 	case uimsg.SelectedMsg:
@@ -203,11 +247,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case uimsg.ConfirmMsg:
+		if msg.ID == confirmModalID {
+			m.closeConfirm()
+			cmd := m.pending
+			m.pending = nil
+			return m, cmd
+		}
+		return m, nil
+
 	case uimsg.DismissMsg:
-		if msg.ID == commitEditorID {
+		switch msg.ID {
+		case commitEditorID:
 			m.editing = false
 			m.editor.Blur()
-			m.updateBar()
+		case confirmModalID:
+			m.closeConfirm()
+			m.pending = nil
 		}
 		return m, nil
 
@@ -215,6 +271,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.editing {
 			return m, m.editor.Update(msg)
 		}
+		if m.confirming {
+			return m, m.modal.Update(msg)
+		}
+		m.dismissToast()
 		if cmd, handled := m.handleKey(msg); handled {
 			return m, cmd
 		}
@@ -223,19 +283,41 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, m.panels[m.focus.Index()].Update(msg)
 }
 
-// View renders the full lazygit layout, with the commit editor floating over it
-// while editing.
+// View renders the full lazygit layout, floating a transient toast and, while
+// active, the commit editor or a confirmation modal over it.
 func (m *Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "loading…"
 	}
-	base := m.baseView()
-	if !m.editing {
-		return base
+	view := m.baseView()
+	if m.showingToast {
+		view = m.overlayToast(view)
 	}
-	popup := m.editor.View()
+	switch {
+	case m.editing:
+		view = m.overlayCenter(view, m.editor.View())
+	case m.confirming:
+		view = m.overlayCenter(view, m.modal.View())
+	}
+	return view
+}
+
+// overlayCenter floats popup in the middle of the base view.
+func (m *Model) overlayCenter(base, popup string) string {
 	x := max((m.width-lipgloss.Width(popup))/2, 0)
 	y := max((m.height-lipgloss.Height(popup))/2, 0)
+	return layout.Overlay(base, popup, x, y)
+}
+
+// overlayToast floats the toast in the bottom-right corner, just above the
+// status bar.
+func (m *Model) overlayToast(base string) string {
+	popup := m.toast.View()
+	if popup == "" {
+		return base
+	}
+	x := max(m.width-lipgloss.Width(popup)-1, 0)
+	y := max(m.height-lipgloss.Height(popup)-1, 0) // 1 row for the status bar
 	return layout.Overlay(base, popup, x, y)
 }
 
@@ -258,7 +340,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return tea.Quit, true
 	case key.Matches(k, m.keys.Refresh):
 		m.loading = true
-		m.notice = ""
+		m.dismissToast()
 		m.diffPath, m.diffText = "", ""
 		m.refreshChrome()
 		return tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client)), true
@@ -290,6 +372,18 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, false
 	case "c":
 		return m.openCommit(), true
+	case "r":
+		if m.focus.Index() == panelFiles {
+			return m.requestRevert(), true
+		}
+		return nil, false
+	case "d":
+		if m.focus.Index() == panelFiles {
+			return m.requestDelete(), true
+		}
+		return nil, false
+	case "u":
+		return m.requestUpdate(), true
 	}
 	return nil, false
 }
@@ -300,7 +394,9 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 func (m *Model) stageSelected() tea.Cmd {
 	act, ok := m.stageTarget()
 	if !ok {
-		m.updateBar()
+		if it, sel := m.files.Selected(); sel {
+			m.showToast("can't stage "+it.Path+" ("+it.State.Code()+")", component.LevelWarning)
+		}
 		return nil
 	}
 	return stageCmd(m.client, stagedChangelist, act)
@@ -313,10 +409,16 @@ type stageAction struct {
 	stage bool // add to (true) or remove from (false) the staged changelist
 }
 
+// deleteAction describes how a delete keypress should remove one file.
+type deleteAction struct {
+	path        string
+	unversioned bool // remove from disk (untracked) vs. svn delete (versioned)
+}
+
 // stageTarget resolves what a stage action would do for the current Files
 // selection. An unversioned file is added and staged in one step; a versioned
-// pending change toggles its changelist membership. It sets a notice and
-// returns ok=false when the selection cannot be staged.
+// pending change toggles its changelist membership. It returns ok=false when
+// there is no selection or the selection cannot be staged.
 func (m *Model) stageTarget() (stageAction, bool) {
 	it, ok := m.files.Selected()
 	if !ok {
@@ -328,7 +430,6 @@ func (m *Model) stageTarget() (stageAction, bool) {
 	case stageable(it.State):
 		return stageAction{path: it.Path, stage: it.Changelist != stagedChangelist}, true
 	default:
-		m.notice = "can't stage " + it.Path + " (" + it.State.Code() + ")"
 		return stageAction{}, false
 	}
 }
@@ -336,11 +437,9 @@ func (m *Model) stageTarget() (stageAction, bool) {
 // openCommit opens the commit-message editor, provided something is staged.
 func (m *Model) openCommit() tea.Cmd {
 	if m.stagedCount() == 0 {
-		m.notice = "nothing staged — press space to stage files"
-		m.updateBar()
+		m.showToast("nothing staged — press space to stage files", component.LevelWarning)
 		return nil
 	}
-	m.notice = ""
 	m.editing = true
 	m.editor.Reset()
 	m.editor.Focus()
@@ -348,12 +447,80 @@ func (m *Model) openCommit() tea.Cmd {
 	return nil
 }
 
+// requestRevert asks to discard local changes to the selected file, opening a
+// confirmation modal. A clean/unversioned selection has nothing to revert.
+func (m *Model) requestRevert() tea.Cmd {
+	it, ok := m.files.Selected()
+	if !ok {
+		return nil
+	}
+	if !it.State.IsDirty() {
+		m.showToast("nothing to revert in "+it.Path, component.LevelWarning)
+		return nil
+	}
+	m.pending = revertCmd(m.client, it.Path)
+	m.openConfirm("Revert changes?", "Discard local changes to "+it.Path+"? This cannot be undone.")
+	return nil
+}
+
+// requestDelete asks to remove the selected file, opening a confirmation modal.
+// A versioned file is scheduled for deletion; an unversioned one is removed from
+// disk. Ignored files are left alone.
+func (m *Model) requestDelete() tea.Cmd {
+	it, ok := m.files.Selected()
+	if !ok {
+		return nil
+	}
+	if it.State == svn.StateIgnored {
+		m.showToast("can't delete ignored "+it.Path, component.LevelWarning)
+		return nil
+	}
+	act := deleteAction{path: it.Path, unversioned: it.State == svn.StateUnversioned}
+	message := it.Path + " will be scheduled for deletion (removed on the next commit)."
+	if act.unversioned {
+		message = "Permanently delete untracked " + it.Path + " from disk? This cannot be undone."
+	}
+	m.pending = deleteCmd(m.client, act)
+	m.openConfirm("Delete file?", message)
+	return nil
+}
+
+// requestUpdate brings the working copy up to date with the repository.
+func (m *Model) requestUpdate() tea.Cmd {
+	m.loading = true
+	m.refreshChrome()
+	return updateCmd(m.client)
+}
+
+// openConfirm arms the shared modal with a prompt and shows it; the pending
+// command runs when the user confirms.
+func (m *Model) openConfirm(title, message string) {
+	m.confirming = true
+	m.modal.SetPrompt(title, message)
+	m.modal.Focus()
+	m.sizeModal()
+}
+
+// closeConfirm hides the confirmation modal.
+func (m *Model) closeConfirm() {
+	m.confirming = false
+	m.modal.Blur()
+}
+
+// showToast displays a transient notice; it stays until the next interaction.
+func (m *Model) showToast(text string, level component.Level) {
+	m.toast.Show(text, level)
+	m.showingToast = true
+}
+
+// dismissToast hides the current toast.
+func (m *Model) dismissToast() { m.showingToast = false }
+
 // submitCommit closes the editor and commits the staged changelist with the
 // entered message, rejecting an empty message.
 func (m *Model) submitCommit(message string) tea.Cmd {
 	if strings.TrimSpace(message) == "" {
-		m.notice = "commit message cannot be empty"
-		m.updateBar()
+		m.showToast("commit message cannot be empty", component.LevelWarning)
 		return nil
 	}
 	m.editing = false
@@ -379,6 +546,13 @@ func (m *Model) sizeEditor() {
 	w := clamp(m.width*3/5, 40, max(m.width-4, 40))
 	h := clamp(m.height/2, 8, max(m.height-4, 8))
 	m.editor.SetSize(w, h)
+}
+
+// sizeModal sizes the confirmation modal to a centered portion of the screen
+// (only its width matters; the height follows the wrapped message).
+func (m *Model) sizeModal() {
+	w := clamp(m.width/2, 34, max(m.width-6, 34))
+	m.modal.SetSize(w, 0)
 }
 
 // stageable reports whether a working-copy state can be added to the staged
@@ -414,7 +588,6 @@ func (m *Model) handleSelection(sel uimsg.SelectedMsg) tea.Cmd {
 // afterFocusChange updates which panel drives Main, refreshes the chrome, and
 // loads a diff when Main now follows the Files panel.
 func (m *Model) afterFocusChange() tea.Cmd {
-	m.notice = ""
 	switch m.focus.Index() {
 	case panelLog:
 		m.source = sourceLog
@@ -555,15 +728,9 @@ func (m *Model) logDetail() string {
 	return strings.Join(lines, "\n")
 }
 
-// updateBar sets the contextual key hints and right-aligned repo context. A
-// transient notice takes over the left slot so it is never dropped when the
-// bar is narrow.
+// updateBar sets the contextual key hints and right-aligned repo context.
 func (m *Model) updateBar() {
-	if m.notice != "" {
-		m.bar.SetLeft(m.notice)
-	} else {
-		m.bar.SetLeft("space stage · c commit · tab cycle · R refresh · q quit")
-	}
+	m.bar.SetLeft("space stage · c commit · r revert · d delete · u update · R refresh · q quit")
 
 	switch {
 	case m.err != nil:

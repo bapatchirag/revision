@@ -1,0 +1,7 @@
+╭─ Revert changes? ────────────────────╮
+│Discard local changes to              │
+│internal/app/app.go? This cannot be   │
+│undone.                               │
+│                                      │
+│enter confirm · esc cancel            │
+╰──────────────────────────────────────╯

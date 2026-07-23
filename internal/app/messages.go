@@ -45,6 +45,24 @@ type committedMsg struct {
 	err      error
 }
 
+// revertedMsg carries the result of reverting a single path.
+type revertedMsg struct {
+	path string
+	err  error
+}
+
+// deletedMsg carries the result of deleting a single path.
+type deletedMsg struct {
+	path string
+	err  error
+}
+
+// updatedMsg carries the result of an `svn update`.
+type updatedMsg struct {
+	revision string
+	err      error
+}
+
 // loadStatusCmd runs `svn status` off the UI goroutine and reports the result.
 func loadStatusCmd(client *svn.Client) tea.Cmd {
 	return func() tea.Msg {
@@ -110,5 +128,40 @@ func commitCmd(client *svn.Client, message, changelist string) tea.Cmd {
 		defer cancel()
 		rev, err := client.Commit(ctx, message, changelist)
 		return committedMsg{revision: rev, err: err}
+	}
+}
+
+// revertCmd discards local modifications to path off the UI goroutine.
+func revertCmd(client *svn.Client, path string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return revertedMsg{path: path, err: client.Revert(ctx, path)}
+	}
+}
+
+// deleteCmd deletes a path off the UI goroutine: a versioned path is scheduled
+// for removal (svn delete), an unversioned one is removed from disk.
+func deleteCmd(client *svn.Client, act deleteAction) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		var err error
+		if act.unversioned {
+			err = client.RemoveUnversioned(act.path)
+		} else {
+			err = client.Delete(ctx, act.path)
+		}
+		return deletedMsg{path: act.path, err: err}
+	}
+}
+
+// updateCmd brings the working copy up to date off the UI goroutine.
+func updateCmd(client *svn.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		rev, err := client.Update(ctx)
+		return updatedMsg{revision: rev, err: err}
 	}
 }

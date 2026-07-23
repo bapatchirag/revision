@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/bapatchirag/revision/internal/tui"
 	"github.com/bapatchirag/revision/internal/tui/keymap"
@@ -34,6 +35,12 @@ var (
 // NewModal builds a confirmation modal.
 func NewModal(id, title, message string, th theme.Theme, keys keymap.KeyMap) *Modal {
 	return &Modal{id: id, title: title, message: message, theme: th, keys: keys}
+}
+
+// SetPrompt replaces the modal's title and message so a single modal can be
+// reused for different confirmations (e.g. revert vs. delete).
+func (mo *Modal) SetPrompt(title, message string) {
+	mo.title, mo.message = title, message
 }
 
 // Init implements tui.Component.
@@ -74,13 +81,17 @@ func (mo *Modal) Focused() bool { return mo.focused }
 // SetTheme implements tui.Themeable.
 func (mo *Modal) SetTheme(th theme.Theme) { mo.theme = th }
 
-// View renders the modal as a titled box.
+// View renders the modal as a titled box. When sized, a long message is
+// word-wrapped to the box width; unsized (width ≤ 0) the box hugs its content.
 func (mo *Modal) View() string {
 	hint := "enter confirm · esc cancel"
-	body := []string{mo.message, "", hint}
-	innerW := mo.width - 2
 	if mo.width <= 0 {
-		innerW = maxWidth(append([]string{" " + mo.title + " "}, body...))
+		body := []string{mo.message, "", hint}
+		innerW := maxWidth(append([]string{" " + mo.title + " "}, body...))
+		return box(strings.Join(body, "\n"), mo.title, innerW, len(body), mo.theme, mo.focused)
 	}
+	innerW := mo.width - 2
+	wrapped := lipgloss.NewStyle().Width(innerW).Render(mo.message)
+	body := append(strings.Split(wrapped, "\n"), "", hint)
 	return box(strings.Join(body, "\n"), mo.title, innerW, len(body), mo.theme, mo.focused)
 }

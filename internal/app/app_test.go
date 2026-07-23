@@ -337,14 +337,14 @@ func TestCommitEditorCancels(t *testing.T) {
 	}
 }
 
-func TestCommitResultShowsInBar(t *testing.T) {
+func TestCommitResultShowsToast(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "modified.go", State: svn.StateModified, Changelist: "revision:staged"},
 	})
 	next, _ := m.Update(committedMsg{revision: "128"})
 	m = next.(*Model)
 	if view := stripANSI(m.View()); !strings.Contains(view, "committed r128") {
-		t.Errorf("expected the commit notice in the status bar, got:\n%s", view)
+		t.Errorf("expected the commit toast, got:\n%s", view)
 	}
 }
 
@@ -355,5 +355,156 @@ func TestCommitEditorGolden(t *testing.T) {
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
 	m = next.(*Model)
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Fix status parsing")})
+	golden.RequireEqual(t, []byte(m.View()))
+}
+
+func TestRevertRequiresConfirmation(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	// r on a dirty file opens the confirmation modal rather than acting.
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m = next.(*Model)
+	if !m.confirming {
+		t.Fatal("expected the confirmation modal to open")
+	}
+	if cmd != nil {
+		t.Error("opening the modal should not run a command yet")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "Revert changes?") {
+		t.Errorf("expected the revert prompt, got:\n%s", view)
+	}
+
+	// Confirming emits ConfirmMsg, which the app turns into the revert command.
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected a ConfirmMsg command from the modal")
+	}
+	conf, ok := cmd().(uimsg.ConfirmMsg)
+	if !ok {
+		t.Fatalf("expected ConfirmMsg, got %T", cmd())
+	}
+	next, cmd = m.Update(conf)
+	m = next.(*Model)
+	if m.confirming {
+		t.Error("the modal should close after confirming")
+	}
+	if cmd == nil {
+		t.Error("expected a revert command after confirming")
+	}
+}
+
+func TestRevertGuardOnUnversioned(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "untracked.txt", State: svn.StateUnversioned},
+	})
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m = next.(*Model)
+	if m.confirming {
+		t.Error("an unversioned file has nothing to revert; no modal should open")
+	}
+	if cmd != nil {
+		t.Error("the revert guard should not run a command")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "nothing to revert") {
+		t.Errorf("expected a guard toast, got:\n%s", view)
+	}
+}
+
+func TestDeleteConfirmationCancels(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = next.(*Model)
+	if !m.confirming {
+		t.Fatal("d should open the delete confirmation")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "Delete file?") {
+		t.Errorf("expected the delete prompt, got:\n%s", view)
+	}
+
+	// Esc emits DismissMsg; the app closes the modal and runs nothing.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	dis, ok := cmd().(uimsg.DismissMsg)
+	if !ok {
+		t.Fatalf("expected DismissMsg, got %T", cmd())
+	}
+	next, cmd = m.Update(dis)
+	m = next.(*Model)
+	if m.confirming {
+		t.Error("the modal should close on cancel")
+	}
+	if cmd != nil {
+		t.Error("cancelling delete should not run a command")
+	}
+}
+
+func TestDeleteUnversionedWarnsDiskRemoval(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "untracked.txt", State: svn.StateUnversioned},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = next.(*Model)
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "untracked") || !strings.Contains(view, "disk") {
+		t.Errorf("expected an unversioned-delete warning, got:\n%s", view)
+	}
+}
+
+func TestUpdateRunsCommand(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}}); cmd == nil {
+		t.Error("u should run an update command")
+	}
+}
+
+func TestUpdateResultShowsToast(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	next, _ := m.Update(updatedMsg{revision: "7"})
+	m = next.(*Model)
+	if view := stripANSI(m.View()); !strings.Contains(view, "updated to r7") {
+		t.Errorf("expected the update toast, got:\n%s", view)
+	}
+}
+
+func TestRevertResultShowsToast(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	next, cmd := m.Update(revertedMsg{path: "modified.go"})
+	m = next.(*Model)
+	if cmd == nil {
+		t.Error("a revert should trigger a status reload")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "reverted modified.go") {
+		t.Errorf("expected the revert toast, got:\n%s", view)
+	}
+}
+
+func TestToastDismissedOnKey(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "a.go", State: svn.StateModified},
+		{Path: "b.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(committedMsg{revision: "9"})
+	m = next.(*Model)
+	if view := stripANSI(m.View()); !strings.Contains(view, "committed r9") {
+		t.Fatalf("expected the commit toast, got:\n%s", view)
+	}
+	// Any interaction (here: navigating the Files panel) clears the toast.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(*Model)
+	if view := stripANSI(m.View()); strings.Contains(view, "committed r9") {
+		t.Errorf("the toast should clear on the next key, got:\n%s", view)
+	}
+}
+
+func TestModalConfirmGolden(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "internal/app/app.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = next.(*Model)
 	golden.RequireEqual(t, []byte(m.View()))
 }
