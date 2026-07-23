@@ -115,3 +115,17 @@ func TestGoldenMenu(t *testing.T) {
 	mn.Focus()
 	golden.RequireEqual(t, []byte(mn.View()))
 }
+
+func TestGoldenTextArea(t *testing.T) {
+	ta := component.NewTextArea("commit", "Commit message", "Describe your change…", testTheme(), testKeys())
+	ta.SetValue("Fix status parsing\n\nHandle the changelist grouping.")
+	ta.SetSize(40, 8)
+	ta.Focus()
+	golden.RequireEqual(t, []byte(ta.View()))
+}
+
+func TestGoldenTextAreaPlaceholder(t *testing.T) {
+	ta := component.NewTextArea("commit", "Commit message", "Describe your change…", testTheme(), testKeys())
+	ta.SetSize(40, 6)
+	golden.RequireEqual(t, []byte(ta.View()))
+}

@@ -4,9 +4,9 @@
 │3 change(s)                   ││changelist: revision:staged                   │
 ╰──────────────────────────────╯│                                              │
 ╭─ [2] Files ──────────────────╮│Loading diff…                                 │
-│> A  added.txt                ││                                              │
-│  M  modified.go              ││                                              │
-│  D  gone.txt                 ││                                              │
+│> ● A added.txt               ││                                              │
+│    M modified.go             ││                                              │
+│    D gone.txt                ││                                              │
 │                              ││                                              │
 │                              ││                                              │
 │                              ││                                              │
@@ -21,4 +21,4 @@
 │                              ││                                              │
 │                              ││                                              │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-1 status · 2 files · 3 log · 0 main · tab cycle · R refresh · ? help · q quit   
+space stage · c commit · tab cycle · R refresh · q quit                         

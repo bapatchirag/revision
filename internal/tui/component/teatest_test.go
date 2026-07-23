@@ -133,3 +133,13 @@ func TestTeatestModalRenders(t *testing.T) {
 	nudge(tm)
 	assertContains(t, finalOutput(t, tm), "Delete file?")
 }
+
+func TestTeatestTextAreaEditing(t *testing.T) {
+	ta := component.NewTextArea("commit", "Commit message", "", testTheme(), testKeys())
+	ta.SetSize(30, 6)
+	ta.Focus()
+
+	tm := teatest.NewTestModel(t, asModel(ta), teatest.WithInitialTermSize(50, 12))
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello")})
+	assertContains(t, finalOutput(t, tm), "Commit message", "hello")
+}

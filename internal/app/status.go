@@ -9,14 +9,19 @@ import (
 
 // renderStatusItem is the domain adapter that turns an svn.StatusItem into the
 // display string the reusable List renders. This is the only place SVN state is
-// mapped onto theme colors, keeping the List component domain-agnostic.
+// mapped onto theme colors, keeping the List component domain-agnostic. Staged
+// items (members of the staged changelist) are marked with a leading dot.
 func renderStatusItem(th theme.Theme) func(svn.StatusItem) string {
 	return func(it svn.StatusItem) string {
 		code := lipgloss.NewStyle().
 			Foreground(stateColor(th, it.State)).
 			Bold(true).
 			Render(it.State.Code())
-		return code + "  " + it.Path
+		mark := " "
+		if it.Changelist == stagedChangelist {
+			mark = lipgloss.NewStyle().Foreground(th.Success).Bold(true).Render("●")
+		}
+		return mark + " " + code + " " + it.Path
 	}
 }
 

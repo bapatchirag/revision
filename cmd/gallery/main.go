@@ -99,6 +99,10 @@ func newModel() model {
 	}, th, keys)
 	menu.Focus()
 
+	editor := component.NewTextArea("gallery-editor", "Commit message", "Describe your change…", th, keys)
+	editor.SetValue("Add reusable TextArea component\n\nEmits SubmitMsg on ctrl+s; edits multi-line text.")
+	editor.Focus()
+
 	return model{
 		keys: keys,
 		demos: []demo{
@@ -110,6 +114,7 @@ func newModel() model {
 			{"Modal", modal},
 			{"Toast", toast},
 			{"Menu", menu},
+			{"TextArea", editor},
 		},
 	}
 }

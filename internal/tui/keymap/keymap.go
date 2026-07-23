@@ -20,6 +20,7 @@ type KeyMap struct {
 	Confirm key.Binding
 	Cancel  key.Binding
 	Back    key.Binding
+	Submit  key.Binding
 
 	FocusNext key.Binding
 	FocusPrev key.Binding
@@ -44,6 +45,7 @@ func Default() KeyMap {
 		Confirm:   key.NewBinding(key.WithKeys("enter", "y"), key.WithHelp("enter", "confirm")),
 		Cancel:    key.NewBinding(key.WithKeys("esc", "n"), key.WithHelp("esc", "cancel")),
 		Back:      key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
+		Submit:    key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "submit")),
 		FocusNext: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next panel")),
 		FocusPrev: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev panel")),
 		Refresh:   key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh")),

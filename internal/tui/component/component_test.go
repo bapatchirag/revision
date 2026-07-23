@@ -52,3 +52,9 @@ func mustCmd(t *testing.T, cmd tea.Cmd) tea.Msg {
 func keyDown() tea.KeyMsg  { return tea.KeyMsg{Type: tea.KeyDown} }
 func keyEnter() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyEnter} }
 func keyEsc() tea.KeyMsg   { return tea.KeyMsg{Type: tea.KeyEsc} }
+
+func keyBackspace() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyBackspace} }
+func keyCtrlS() tea.KeyMsg     { return tea.KeyMsg{Type: tea.KeyCtrlS} }
+
+// runes builds a key message that types the given text.
+func runes(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
