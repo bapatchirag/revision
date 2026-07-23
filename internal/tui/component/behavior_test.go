@@ -164,6 +164,23 @@ func TestModalEmitsConfirmAndDismiss(t *testing.T) {
 	}
 }
 
+func TestModalSetPromptUpdatesView(t *testing.T) {
+	mo := component.NewModal("confirm", "Delete file?", "gone forever", testTheme(), testKeys())
+	mo.SetSize(40, 0)
+	mo.SetPrompt("Revert changes?", "Discard local changes to app.go?")
+
+	view := mo.View()
+	if !strings.Contains(view, "Revert changes?") {
+		t.Errorf("view should show the new title, got:\n%s", view)
+	}
+	if !strings.Contains(view, "Discard local changes to app.go?") {
+		t.Errorf("view should show the new message, got:\n%s", view)
+	}
+	if strings.Contains(view, "gone forever") {
+		t.Errorf("view should drop the old message, got:\n%s", view)
+	}
+}
+
 func TestTextAreaEmitsSubmit(t *testing.T) {
 	ta := component.NewTextArea("commit", "Commit", "", testTheme(), testKeys())
 	ta.SetSize(30, 6)

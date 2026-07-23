@@ -100,6 +100,14 @@ func TestGoldenModal(t *testing.T) {
 	golden.RequireEqual(t, []byte(mo.View()))
 }
 
+func TestGoldenModalSized(t *testing.T) {
+	mo := component.NewModal("confirm", "Delete file?", "", testTheme(), testKeys())
+	mo.SetPrompt("Revert changes?", "Discard local changes to internal/app/app.go? This cannot be undone.")
+	mo.SetSize(40, 0)
+	mo.Focus()
+	golden.RequireEqual(t, []byte(mo.View()))
+}
+
 func TestGoldenToast(t *testing.T) {
 	to := component.NewToast(testTheme())
 	to.Show("Committed r128", component.LevelSuccess)

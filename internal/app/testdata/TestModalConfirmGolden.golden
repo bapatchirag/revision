@@ -1,0 +1,24 @@
+╭─ [1] Status ─────────────────╮╭─ Main ───────────────────────────────────────╮
+│https://svn.example.com/repo/t││internal/app/app.go                           │
+│r42                           ││state: modified (M)                           │
+│1 change(s)                   ││                                              │
+╰──────────────────────────────╯│Loading diff…                                 │
+╭─ [2] Files ──────────────────╮│                                              │
+│>   M internal/app/app.go     ││                                              │
+│                              ││                                              │
+│                   ╭─ Delete file? ───────────────────────╮                   │
+│                   │internal/app/app.go will be scheduled │                   │
+│                   │for deletion (removed on the next     │                   │
+│                   │commit).                              │                   │
+│                   │                                      │                   │
+╰───────────────────│enter confirm · esc cancel            │                   │
+╭─ [3] Log ─────────╰──────────────────────────────────────╯                   │
+│  Rev    Author     Message   ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+╰──────────────────────────────╯╰──────────────────────────────────────────────╯
+space stage · c commit · r revert · d delete · u update · R refresh · q quit    

@@ -240,3 +240,102 @@ func TestIntegrationAddThenStage(t *testing.T) {
 		t.Errorf("fresh.txt changelist = %q, want revision:staged", got)
 	}
 }
+
+func TestIntegrationRevert(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	writeFile(t, filepath.Join(wc, "file.txt"), "one\n")
+	mustRun(t, wc, "svn", "add", "file.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "seed")
+	mustRun(t, wc, "svn", "update")
+
+	// Modify then revert: the working copy returns to its committed state and
+	// the file drops out of status entirely.
+	writeFile(t, filepath.Join(wc, "file.txt"), "one\ntwo\n")
+	if got := statusByPath(t, c, ctx)["file.txt"].State; got != StateModified {
+		t.Fatalf("file.txt state = %s, want modified", got)
+	}
+	if err := c.Revert(ctx, "file.txt"); err != nil {
+		t.Fatalf("Revert: %v", err)
+	}
+	if _, ok := statusByPath(t, c, ctx)["file.txt"]; ok {
+		t.Error("file.txt should be clean after revert (absent from status)")
+	}
+	data, err := os.ReadFile(filepath.Join(wc, "file.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != "one\n" {
+		t.Errorf("file.txt = %q after revert, want %q", string(data), "one\n")
+	}
+}
+
+func TestIntegrationDelete(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	writeFile(t, filepath.Join(wc, "doomed.txt"), "bye\n")
+	mustRun(t, wc, "svn", "add", "doomed.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "seed")
+	mustRun(t, wc, "svn", "update")
+
+	// Local modifications must not block the delete (hence --force); the file is
+	// then scheduled for removal.
+	writeFile(t, filepath.Join(wc, "doomed.txt"), "bye\nnow\n")
+	if err := c.Delete(ctx, "doomed.txt"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if got := statusByPath(t, c, ctx)["doomed.txt"].State; got != StateDeleted {
+		t.Errorf("doomed.txt state = %s after delete, want deleted", got)
+	}
+}
+
+func TestIntegrationRemoveUnversioned(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	scratch := filepath.Join(wc, "scratch.txt")
+	writeFile(t, scratch, "temp\n")
+	if got := statusByPath(t, c, ctx)["scratch.txt"].State; got != StateUnversioned {
+		t.Fatalf("scratch.txt state = %s, want unversioned", got)
+	}
+	if err := c.RemoveUnversioned("scratch.txt"); err != nil {
+		t.Fatalf("RemoveUnversioned: %v", err)
+	}
+	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
+		t.Errorf("scratch.txt should be gone from disk, stat err = %v", err)
+	}
+}
+
+func TestIntegrationUpdate(t *testing.T) {
+	requireSVN(t)
+	ctx := context.Background()
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	wc1 := filepath.Join(root, "wc1")
+	wc2 := filepath.Join(root, "wc2")
+
+	mustRun(t, "", "svnadmin", "create", repo)
+	mustRun(t, "", "svn", "checkout", "file://"+repo, wc1)
+	mustRun(t, "", "svn", "checkout", "file://"+repo, wc2)
+
+	// Commit a file from wc1; wc2 has not seen it until it updates.
+	writeFile(t, filepath.Join(wc1, "shared.txt"), "hello\n")
+	mustRun(t, wc1, "svn", "add", "shared.txt")
+	mustRun(t, wc1, "svn", "commit", "-m", "add shared")
+
+	rev, err := New(wc2).Update(ctx)
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if rev == "" {
+		t.Error("expected a revision number from update")
+	}
+	if _, err := os.Stat(filepath.Join(wc2, "shared.txt")); err != nil {
+		t.Errorf("shared.txt should exist in wc2 after update: %v", err)
+	}
+}
