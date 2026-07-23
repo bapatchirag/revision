@@ -508,3 +508,93 @@ func TestModalConfirmGolden(t *testing.T) {
 	m = next.(*Model)
 	golden.RequireEqual(t, []byte(m.View()))
 }
+
+func TestHelpMenuOpensAndCloses(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+
+	// "?" floats the keybindings menu over the layout.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = next.(*Model)
+	if !m.helping {
+		t.Fatal("expected the help menu to open on ?")
+	}
+	view := stripANSI(m.View())
+	for _, want := range []string{"Keybindings", "Stage / unstage", "space", "Quit"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("help view missing %q\n---\n%s", want, view)
+		}
+	}
+
+	// While help is open, other keys are captured by the menu — q must not quit.
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}); cmd != nil {
+		if _, ok := cmd().(tea.QuitMsg); ok {
+			t.Error("q should not quit while the help menu is open")
+		}
+	}
+	if !m.helping {
+		t.Error("the help menu should stay open on a non-dismiss key")
+	}
+
+	// enter must NOT close the help menu — it is a read-only reference.
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd()) // deliver the resulting ActivatedMsg
+		m = next.(*Model)
+	}
+	if !m.helping {
+		t.Error("enter should not close the help menu")
+	}
+
+	// esc closes the help menu.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*Model)
+	if m.helping {
+		t.Error("the help menu should close after esc")
+	}
+	if view := stripANSI(m.View()); strings.Contains(view, "Keybindings") {
+		t.Error("the layout should return after closing help")
+	}
+}
+
+func TestHelpMenuTogglesClosedWithQuestionMark(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = next.(*Model)
+	if !m.helping {
+		t.Fatal("? should open the help menu")
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = next.(*Model)
+	if m.helping {
+		t.Error("? should toggle the help menu closed")
+	}
+}
+
+func TestAuthFailureShowsHint(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified, Changelist: "revision:staged"},
+	})
+	authErr := errors.New("svn commit: E170001: No more credentials or we tried too many times.")
+	next, _ := m.Update(committedMsg{err: authErr})
+	m = next.(*Model)
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "authentication required") {
+		t.Errorf("expected an auth hint toast, got:\n%s", view)
+	}
+	if strings.Contains(view, "E170001") {
+		t.Errorf("the raw svn error should be replaced by the hint, got:\n%s", view)
+	}
+}
+
+func TestHelpMenuGolden(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = next.(*Model)
+	golden.RequireEqual(t, []byte(m.View()))
+}

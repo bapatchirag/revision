@@ -83,3 +83,28 @@ jobs:
           # Universal fallback (no bundled binary; resolves from PATH)
           rm -rf bin
           npx --yes @vscode/vsce@latest publish -p "$VSCE_PAT"
+
+      - name: Publish to Open VSX (optional)
+        working-directory: extension
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          set -e
+          if [ -z "${OVSX_PAT:-}" ]; then
+            echo "OVSX_PAT secret is not set; skipping Open VSX publish."
+            exit 0
+          fi
+
+          mkdir -p bin
+
+          # macOS (Apple Silicon)
+          cp ../dist/revision-darwin-arm64 bin/revision && chmod +x bin/revision
+          npx --yes ovsx publish --target darwin-arm64 -p "$OVSX_PAT"
+
+          # Linux (x64)
+          cp ../dist/revision-linux-amd64 bin/revision && chmod +x bin/revision
+          npx --yes ovsx publish --target linux-x64 -p "$OVSX_PAT"
+
+          # Universal fallback (no bundled binary; resolves from PATH)
+          rm -rf bin
+          npx --yes ovsx publish -p "$OVSX_PAT"

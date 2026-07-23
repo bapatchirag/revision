@@ -1,0 +1,24 @@
+╭─ [1] Status ─────────────────╮╭─ Main ───────────────────────────────────────╮
+│https://svn.example.com/repo/t││modified.go                                   │
+│r42                           ││state: modified (M)                           │
+│1 change(s)                   ││                                              │
+╰──────────────────────────────╯│Loading diff…                                 │
+╭─ [2] Files ───────╭─ Keybindings ────────────────────────╮                   │
+│>   M modified.go  │> Stage / unstage                space│                   │
+│                   │  Commit staged                      c│                   │
+│                   │  Revert file                        r│                   │
+│                   │  Delete file                        d│                   │
+│                   │  Update working copy                u│                   │
+│                   │  Refresh                            R│                   │
+│                   │  Jump to panel                1 2 3 0│                   │
+╰───────────────────│  Cycle panels         tab / shift+tab│                   │
+╭─ [3] Log ─────────│  Move up / down                 k / j│                   │
+│  Rev    Author    │  Scroll main                    K / J│                   │
+│                   │  Toggle help                        ?│                   │
+│                   │  Quit                               q│                   │
+│                   ╰──────────────────────────────────────╯                   │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+╰──────────────────────────────╯╰──────────────────────────────────────────────╯
+space stage · c commit · r revert · d delete · u update · ? help · q quit       

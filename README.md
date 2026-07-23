@@ -2,7 +2,7 @@
 
 A lazygit-style terminal UI for Subversion (SVN). `revision` gives you a fast, keyboard-driven interface over the `svn` command line — review changes, stage with changelists, commit, update, and browse history without leaving your terminal.
 
-> **Status:** early development. Features are being built out phase by phase (see the roadmap in the repo).
+> **Status:** the core SVN workflow — status, diff, log, staging, commit, update, revert, and delete — is complete and usable. Currently polishing toward a first tagged release.
 
 ## Why
 
@@ -65,11 +65,34 @@ Flags:
 
 ### Keybindings
 
-Keybindings are shown in the footer and via `?`. (Full reference coming as features land.)
+The footer shows the most common actions, and `?` opens the full keybindings menu at any time.
+
+| Key | Action |
+|-----|--------|
+| `1` / `2` / `3` / `0` | Focus the Status / Files / Log / Main panel |
+| `Tab` / `Shift+Tab` | Cycle focus between panels |
+| `↑`/`k`, `↓`/`j` | Move the selection up / down |
+| `K` / `J` | Scroll the Main panel up / down a page |
+| `space` | Stage / unstage the selected file (an untracked file is `svn add`ed first) |
+| `c` | Commit the staged files (opens the message editor) |
+| `r` | Revert the selected file (with confirmation) |
+| `d` | Delete the selected file (with confirmation) |
+| `u` | Update the working copy to the latest revision |
+| `R` | Refresh status and history |
+| `?` | Toggle the keybindings help |
+| `q` / `Ctrl+C` | Quit |
+
+In the commit editor, `Ctrl+S` submits and `Esc` cancels. In a confirmation dialog, `Enter`/`y` confirms and `Esc`/`n` cancels.
 
 ## How staging works
 
 SVN has no local staging index. `revision` emulates one using an SVN **changelist** named `revision:staged`: staging a file adds it to that changelist, unstaging removes it, and committing operates on the staged set. This maps a git-like stage/commit flow onto native SVN.
+
+## Authentication
+
+`revision` always runs `svn` with `--non-interactive`, so it never blocks on a hidden credential prompt. If a command needs credentials that aren't cached, it fails fast with a clear hint instead of hanging.
+
+Cache your credentials once by running an `svn` command yourself in the working copy (for example `svn info` or `svn update`). SVN stores them, and `revision` uses them on subsequent actions.
 
 ## Building from source
 

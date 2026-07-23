@@ -5,6 +5,7 @@
   "version": "0.0.0",
   "publisher": "bapatchirag",
   "license": "MIT",
+  "icon": "icon.png",
   "engines": {
     "vscode": "^1.75.0"
   },

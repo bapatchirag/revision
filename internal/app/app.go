@@ -39,6 +39,9 @@ const commitEditorID = "commit"
 // confirmModalID identifies the shared confirmation modal on emitted messages.
 const confirmModalID = "confirm"
 
+// helpMenuID identifies the keybindings help menu on emitted messages.
+const helpMenuID = "help"
+
 // mainSource selects which side panel's selection drives the Main viewport.
 type mainSource int
 
@@ -66,6 +69,7 @@ type Model struct {
 	bar    *component.StatusBar
 	editor *component.TextArea
 	modal  *component.Modal
+	menu   *component.Menu
 	toast  *component.Toast
 	focus  *focus.Manager
 
@@ -75,6 +79,7 @@ type Model struct {
 	logErr       error
 	editing      bool
 	confirming   bool
+	helping      bool
 	pending      tea.Cmd
 	showingToast bool
 
@@ -116,6 +121,7 @@ func New(client *svn.Client, info *svn.Info) *Model {
 		bar:     component.NewStatusBar(th),
 		editor:  component.NewTextArea(commitEditorID, "Commit message", "Enter a commit message…", th, keys),
 		modal:   component.NewModal(confirmModalID, "", "", th, keys),
+		menu:    component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
 		toast:   component.NewToast(th),
 		source:  sourceFiles,
 		loading: true,
@@ -144,6 +150,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.confirming {
 			m.sizeModal()
+		}
+		if m.helping {
+			m.sizeMenu()
 		}
 		return m, nil
 
@@ -183,7 +192,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case stagedMsg:
 		if msg.err != nil {
-			m.showToast("stage failed: "+msg.err.Error(), component.LevelError)
+			m.showToast(failureText("stage", msg.err), component.LevelError)
 			return m, nil
 		}
 		// Reload status so the changelist grouping (and staged marker) refresh.
@@ -192,7 +201,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case committedMsg:
 		if msg.err != nil {
 			m.loading = false
-			m.showToast("commit failed: "+msg.err.Error(), component.LevelError)
+			m.showToast(failureText("commit", msg.err), component.LevelError)
 			m.refreshChrome()
 			return m, nil
 		}
@@ -207,7 +216,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case revertedMsg:
 		if msg.err != nil {
-			m.showToast("revert failed: "+msg.err.Error(), component.LevelError)
+			m.showToast(failureText("revert", msg.err), component.LevelError)
 			return m, nil
 		}
 		m.showToast("reverted "+msg.path, component.LevelSuccess)
@@ -216,7 +225,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case deletedMsg:
 		if msg.err != nil {
-			m.showToast("delete failed: "+msg.err.Error(), component.LevelError)
+			m.showToast(failureText("delete", msg.err), component.LevelError)
 			return m, nil
 		}
 		m.showToast("deleted "+msg.path, component.LevelSuccess)
@@ -226,7 +235,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case updatedMsg:
 		if msg.err != nil {
 			m.loading = false
-			m.showToast("update failed: "+msg.err.Error(), component.LevelError)
+			m.showToast(failureText("update", msg.err), component.LevelError)
 			m.refreshChrome()
 			return m, nil
 		}
@@ -240,6 +249,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case uimsg.SelectedMsg:
 		return m, m.handleSelection(msg)
+
+	case uimsg.ActivatedMsg:
+		// The help menu is a read-only keybindings reference; activating an item
+		// (enter) is inert. Only ? and esc close it (see the KeyMsg handler).
+		return m, nil
 
 	case uimsg.SubmitMsg:
 		if msg.ID == commitEditorID {
@@ -274,6 +288,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.confirming {
 			return m, m.modal.Update(msg)
 		}
+		if m.helping {
+			// Read-only reference: only ? and esc close it; other keys drive the
+			// menu (enter/n are inert, handled above).
+			if key.Matches(msg, m.keys.Help) || key.Matches(msg, m.keys.Back) {
+				m.closeHelp()
+				return m, nil
+			}
+			return m, m.menu.Update(msg)
+		}
 		m.dismissToast()
 		if cmd, handled := m.handleKey(msg); handled {
 			return m, cmd
@@ -298,6 +321,8 @@ func (m *Model) View() string {
 		view = m.overlayCenter(view, m.editor.View())
 	case m.confirming:
 		view = m.overlayCenter(view, m.modal.View())
+	case m.helping:
+		view = m.overlayCenter(view, m.menu.View())
 	}
 	return view
 }
@@ -350,6 +375,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	case key.Matches(k, m.keys.FocusPrev):
 		m.focus.Prev()
 		return m.afterFocusChange(), true
+	case key.Matches(k, m.keys.Help):
+		return m.openHelp(), true
 	}
 
 	switch k.String() {
@@ -507,6 +534,20 @@ func (m *Model) closeConfirm() {
 	m.modal.Blur()
 }
 
+// openHelp shows the keybindings help menu as a centered overlay.
+func (m *Model) openHelp() tea.Cmd {
+	m.helping = true
+	m.menu.Focus()
+	m.sizeMenu()
+	return nil
+}
+
+// closeHelp hides the help menu.
+func (m *Model) closeHelp() {
+	m.helping = false
+	m.menu.Blur()
+}
+
 // showToast displays a transient notice; it stays until the next interaction.
 func (m *Model) showToast(text string, level component.Level) {
 	m.toast.Show(text, level)
@@ -515,6 +556,34 @@ func (m *Model) showToast(text string, level component.Level) {
 
 // dismissToast hides the current toast.
 func (m *Model) dismissToast() { m.showingToast = false }
+
+// failureText renders an action failure for a toast. An svn authentication
+// failure collapses to a short, actionable hint instead of a raw multi-line svn
+// error dump.
+func failureText(action string, err error) string {
+	if svn.IsAuthError(err) {
+		return action + " failed: " + svn.AuthHint
+	}
+	return action + " failed: " + err.Error()
+}
+
+// helpMenuItems is the keybindings reference shown by the "?" help menu.
+func helpMenuItems() []component.MenuItem {
+	return []component.MenuItem{
+		{Label: "Stage / unstage", Key: "space"},
+		{Label: "Commit staged", Key: "c"},
+		{Label: "Revert file", Key: "r"},
+		{Label: "Delete file", Key: "d"},
+		{Label: "Update working copy", Key: "u"},
+		{Label: "Refresh", Key: "R"},
+		{Label: "Jump to panel", Key: "1 2 3 0"},
+		{Label: "Cycle panels", Key: "tab / shift+tab"},
+		{Label: "Move up / down", Key: "k / j"},
+		{Label: "Scroll main", Key: "K / J"},
+		{Label: "Toggle help", Key: "?"},
+		{Label: "Quit", Key: "q"},
+	}
+}
 
 // submitCommit closes the editor and commits the staged changelist with the
 // entered message, rejecting an empty message.
@@ -553,6 +622,12 @@ func (m *Model) sizeEditor() {
 func (m *Model) sizeModal() {
 	w := clamp(m.width/2, 34, max(m.width-6, 34))
 	m.modal.SetSize(w, 0)
+}
+
+// sizeMenu sizes the help menu to a centered portion of the screen (only its
+// width matters; the height follows the item count).
+func (m *Model) sizeMenu() {
+	m.menu.SetSize(clamp(m.width/2, 40, max(m.width-6, 40)), 0)
 }
 
 // stageable reports whether a working-copy state can be added to the staged
@@ -730,7 +805,7 @@ func (m *Model) logDetail() string {
 
 // updateBar sets the contextual key hints and right-aligned repo context.
 func (m *Model) updateBar() {
-	m.bar.SetLeft("space stage · c commit · r revert · d delete · u update · R refresh · q quit")
+	m.bar.SetLeft("space stage · c commit · r revert · d delete · u update · ? help · q quit")
 
 	switch {
 	case m.err != nil:
