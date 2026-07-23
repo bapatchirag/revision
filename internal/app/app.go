@@ -16,6 +16,7 @@ import (
 	"github.com/bapatchirag/revision/internal/tui/component"
 	"github.com/bapatchirag/revision/internal/tui/focus"
 	"github.com/bapatchirag/revision/internal/tui/keymap"
+	"github.com/bapatchirag/revision/internal/tui/layout"
 	uimsg "github.com/bapatchirag/revision/internal/tui/msg"
 	"github.com/bapatchirag/revision/internal/tui/theme"
 )
@@ -27,6 +28,13 @@ const (
 	panelLog    = 2
 	panelMain   = 3
 )
+
+// stagedChangelist is the SVN changelist name revision uses to emulate a
+// staging area: paths in it are "staged" and committed as a unit.
+const stagedChangelist = "revision:staged"
+
+// commitEditorID identifies the commit-message editor on emitted messages.
+const commitEditorID = "commit"
 
 // mainSource selects which side panel's selection drives the Main viewport.
 type mainSource int
@@ -53,12 +61,15 @@ type Model struct {
 
 	panels []*component.Panel
 	bar    *component.StatusBar
+	editor *component.TextArea
 	focus  *focus.Manager
 
 	source   mainSource
 	diffPath string
 	diffText string
 	logErr   error
+	notice   string
+	editing  bool
 
 	width   int
 	height  int
@@ -96,6 +107,7 @@ func New(client *svn.Client, info *svn.Info) *Model {
 		main:    main,
 		panels:  panels,
 		bar:     component.NewStatusBar(th),
+		editor:  component.NewTextArea(commitEditorID, "Commit message", "Enter a commit message…", th, keys),
 		source:  sourceFiles,
 		loading: true,
 	}
@@ -118,6 +130,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
+		if m.editing {
+			m.sizeEditor()
+		}
 		return m, nil
 
 	case statusLoadedMsg:
@@ -154,10 +169,52 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshChrome()
 		return m, nil
 
+	case stagedMsg:
+		if msg.err != nil {
+			m.notice = "stage failed: " + msg.err.Error()
+			m.updateBar()
+			return m, nil
+		}
+		// Reload status so the changelist grouping (and staged marker) refresh.
+		return m, loadStatusCmd(m.client)
+
+	case committedMsg:
+		if msg.err != nil {
+			m.loading = false
+			m.notice = "commit failed: " + msg.err.Error()
+			m.refreshChrome()
+			return m, nil
+		}
+		if msg.revision != "" {
+			m.notice = "committed r" + msg.revision
+		} else {
+			m.notice = "commit complete"
+		}
+		m.diffPath, m.diffText = "", ""
+		m.refreshChrome()
+		return m, tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client))
+
 	case uimsg.SelectedMsg:
 		return m, m.handleSelection(msg)
 
+	case uimsg.SubmitMsg:
+		if msg.ID == commitEditorID {
+			return m, m.submitCommit(msg.Value)
+		}
+		return m, nil
+
+	case uimsg.DismissMsg:
+		if msg.ID == commitEditorID {
+			m.editing = false
+			m.editor.Blur()
+			m.updateBar()
+		}
+		return m, nil
+
 	case tea.KeyMsg:
+		if m.editing {
+			return m, m.editor.Update(msg)
+		}
 		if cmd, handled := m.handleKey(msg); handled {
 			return m, cmd
 		}
@@ -166,11 +223,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, m.panels[m.focus.Index()].Update(msg)
 }
 
-// View renders the full lazygit layout.
+// View renders the full lazygit layout, with the commit editor floating over it
+// while editing.
 func (m *Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "loading…"
 	}
+	base := m.baseView()
+	if !m.editing {
+		return base
+	}
+	popup := m.editor.View()
+	x := max((m.width-lipgloss.Width(popup))/2, 0)
+	y := max((m.height-lipgloss.Height(popup))/2, 0)
+	return layout.Overlay(base, popup, x, y)
+}
+
+// baseView renders the lazygit layout: the left column of panels beside Main,
+// over the status bar.
+func (m *Model) baseView() string {
 	left := lipgloss.JoinVertical(lipgloss.Left,
 		m.panels[panelStatus].View(),
 		m.panels[panelFiles].View(),
@@ -187,6 +258,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return tea.Quit, true
 	case key.Matches(k, m.keys.Refresh):
 		m.loading = true
+		m.notice = ""
 		m.diffPath, m.diffText = "", ""
 		m.refreshChrome()
 		return tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client)), true
@@ -211,8 +283,115 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	case "0":
 		m.focus.Focus(panelMain)
 		return m.afterFocusChange(), true
+	case " ":
+		if m.focus.Index() == panelFiles {
+			return m.stageSelected(), true
+		}
+		return nil, false
+	case "c":
+		return m.openCommit(), true
 	}
 	return nil, false
+}
+
+// stageSelected toggles the staged state of the file under the Files cursor,
+// returning the command that performs the change (or nil when the selection is
+// not stageable).
+func (m *Model) stageSelected() tea.Cmd {
+	act, ok := m.stageTarget()
+	if !ok {
+		m.updateBar()
+		return nil
+	}
+	return stageCmd(m.client, stagedChangelist, act)
+}
+
+// stageAction describes how a stage keypress should change one file.
+type stageAction struct {
+	path  string
+	add   bool // svn add first (unversioned → versioned)
+	stage bool // add to (true) or remove from (false) the staged changelist
+}
+
+// stageTarget resolves what a stage action would do for the current Files
+// selection. An unversioned file is added and staged in one step; a versioned
+// pending change toggles its changelist membership. It sets a notice and
+// returns ok=false when the selection cannot be staged.
+func (m *Model) stageTarget() (stageAction, bool) {
+	it, ok := m.files.Selected()
+	if !ok {
+		return stageAction{}, false
+	}
+	switch {
+	case it.State == svn.StateUnversioned:
+		return stageAction{path: it.Path, add: true, stage: true}, true
+	case stageable(it.State):
+		return stageAction{path: it.Path, stage: it.Changelist != stagedChangelist}, true
+	default:
+		m.notice = "can't stage " + it.Path + " (" + it.State.Code() + ")"
+		return stageAction{}, false
+	}
+}
+
+// openCommit opens the commit-message editor, provided something is staged.
+func (m *Model) openCommit() tea.Cmd {
+	if m.stagedCount() == 0 {
+		m.notice = "nothing staged — press space to stage files"
+		m.updateBar()
+		return nil
+	}
+	m.notice = ""
+	m.editing = true
+	m.editor.Reset()
+	m.editor.Focus()
+	m.sizeEditor()
+	return nil
+}
+
+// submitCommit closes the editor and commits the staged changelist with the
+// entered message, rejecting an empty message.
+func (m *Model) submitCommit(message string) tea.Cmd {
+	if strings.TrimSpace(message) == "" {
+		m.notice = "commit message cannot be empty"
+		m.updateBar()
+		return nil
+	}
+	m.editing = false
+	m.editor.Blur()
+	m.loading = true
+	m.refreshChrome()
+	return commitCmd(m.client, message, stagedChangelist)
+}
+
+// stagedCount returns how many files are currently staged.
+func (m *Model) stagedCount() int {
+	n := 0
+	for _, it := range m.files.Items() {
+		if it.Changelist == stagedChangelist {
+			n++
+		}
+	}
+	return n
+}
+
+// sizeEditor sizes the commit editor to a centered portion of the screen.
+func (m *Model) sizeEditor() {
+	w := clamp(m.width*3/5, 40, max(m.width-4, 40))
+	h := clamp(m.height/2, 8, max(m.height-4, 8))
+	m.editor.SetSize(w, h)
+}
+
+// stageable reports whether a working-copy state can be added to the staged
+// changelist as-is. Only versioned, pending changes qualify. Unversioned files
+// are handled separately by stageTarget (svn add + stage); ignored and missing
+// paths are excluded (missing needs `svn rm` first).
+func stageable(s svn.FileState) bool {
+	switch s {
+	case svn.StateModified, svn.StateAdded, svn.StateDeleted, svn.StateReplaced, svn.StateConflicted, svn.StateMerged:
+		return true
+	default:
+		return false
+	}
 }
 
 // handleSelection re-renders Main when the selection that drives it changes, and
@@ -235,6 +414,7 @@ func (m *Model) handleSelection(sel uimsg.SelectedMsg) tea.Cmd {
 // afterFocusChange updates which panel drives Main, refreshes the chrome, and
 // loads a diff when Main now follows the Files panel.
 func (m *Model) afterFocusChange() tea.Cmd {
+	m.notice = ""
 	switch m.focus.Index() {
 	case panelLog:
 		m.source = sourceLog
@@ -375,9 +555,15 @@ func (m *Model) logDetail() string {
 	return strings.Join(lines, "\n")
 }
 
-// updateBar sets the contextual key hints and right-aligned repo context.
+// updateBar sets the contextual key hints and right-aligned repo context. A
+// transient notice takes over the left slot so it is never dropped when the
+// bar is narrow.
 func (m *Model) updateBar() {
-	m.bar.SetLeft("1 status · 2 files · 3 log · 0 main · tab cycle · R refresh · ? help · q quit")
+	if m.notice != "" {
+		m.bar.SetLeft(m.notice)
+	} else {
+		m.bar.SetLeft("space stage · c commit · tab cycle · R refresh · q quit")
+	}
 
 	switch {
 	case m.err != nil:

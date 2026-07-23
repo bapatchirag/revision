@@ -163,3 +163,61 @@ func TestModalEmitsConfirmAndDismiss(t *testing.T) {
 		t.Errorf("expected DismissMsg{confirm}, got %#v", dismiss)
 	}
 }
+
+func TestTextAreaEmitsSubmit(t *testing.T) {
+	ta := component.NewTextArea("commit", "Commit", "", testTheme(), testKeys())
+	ta.SetSize(30, 6)
+	ta.Focus()
+
+	ta.Update(runes("hi"))
+	got := mustCmd(t, ta.Update(keyCtrlS()))
+	sub, ok := got.(msg.SubmitMsg)
+	if !ok {
+		t.Fatalf("expected SubmitMsg, got %T", got)
+	}
+	if sub.ID != "commit" || sub.Value != "hi" {
+		t.Errorf("got %+v, want {commit hi}", sub)
+	}
+}
+
+func TestTextAreaEmitsDismiss(t *testing.T) {
+	ta := component.NewTextArea("commit", "Commit", "", testTheme(), testKeys())
+	ta.SetSize(30, 6)
+	ta.Focus()
+
+	got := mustCmd(t, ta.Update(keyEsc()))
+	if d, ok := got.(msg.DismissMsg); !ok || d.ID != "commit" {
+		t.Errorf("expected DismissMsg{commit}, got %#v", got)
+	}
+}
+
+func TestTextAreaEditsMultiLine(t *testing.T) {
+	ta := component.NewTextArea("commit", "Commit", "", testTheme(), testKeys())
+	ta.SetSize(30, 6)
+	ta.Focus()
+
+	ta.Update(runes("ab"))
+	ta.Update(keyEnter())
+	ta.Update(runes("c"))
+	if got, want := ta.Value(), "ab\nc"; got != want {
+		t.Fatalf("value = %q, want %q", got, want)
+	}
+
+	ta.Update(keyBackspace()) // deletes 'c'
+	ta.Update(keyBackspace()) // joins the empty second line back onto "ab"
+	if got, want := ta.Value(), "ab"; got != want {
+		t.Errorf("after backspace value = %q, want %q", got, want)
+	}
+}
+
+func TestTextAreaIgnoresInputWhenBlurred(t *testing.T) {
+	ta := component.NewTextArea("commit", "Commit", "", testTheme(), testKeys())
+	ta.SetSize(30, 6)
+
+	if cmd := ta.Update(runes("x")); cmd != nil {
+		t.Error("blurred editor should ignore key input")
+	}
+	if ta.Value() != "" {
+		t.Errorf("blurred editor should not change, got %q", ta.Value())
+	}
+}

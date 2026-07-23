@@ -30,11 +30,19 @@ type logEntryXML struct {
 
 // Log returns up to limit recent revisions reported by `svn log`. A limit of
 // zero or less applies svn's own default. Changed paths are included (--verbose).
+//
+// It targets the working-copy root pegged at HEAD (".@HEAD") rather than the
+// default BASE. After committing a single path the working copy is left at a
+// mixed revision — the containing directory stays at the old revision — so a
+// default `svn log` would stop at BASE and omit the just-created revision until
+// the next `svn update`. Pegging at HEAD logs from the repository head instead,
+// and stays safe (empty, not an error) on a freshly created repository.
 func (c *Client) Log(ctx context.Context, limit int) ([]LogEntry, error) {
 	args := []string{"log", "--xml", "--verbose"}
 	if limit > 0 {
 		args = append(args, "--limit", strconv.Itoa(limit))
 	}
+	args = append(args, ".@HEAD")
 	out, err := c.run(ctx, args...)
 	if err != nil {
 		return nil, err

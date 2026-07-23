@@ -1,0 +1,8 @@
+╭─ Commit message ─────────────────────╮
+│Fix status parsing                    │
+│                                      │
+│Handle the changelist grouping.       │
+│                                      │
+│                                      │
+│ctrl+s submit · esc cancel            │
+╰──────────────────────────────────────╯

@@ -6,7 +6,11 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
+
+// resetSeq closes any open SGR styling between spliced segments.
+const resetSeq = "\x1b[0m"
 
 // Place positions content within a width×height box at the given alignment.
 func Place(width, height int, hPos, vPos lipgloss.Position, content string) string {
@@ -19,9 +23,9 @@ func Center(width, height int, content string) string {
 }
 
 // Overlay composites fg on top of bg with fg's top-left corner at (x, y). It is
-// a best-effort, cell-based overlay intended for plain (already-rendered)
-// popups over a plain background; it does not attempt to preserve interleaved
-// ANSI styling from the background beneath fg.
+// ANSI-aware: the background is sliced by visible column (preserving styling
+// outside fg), so it composites correctly over a styled layout. The background
+// styling directly beneath fg is replaced by fg, which is assumed to be opaque.
 func Overlay(bg, fg string, x, y int) string {
 	if x < 0 {
 		x = 0
@@ -41,19 +45,35 @@ func Overlay(bg, fg string, x, y int) string {
 	return strings.Join(bgLines, "\n")
 }
 
-// overlayLine splices fg into bg starting at rune column x, padding bg with
-// spaces if it is shorter than x.
+// overlayLine splices fg into bg starting at visible column x, padding bg with
+// spaces when it is shorter than x. Slicing is done by display width and
+// preserves ANSI styling on the exposed parts of the background; a reset is
+// inserted around a styled segment so its color never bleeds into its neighbor.
 func overlayLine(bg, fg string, x int) string {
-	bgRunes := []rune(bg)
-	fgRunes := []rune(fg)
-	for len(bgRunes) < x {
-		bgRunes = append(bgRunes, ' ')
+	fgWidth := ansi.StringWidth(fg)
+	bgWidth := ansi.StringWidth(bg)
+
+	left := ansi.Cut(bg, 0, x)
+	if lw := ansi.StringWidth(left); lw < x {
+		left += strings.Repeat(" ", x-lw)
 	}
-	out := make([]rune, 0, len(bgRunes)+len(fgRunes))
-	out = append(out, bgRunes[:x]...)
-	out = append(out, fgRunes...)
-	if tail := x + len(fgRunes); tail < len(bgRunes) {
-		out = append(out, bgRunes[tail:]...)
+
+	var right string
+	if end := x + fgWidth; end < bgWidth {
+		right = ansi.Cut(bg, end, bgWidth)
 	}
-	return string(out)
+
+	var b strings.Builder
+	b.WriteString(left)
+	if hasANSI(left) {
+		b.WriteString(resetSeq)
+	}
+	b.WriteString(fg)
+	if hasANSI(fg) {
+		b.WriteString(resetSeq)
+	}
+	b.WriteString(right)
+	return b.String()
 }
+
+func hasANSI(s string) bool { return strings.Contains(s, "\x1b") }
