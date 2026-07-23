@@ -50,6 +50,8 @@ func mustCmd(t *testing.T, cmd tea.Cmd) tea.Msg {
 }
 
 func keyDown() tea.KeyMsg  { return tea.KeyMsg{Type: tea.KeyDown} }
+func keyUp() tea.KeyMsg    { return tea.KeyMsg{Type: tea.KeyUp} }
+func keyTab() tea.KeyMsg   { return tea.KeyMsg{Type: tea.KeyTab} }
 func keyEnter() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyEnter} }
 func keyEsc() tea.KeyMsg   { return tea.KeyMsg{Type: tea.KeyEsc} }
 

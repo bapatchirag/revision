@@ -1,0 +1,8 @@
+╭─ Changelist name ────────────────────╮
+│hotfix                                │
+│                                      │
+│Existing changelists:                 │
+│  feature-x                           │
+│> hotfix                              │
+│↑↓ pick · tab back · esc cancel       │
+╰──────────────────────────────────────╯

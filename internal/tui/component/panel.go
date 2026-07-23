@@ -24,11 +24,13 @@ type Panel struct {
 
 // tabbed is implemented by a Panel child that hosts multiple named views. The
 // Panel inlays the view names (and any drill breadcrumb) into its top border, so
-// tabs cost no content row.
+// tabs cost no content row. While drilled into a titled sub-view, CrumbTitle
+// names it so the Panel can show just that name in place of the tabs.
 type tabbed interface {
 	Tabs() []string
 	ActiveIndex() int
 	Depth() int
+	CrumbTitle() string
 }
 
 var (
@@ -72,7 +74,7 @@ func (p *Panel) View() string {
 	// its tabs in the border instead of a plain title, sparing a content row.
 	if tb, ok := p.child.(tabbed); ok {
 		if tabs := tb.Tabs(); len(tabs) > 1 || tb.Depth() > 0 {
-			return boxTabbed(content, p.number, tabs, tb.ActiveIndex(), tb.Depth(), innerW, innerH, p.theme, p.focused)
+			return boxTabbed(content, p.number, tabs, tb.ActiveIndex(), tb.Depth(), tb.CrumbTitle(), innerW, innerH, p.theme, p.focused)
 		}
 	}
 	return box(content, p.titleText(), innerW, innerH, p.theme, p.focused)

@@ -73,8 +73,9 @@ func box(content, title string, innerW, innerH int, th theme.Theme, focused bool
 
 // boxTabbed is box for a panel that hosts tabbed views: it inlays the panel
 // number, the view names (the active one highlighted) and any drill breadcrumb
-// into the top border, so no content row is spent on them.
-func boxTabbed(content string, number int, tabs []string, active, depth, innerW, innerH int, th theme.Theme, focused bool) string {
+// into the top border, so no content row is spent on them. While drilled into a
+// titled sub-view (crumb != ""), the tabs are replaced by just that title.
+func boxTabbed(content string, number int, tabs []string, active, depth int, crumb string, innerW, innerH int, th theme.Theme, focused bool) string {
 	if innerW < 0 {
 		innerW = 0
 	}
@@ -82,7 +83,7 @@ func boxTabbed(content string, number int, tabs []string, active, depth, innerW,
 		innerH = 0
 	}
 	bs := borderStyle(th, focused)
-	return boxBody(content, tabTopBorder(number, tabs, active, depth, innerW, th, bs, focused), innerW, innerH, bs)
+	return boxBody(content, tabTopBorder(number, tabs, active, depth, crumb, innerW, th, bs, focused), innerW, innerH, bs)
 }
 
 // boxBody renders content beneath the given top border line, padding the body to
@@ -141,11 +142,17 @@ func topBorder(title string, innerW int, th theme.Theme, bs lipgloss.Style, focu
 
 // tabTopBorder renders the top edge of a tabbed panel, inlaying the panel number
 // and each view name into the border with the active view highlighted, plus a
-// chevron per drill-down depth. The middle is fit to exactly innerW-1 cells so
-// the row width matches the body.
-func tabTopBorder(number int, tabs []string, active, depth, innerW int, th theme.Theme, bs lipgloss.Style, focused bool) string {
+// chevron per drill-down depth. While drilled into a titled sub-view (crumb !=
+// "") the tabs and chevron are replaced by just the crumb title. The middle is
+// fit to exactly innerW-1 cells so the row width matches the body.
+func tabTopBorder(number int, tabs []string, active, depth int, crumb string, innerW int, th theme.Theme, bs lipgloss.Style, focused bool) string {
 	if innerW < 4 || len(tabs) == 0 {
 		return bs.Render(borderTopLeft + strings.Repeat(borderHorizontal, innerW) + borderTopRight)
+	}
+
+	// Drilled into a titled sub-view: show just the panel number and that title.
+	if depth > 0 && crumb != "" {
+		return numberedTitleBorder(number, crumb, innerW, th, bs, focused)
 	}
 
 	numStyle := lipgloss.NewStyle().Foreground(th.Accent)
@@ -192,6 +199,50 @@ func tabTopBorder(number int, tabs []string, active, depth, innerW int, th theme
 		text(" ", bs)
 		text(strings.Repeat(">", depth), activeStyle)
 	}
+	text(" ", bs)
+
+	middle := b.String()
+	switch {
+	case used < innerW-1:
+		middle += bs.Render(strings.Repeat(borderHorizontal, innerW-1-used))
+	case used > innerW-1:
+		middle = ansi.Truncate(middle, innerW-1, "")
+	}
+	return bs.Render(borderTopLeft+borderHorizontal) + middle + bs.Render(borderTopRight)
+}
+
+// numberedTitleBorder renders a top edge carrying just the panel number and a
+// single title (e.g. the changelist a drilled-in panel is showing), fit to
+// innerW-1 cells. It is used in place of the tab strip while drilled in.
+func numberedTitleBorder(number int, title string, innerW int, th theme.Theme, bs lipgloss.Style, focused bool) string {
+	numStyle := lipgloss.NewStyle().Foreground(th.Accent)
+	titleStyle := lipgloss.NewStyle().Foreground(th.Accent)
+	if focused {
+		numStyle = numStyle.Bold(true)
+		titleStyle = titleStyle.Bold(true)
+	}
+
+	var b strings.Builder
+	used := 0
+	dash := func(n int) {
+		if n > 0 {
+			b.WriteString(bs.Render(strings.Repeat(borderHorizontal, n)))
+			used += n
+		}
+	}
+	text := func(s string, st lipgloss.Style) {
+		b.WriteString(st.Render(s))
+		used += ansi.StringWidth(s)
+	}
+
+	text(" ", bs)
+	if number > 0 {
+		text("["+strconv.Itoa(number)+"]", numStyle)
+	}
+	text(" ", bs)
+	dash(1)
+	text(" ", bs)
+	text(title, titleStyle)
 	text(" ", bs)
 
 	middle := b.String()

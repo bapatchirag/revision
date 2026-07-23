@@ -36,6 +36,20 @@ const stagedChangelist = "revision:staged"
 // commitEditorID identifies the commit-message editor on emitted messages.
 const commitEditorID = "commit"
 
+// changelistEditorID identifies the changelist-name prompt on emitted messages.
+const changelistEditorID = "changelist"
+
+// filesViewsID identifies the Files panel's multi-view container on emitted
+// messages (the Changes / Changelists tabs and their drill-downs).
+const filesViewsID = "files-views"
+
+// changelistsListID / changelistFilesID identify the Changelists list and its
+// drilled-in file list on emitted selection/activation messages.
+const (
+	changelistsListID = "changelists"
+	changelistFilesID = "changelist-files"
+)
+
 // confirmModalID identifies the shared confirmation modal on emitted messages.
 const confirmModalID = "confirm"
 
@@ -60,24 +74,33 @@ type Model struct {
 	theme theme.Theme
 	keys  keymap.KeyMap
 
-	status *component.Viewport
-	files  *component.List[svn.StatusItem]
-	log    *component.Table[svn.LogEntry]
-	main   *component.Viewport
+	status      *component.Viewport
+	files       *component.List[svn.StatusItem]
+	changelists *component.List[changelistGroup]
+	clFiles     *component.List[svn.StatusItem]
+	filesViews  *component.Views
+	log         *component.Table[svn.LogEntry]
+	main        *component.Viewport
 
-	panels []*component.Panel
-	bar    *component.StatusBar
-	editor *component.TextArea
-	modal  *component.Modal
-	menu   *component.Menu
-	toast  *component.Toast
-	focus  *focus.Manager
+	panels     []*component.Panel
+	bar        *component.StatusBar
+	editor     *component.TextArea
+	nameEditor *component.Prompt
+	modal      *component.Modal
+	menu       *component.Menu
+	toast      *component.Toast
+	focus      *focus.Manager
 
 	source       mainSource
 	diffPath     string
 	diffText     string
 	logErr       error
 	editing      bool
+	naming       bool
+	namePath     string
+	nameAdd      bool
+	drilledCL    string
+	commitCL     string
 	confirming   bool
 	helping      bool
 	pending      tea.Cmd
@@ -98,33 +121,44 @@ func New(client *svn.Client, info *svn.Info) *Model {
 
 	status := component.NewViewport(th, keys)
 	files := component.NewList[svn.StatusItem]("files", renderStatusItem(th), th, keys)
+	changelists := component.NewList[changelistGroup](changelistsListID, renderChangelistGroup(th), th, keys)
+	clFiles := component.NewList[svn.StatusItem](changelistFilesID, renderStatusItem(th), th, keys)
+	filesViews := component.NewViews(filesViewsID, []component.View{
+		{Name: "Changes", Content: files},
+		{Name: "Changelists", Content: changelists},
+	}, th, keys)
 	logTable := component.NewTable[svn.LogEntry]("log", logColumns(), renderLogRow, th, keys)
 	main := component.NewViewport(th, keys)
 
 	panels := []*component.Panel{
 		component.NewPanel("Status", 1, status, th),
-		component.NewPanel("Files", 2, files, th),
+		component.NewPanel("Files", 2, filesViews, th),
 		component.NewPanel("Log", 3, logTable, th),
 		component.NewPanel("Main", 0, main, th),
 	}
 
 	m := &Model{
-		client:  client,
-		info:    info,
-		theme:   th,
-		keys:    keys,
-		status:  status,
-		files:   files,
-		log:     logTable,
-		main:    main,
-		panels:  panels,
-		bar:     component.NewStatusBar(th),
-		editor:  component.NewTextArea(commitEditorID, "Commit message", "Enter a commit message…", th, keys),
-		modal:   component.NewModal(confirmModalID, "", "", th, keys),
-		menu:    component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
-		toast:   component.NewToast(th),
-		source:  sourceFiles,
-		loading: true,
+		client:      client,
+		info:        info,
+		theme:       th,
+		keys:        keys,
+		status:      status,
+		files:       files,
+		changelists: changelists,
+		clFiles:     clFiles,
+		filesViews:  filesViews,
+		log:         logTable,
+		main:        main,
+		panels:      panels,
+		bar:         component.NewStatusBar(th),
+		editor:      component.NewTextArea(commitEditorID, "Commit message", "Enter a commit message…", th, keys),
+		nameEditor:  component.NewPrompt(changelistEditorID, "Changelist name", "e.g. feature-x", th, keys),
+		modal:       component.NewModal(confirmModalID, "", "", th, keys),
+		menu:        component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
+		toast:       component.NewToast(th),
+		source:      sourceFiles,
+		commitCL:    stagedChangelist,
+		loading:     true,
 	}
 	m.focus = focus.New(panels[panelStatus], panels[panelFiles], panels[panelLog], panels[panelMain])
 	m.focus.Focus(panelFiles)
@@ -148,6 +182,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.editing {
 			m.sizeEditor()
 		}
+		if m.naming {
+			m.sizeNameEditor()
+		}
 		if m.confirming {
 			m.sizeModal()
 		}
@@ -161,6 +198,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.diffPath, m.diffText = "", ""
 		m.files.SetItems(msg.items)
+		m.changelists.SetItems(groupChangelists(msg.items))
+		m.syncDrill()
 		m.refreshChrome()
 		return m, m.diffLoadForSelection()
 
@@ -194,6 +233,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.showToast(failureText("stage", msg.err), component.LevelError)
 			return m, nil
+		}
+		if msg.changelist != "" {
+			m.showToast("added "+msg.path+" to "+msg.changelist, component.LevelSuccess)
 		}
 		// Reload status so the changelist grouping (and staged marker) refresh.
 		return m, loadStatusCmd(m.client)
@@ -251,13 +293,37 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleSelection(msg)
 
 	case uimsg.ActivatedMsg:
-		// The help menu is a read-only keybindings reference; activating an item
-		// (enter) is inert. Only ? and esc close it (see the KeyMsg handler).
+		// Enter on a changelist row drills into its files; enter on the help
+		// menu is inert (it is a read-only keybindings reference).
+		if msg.ID == changelistsListID {
+			return m, m.drillChangelist()
+		}
+		return m, nil
+
+	case uimsg.ViewSelectedMsg:
+		if msg.ID == filesViewsID {
+			m.updateBar()
+			m.updateMain()
+			if msg.Name == "Changes" {
+				return m, m.diffLoadForSelection()
+			}
+		}
+		return m, nil
+
+	case uimsg.SubViewPoppedMsg:
+		if msg.ID == filesViewsID {
+			m.drilledCL = ""
+			m.updateBar()
+			m.updateMain()
+		}
 		return m, nil
 
 	case uimsg.SubmitMsg:
-		if msg.ID == commitEditorID {
+		switch msg.ID {
+		case commitEditorID:
 			return m, m.submitCommit(msg.Value)
+		case changelistEditorID:
+			return m, m.submitChangelist(msg.Value)
 		}
 		return m, nil
 
@@ -275,6 +341,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case commitEditorID:
 			m.editing = false
 			m.editor.Blur()
+		case changelistEditorID:
+			m.naming = false
+			m.nameEditor.Blur()
 		case confirmModalID:
 			m.closeConfirm()
 			m.pending = nil
@@ -284,6 +353,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.editing {
 			return m, m.editor.Update(msg)
+		}
+		if m.naming {
+			return m, m.nameEditor.Update(msg)
 		}
 		if m.confirming {
 			return m, m.modal.Update(msg)
@@ -319,6 +391,8 @@ func (m *Model) View() string {
 	switch {
 	case m.editing:
 		view = m.overlayCenter(view, m.editor.View())
+	case m.naming:
+		view = m.overlayCenter(view, m.nameEditor.View())
 	case m.confirming:
 		view = m.overlayCenter(view, m.modal.View())
 	case m.helping:
@@ -397,6 +471,11 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 			return m.stageSelected(), true
 		}
 		return nil, false
+	case "n":
+		if m.focus.Index() == panelFiles {
+			return m.assignChangelist(), true
+		}
+		return nil, false
 	case "c":
 		return m.openCommit(), true
 	case "r":
@@ -415,13 +494,13 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	return nil, false
 }
 
-// stageSelected toggles the staged state of the file under the Files cursor,
-// returning the command that performs the change (or nil when the selection is
-// not stageable).
+// stageSelected toggles the staged state of the file under the current file
+// selection (the Changes view or a drilled-in changelist), returning the command
+// that performs the change (or nil when the selection is not stageable).
 func (m *Model) stageSelected() tea.Cmd {
 	act, ok := m.stageTarget()
 	if !ok {
-		if it, sel := m.files.Selected(); sel {
+		if it, sel := m.selectedFile(); sel {
 			m.showToast("can't stage "+it.Path+" ("+it.State.Code()+")", component.LevelWarning)
 		}
 		return nil
@@ -433,7 +512,7 @@ func (m *Model) stageSelected() tea.Cmd {
 type stageAction struct {
 	path  string
 	add   bool // svn add first (unversioned → versioned)
-	stage bool // add to (true) or remove from (false) the staged changelist
+	stage bool // add to (true) or remove from (false) a changelist
 }
 
 // deleteAction describes how a delete keypress should remove one file.
@@ -442,31 +521,147 @@ type deleteAction struct {
 	unversioned bool // remove from disk (untracked) vs. svn delete (versioned)
 }
 
-// stageTarget resolves what a stage action would do for the current Files
-// selection. An unversioned file is added and staged in one step; a versioned
-// pending change toggles its changelist membership. It returns ok=false when
-// there is no selection or the selection cannot be staged.
+// stageTarget resolves what a stage action would do for the current file
+// selection. An unversioned file is added and staged in one step; a file already
+// in any changelist (the anonymous staged bucket or a named list) is removed from
+// it — space never moves a file between changelists, enforcing one-changelist-
+// per-file; an unassigned pending change is added to the staged bucket. It
+// returns ok=false when there is no file selected or it cannot be staged.
 func (m *Model) stageTarget() (stageAction, bool) {
-	it, ok := m.files.Selected()
+	it, ok := m.selectedFile()
 	if !ok {
 		return stageAction{}, false
 	}
 	switch {
 	case it.State == svn.StateUnversioned:
 		return stageAction{path: it.Path, add: true, stage: true}, true
+	case it.Changelist != "":
+		return stageAction{path: it.Path, stage: false}, true
 	case stageable(it.State):
-		return stageAction{path: it.Path, stage: it.Changelist != stagedChangelist}, true
+		return stageAction{path: it.Path, stage: true}, true
 	default:
 		return stageAction{}, false
 	}
 }
 
-// openCommit opens the commit-message editor, provided something is staged.
-func (m *Model) openCommit() tea.Cmd {
-	if m.stagedCount() == 0 {
-		m.showToast("nothing staged — press space to stage files", component.LevelWarning)
+// drillChangelist expands the selected changelist into its file list as a
+// drill-down sub-view, labeling the panel with the changelist and tracking which
+// one is open so a status reload can keep it in sync.
+func (m *Model) drillChangelist() tea.Cmd {
+	g, ok := m.changelists.Selected()
+	if !ok {
 		return nil
 	}
+	m.clFiles.SetItems(g.Items)
+	m.drilledCL = g.Name
+	cmd := m.filesViews.PushTitled(g.Label(), m.clFiles)
+	m.updateBar()
+	m.updateMain()
+	return tea.Batch(cmd, m.diffLoadForSelection())
+}
+
+// submitChangelist closes the name prompt and assigns the selected file to the
+// entered changelist, rejecting an empty or reserved name.
+func (m *Model) submitChangelist(name string) tea.Cmd {
+	name = strings.TrimSpace(name)
+	switch name {
+	case "":
+		m.showToast("changelist name cannot be empty", component.LevelWarning)
+		return nil
+	case stagedChangelist:
+		m.showToast("that changelist name is reserved", component.LevelWarning)
+		return nil
+	}
+	m.naming = false
+	m.nameEditor.Blur()
+	return assignChangelistCmd(m.client, name, m.namePath, m.nameAdd)
+}
+
+// selectedFile returns the file the current Files-panel view points at: the
+// Changes list selection, or the selection within a drilled-in changelist. At
+// the Changelists overview (a group is selected, not a file) there is no single
+// file, so ok is false.
+func (m *Model) selectedFile() (svn.StatusItem, bool) {
+	if m.filesViewIsChangelists() {
+		if m.inChangelistDrill() {
+			return m.clFiles.Selected()
+		}
+		return svn.StatusItem{}, false
+	}
+	return m.files.Selected()
+}
+
+// filesViewIsChangelists reports whether the Files panel's active view is the
+// Changelists view.
+func (m *Model) filesViewIsChangelists() bool {
+	return m.filesViews.ActiveName() == "Changelists"
+}
+
+// inChangelistDrill reports whether the Changelists view is drilled into a
+// changelist's file list.
+func (m *Model) inChangelistDrill() bool {
+	return m.filesViewIsChangelists() && m.filesViews.Depth() > 0
+}
+
+// assignChangelist opens the changelist-name prompt for the selected file, so it
+// can be added to a named changelist. A file already in a named changelist is
+// refused (one named changelist per file — unstage it first); files in the
+// anonymous staged/unstaged buckets may be moved into a named changelist. A
+// state that cannot be staged is refused too. The prompt lists the existing
+// named changelists to pick from.
+func (m *Model) assignChangelist() tea.Cmd {
+	it, ok := m.selectedFile()
+	if !ok {
+		return nil
+	}
+	if isNamedChangelist(it.Changelist) {
+		m.showToast(it.Path+" already in "+displayCL(it.Changelist)+" — unstage first (space)", component.LevelWarning)
+		return nil
+	}
+	if it.State != svn.StateUnversioned && !stageable(it.State) {
+		m.showToast("can't add "+it.Path+" to a changelist ("+it.State.Code()+")", component.LevelWarning)
+		return nil
+	}
+	m.naming = true
+	m.namePath = it.Path
+	m.nameAdd = it.State == svn.StateUnversioned
+	m.nameEditor.Reset()
+	m.nameEditor.SetOptions("Existing changelists:", m.namedChangelists())
+	m.nameEditor.Focus()
+	m.sizeNameEditor()
+	return nil
+}
+
+// syncDrill refreshes a drilled-in changelist after a status reload: it
+// repopulates the file list from the rebuilt groups, or collapses the drill when
+// that changelist no longer exists (e.g. its last file was unstaged).
+func (m *Model) syncDrill() {
+	if !m.filesViewIsChangelists() || m.filesViews.Depth() == 0 {
+		return
+	}
+	for _, g := range m.changelists.Items() {
+		if g.Name == m.drilledCL {
+			m.clFiles.SetItems(g.Items)
+			return
+		}
+	}
+	m.filesViews.Pop()
+	m.drilledCL = ""
+}
+
+// openCommit opens the commit-message editor for the current commit target: the
+// selected changelist when in the Changelists view, otherwise the anonymous
+// staged bucket. It refuses an empty target.
+func (m *Model) openCommit() tea.Cmd {
+	target, label, ok := m.commitTarget()
+	if !ok {
+		return nil
+	}
+	if m.countInChangelist(target) == 0 {
+		m.showToast("nothing staged in "+label+" — press space to stage files", component.LevelWarning)
+		return nil
+	}
+	m.commitCL = target
 	m.editing = true
 	m.editor.Reset()
 	m.editor.Focus()
@@ -474,10 +669,48 @@ func (m *Model) openCommit() tea.Cmd {
 	return nil
 }
 
+// commitTarget resolves which changelist a commit would target. In the
+// Changelists view it is the selected (or drilled-in) changelist, refusing the
+// default/unstaged group which is not an addressable changelist; everywhere else
+// it is the anonymous staged bucket.
+func (m *Model) commitTarget() (cl, label string, ok bool) {
+	if m.focus.Index() == panelFiles && m.filesViewIsChangelists() {
+		if m.inChangelistDrill() {
+			if m.drilledCL == "" {
+				m.showToast("the (unstaged) group isn't a changelist — stage or name files first", component.LevelWarning)
+				return "", "", false
+			}
+			return m.drilledCL, displayCL(m.drilledCL), true
+		}
+		g, sel := m.changelists.Selected()
+		if !sel {
+			return "", "", false
+		}
+		if !g.Committable() {
+			m.showToast("the "+g.Label()+" group isn't a changelist — stage or name files first", component.LevelWarning)
+			return "", "", false
+		}
+		return g.Name, g.Label(), true
+	}
+	return stagedChangelist, displayCL(stagedChangelist), true
+}
+
+// countInChangelist returns how many pending files belong to the named
+// changelist.
+func (m *Model) countInChangelist(name string) int {
+	n := 0
+	for _, it := range m.files.Items() {
+		if it.Changelist == name {
+			n++
+		}
+	}
+	return n
+}
+
 // requestRevert asks to discard local changes to the selected file, opening a
 // confirmation modal. A clean/unversioned selection has nothing to revert.
 func (m *Model) requestRevert() tea.Cmd {
-	it, ok := m.files.Selected()
+	it, ok := m.selectedFile()
 	if !ok {
 		return nil
 	}
@@ -494,7 +727,7 @@ func (m *Model) requestRevert() tea.Cmd {
 // A versioned file is scheduled for deletion; an unversioned one is removed from
 // disk. Ignored files are left alone.
 func (m *Model) requestDelete() tea.Cmd {
-	it, ok := m.files.Selected()
+	it, ok := m.selectedFile()
 	if !ok {
 		return nil
 	}
@@ -571,7 +804,10 @@ func failureText(action string, err error) string {
 func helpMenuItems() []component.MenuItem {
 	return []component.MenuItem{
 		{Label: "Stage / unstage", Key: "space"},
-		{Label: "Commit staged", Key: "c"},
+		{Label: "Assign changelist", Key: "n"},
+		{Label: "Commit staged / changelist", Key: "c"},
+		{Label: "Switch file view", Key: "[ / ]"},
+		{Label: "Expand changelist", Key: "enter"},
 		{Label: "Revert file", Key: "r"},
 		{Label: "Delete file", Key: "d"},
 		{Label: "Update working copy", Key: "u"},
@@ -585,7 +821,7 @@ func helpMenuItems() []component.MenuItem {
 	}
 }
 
-// submitCommit closes the editor and commits the staged changelist with the
+// submitCommit closes the editor and commits the target changelist with the
 // entered message, rejecting an empty message.
 func (m *Model) submitCommit(message string) tea.Cmd {
 	if strings.TrimSpace(message) == "" {
@@ -596,18 +832,7 @@ func (m *Model) submitCommit(message string) tea.Cmd {
 	m.editor.Blur()
 	m.loading = true
 	m.refreshChrome()
-	return commitCmd(m.client, message, stagedChangelist)
-}
-
-// stagedCount returns how many files are currently staged.
-func (m *Model) stagedCount() int {
-	n := 0
-	for _, it := range m.files.Items() {
-		if it.Changelist == stagedChangelist {
-			n++
-		}
-	}
-	return n
+	return commitCmd(m.client, message, m.commitCL)
 }
 
 // sizeEditor sizes the commit editor to a centered portion of the screen.
@@ -615,6 +840,31 @@ func (m *Model) sizeEditor() {
 	w := clamp(m.width*3/5, 40, max(m.width-4, 40))
 	h := clamp(m.height/2, 8, max(m.height-4, 8))
 	m.editor.SetSize(w, h)
+}
+
+// sizeNameEditor sizes the changelist-name prompt (only its width matters; the
+// height follows the input and option rows).
+func (m *Model) sizeNameEditor() {
+	w := clamp(m.width/2, 30, max(m.width-6, 30))
+	m.nameEditor.SetSize(w, 0)
+}
+
+// namedChangelists returns the existing user-named changelists (excluding the
+// anonymous staged/unstaged buckets), for the assign prompt to offer as options.
+func (m *Model) namedChangelists() []string {
+	var names []string
+	for _, g := range m.changelists.Items() {
+		if isNamedChangelist(g.Name) {
+			names = append(names, g.Name)
+		}
+	}
+	return names
+}
+
+// isNamedChangelist reports whether cl is a real user-named changelist, i.e. not
+// the empty default group or the anonymous staged bucket.
+func isNamedChangelist(cl string) bool {
+	return cl != "" && cl != stagedChangelist
 }
 
 // sizeModal sizes the confirmation modal to a centered portion of the screen
@@ -647,10 +897,14 @@ func stageable(s svn.FileState) bool {
 // loads the diff for a newly selected file.
 func (m *Model) handleSelection(sel uimsg.SelectedMsg) tea.Cmd {
 	switch sel.ID {
-	case "files":
+	case "files", changelistFilesID:
 		if m.source == sourceFiles {
 			m.updateMain()
 			return m.diffLoadForSelection()
+		}
+	case changelistsListID:
+		if m.source == sourceFiles {
+			m.updateMain()
 		}
 	case "log":
 		if m.source == sourceLog {
@@ -682,7 +936,7 @@ func (m *Model) afterFocusChange() tea.Cmd {
 // diffLoadForSelection returns a command to load the diff of the selected file
 // when it is dirty and not already loaded.
 func (m *Model) diffLoadForSelection() tea.Cmd {
-	it, ok := m.files.Selected()
+	it, ok := m.selectedFile()
 	if !ok || !it.State.IsDirty() || m.diffPath == it.Path {
 		return nil
 	}
@@ -745,13 +999,46 @@ func (m *Model) updateMain() {
 		m.main.SetContent(m.logDetail())
 		return
 	}
-	m.main.SetContent(m.fileDetail())
+	m.main.SetContent(m.filesMain())
+}
+
+// filesMain renders the Main content for the Files panel, which depends on its
+// active view: the Changelists overview shows a changelist summary, everything
+// else (the Changes view or a drilled-in changelist) shows the selected file.
+func (m *Model) filesMain() string {
+	if m.filesViewIsChangelists() && !m.inChangelistDrill() {
+		return m.changelistDetail()
+	}
+	return m.fileDetail()
+}
+
+// changelistDetail summarizes the selected changelist: its label, file count and
+// the paths it groups.
+func (m *Model) changelistDetail() string {
+	g, ok := m.changelists.Selected()
+	if !ok {
+		return "No changelists yet — stage files (space) or assign one (n)."
+	}
+	lines := []string{
+		"Changelist: " + g.Label(),
+		fmt.Sprintf("%d file(s)", len(g.Items)),
+		"",
+	}
+	if g.Committable() {
+		lines = append(lines, "enter expand · c commit this changelist", "")
+	} else {
+		lines = append(lines, "Files in no changelist (committable by default).", "")
+	}
+	for _, it := range g.Items {
+		lines = append(lines, fmt.Sprintf("  %s %s", it.State.Code(), it.Path))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // fileDetail renders the selected file's header followed by its diff, or a
 // placeholder while the diff loads or when the state has no textual diff.
 func (m *Model) fileDetail() string {
-	it, ok := m.files.Selected()
+	it, ok := m.selectedFile()
 	if !ok {
 		return "Working copy is clean — no changes."
 	}
@@ -760,7 +1047,7 @@ func (m *Model) fileDetail() string {
 		fmt.Sprintf("state: %s (%s)", it.State, it.State.Code()),
 	}
 	if it.Changelist != "" {
-		head = append(head, "changelist: "+it.Changelist)
+		head = append(head, "changelist: "+displayCL(it.Changelist))
 	}
 	head = append(head, "")
 	switch {
@@ -805,7 +1092,7 @@ func (m *Model) logDetail() string {
 
 // updateBar sets the contextual key hints and right-aligned repo context.
 func (m *Model) updateBar() {
-	m.bar.SetLeft("space stage · c commit · r revert · d delete · u update · ? help · q quit")
+	m.bar.SetLeft(m.barHint())
 
 	switch {
 	case m.err != nil:
@@ -817,6 +1104,19 @@ func (m *Model) updateBar() {
 	default:
 		m.bar.SetRight("")
 	}
+}
+
+// barHint returns the contextual keybinding hint for the current Files-panel
+// view: the Changelists overview and its drill-down each get their own hints,
+// the Changes view (and every other panel) get the file-oriented hint.
+func (m *Model) barHint() string {
+	if m.focus.Index() == panelFiles && m.filesViewIsChangelists() {
+		if m.inChangelistDrill() {
+			return "space unstage · c commit · esc back · [ ] view · ? help"
+		}
+		return "enter expand · c commit · [ ] view · n name · ? help"
+	}
+	return "space stage · n changelist · c commit · r revert · d delete · ? help"
 }
 
 func clamp(v, lo, hi int) int {
