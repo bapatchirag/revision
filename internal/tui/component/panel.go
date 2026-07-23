@@ -22,6 +22,15 @@ type Panel struct {
 	focused bool
 }
 
+// tabbed is implemented by a Panel child that hosts multiple named views. The
+// Panel inlays the view names (and any drill breadcrumb) into its top border, so
+// tabs cost no content row.
+type tabbed interface {
+	Tabs() []string
+	ActiveIndex() int
+	Depth() int
+}
+
 var (
 	_ tui.Component = (*Panel)(nil)
 	_ tui.Sizeable  = (*Panel)(nil)
@@ -58,6 +67,13 @@ func (p *Panel) View() string {
 	content := ""
 	if p.child != nil {
 		content = p.child.View()
+	}
+	// A child that hosts several views (or is drilled into a sub-view) renders
+	// its tabs in the border instead of a plain title, sparing a content row.
+	if tb, ok := p.child.(tabbed); ok {
+		if tabs := tb.Tabs(); len(tabs) > 1 || tb.Depth() > 0 {
+			return boxTabbed(content, p.number, tabs, tb.ActiveIndex(), tb.Depth(), innerW, innerH, p.theme, p.focused)
+		}
 	}
 	return box(content, p.titleText(), innerW, innerH, p.theme, p.focused)
 }

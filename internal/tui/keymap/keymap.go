@@ -25,6 +25,9 @@ type KeyMap struct {
 	FocusNext key.Binding
 	FocusPrev key.Binding
 
+	PrevView key.Binding
+	NextView key.Binding
+
 	Refresh key.Binding
 	Help    key.Binding
 	Quit    key.Binding
@@ -48,6 +51,8 @@ func Default() KeyMap {
 		Submit:    key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "submit")),
 		FocusNext: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next panel")),
 		FocusPrev: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev panel")),
+		PrevView:  key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev view")),
+		NextView:  key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next view")),
 		Refresh:   key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh")),
 		Help:      key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:      key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),

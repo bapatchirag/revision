@@ -137,3 +137,36 @@ func TestGoldenTextAreaPlaceholder(t *testing.T) {
 	ta.SetSize(40, 6)
 	golden.RequireEqual(t, []byte(ta.View()))
 }
+
+func TestGoldenViews(t *testing.T) {
+	changes := component.NewList[string]("changes", func(s string) string { return s }, testTheme(), testKeys())
+	changes.SetItems([]string{"app.go", "views.go", "keymap.go"})
+	staged := component.NewList[string]("staged", func(s string) string { return s }, testTheme(), testKeys())
+	staged.SetItems([]string{"views.go"})
+	vs := component.NewViews("files-views", []component.View{
+		{Name: "Changes", Content: changes},
+		{Name: "Staged", Content: staged},
+	}, testTheme(), testKeys())
+	// A multi-view container renders its tabs in the host Panel's border.
+	p := component.NewPanel("Files", 2, vs, testTheme())
+	p.SetSize(34, 7)
+	p.Focus()
+	golden.RequireEqual(t, []byte(p.View()))
+}
+
+func TestGoldenViewsDrilled(t *testing.T) {
+	base := component.NewList[string]("log", func(s string) string { return s }, testTheme(), testKeys())
+	base.SetItems([]string{"r42 add views", "r41 fix parse"})
+	vs := component.NewViews("log-views", []component.View{
+		{Name: "Log", Content: base},
+	}, testTheme(), testKeys())
+	p := component.NewPanel("Log", 3, vs, testTheme())
+	p.SetSize(34, 7)
+	p.Focus()
+	// Drill into an unnamed sub-view (a revision's changed paths); the Panel
+	// border gains a breadcrumb chevron.
+	sub := component.NewList[string]("log-paths", func(s string) string { return s }, testTheme(), testKeys())
+	sub.SetItems([]string{"A component/views.go", "M internal/app/app.go"})
+	vs.Push(sub)
+	golden.RequireEqual(t, []byte(p.View()))
+}
