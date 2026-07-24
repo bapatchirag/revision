@@ -123,6 +123,36 @@ func stageCmd(client *svn.Client, changelist string, act stageAction) tea.Cmd {
 	}
 }
 
+// stageManyCmd applies several stage actions in one pass off the UI goroutine:
+// for each action it optionally runs `svn add` first (for a previously
+// unversioned file), then adds the path to (stage) or removes it from (unstage)
+// the staged changelist. It stops on the first error. Success rides on a single
+// stagedMsg with no changelist name, so — like acting on a single file — it shows
+// no toast; the follow-up status reload makes the change visible.
+func stageManyCmd(client *svn.Client, changelist string, acts []stageAction) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		for _, act := range acts {
+			if act.add {
+				if err := client.Add(ctx, act.path); err != nil {
+					return stagedMsg{path: act.path, staged: act.stage, err: err}
+				}
+			}
+			var err error
+			if act.stage {
+				err = client.AddToChangelist(ctx, changelist, act.path)
+			} else {
+				err = client.RemoveFromChangelist(ctx, act.path)
+			}
+			if err != nil {
+				return stagedMsg{path: act.path, staged: act.stage, err: err}
+			}
+		}
+		return stagedMsg{staged: true}
+	}
+}
+
 // commitCmd commits the staged changelist off the UI goroutine.
 func commitCmd(client *svn.Client, message, changelist string) tea.Cmd {
 	return func() tea.Msg {

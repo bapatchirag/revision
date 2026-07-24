@@ -509,10 +509,16 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	return nil, false
 }
 
-// stageSelected toggles the staged state of the file under the current file
-// selection (the Changes view or a drilled-in changelist), returning the command
-// that performs the change (or nil when the selection is not stageable).
+// stageSelected acts on the current Files-panel selection: on a directory row it
+// toggles staging for every file beneath that directory (stage all, then unstage
+// all once everything stageable is staged), and on a file leaf it toggles that
+// file's staged state (the Changes view or a drilled-in changelist). It returns
+// the command that performs the change (or nil when the selection is not
+// stageable).
 func (m *Model) stageSelected() tea.Cmd {
+	if n, items, ok := m.selectedTreeNode(); ok && n.Item == nil {
+		return m.stageDirectory(n, items)
+	}
 	act, ok := m.stageTarget()
 	if !ok {
 		if it, sel := m.selectedFile(); sel {
@@ -521,6 +527,56 @@ func (m *Model) stageSelected() tea.Cmd {
 		return nil
 	}
 	return stageCmd(m.client, stagedChangelist, act)
+}
+
+// stageDirectory toggles staging for the files beneath the selected directory
+// row. While any file can still be staged it stages them all (adding unversioned
+// files first); once nothing is left to stage, a second press removes every file
+// under the directory from whatever changelist it belongs to — the staged bucket
+// or a named one — mirroring how space clears a single file's changelist. A
+// directory holding only clean or ignored files has nothing to do and warns
+// instead of running svn.
+func (m *Model) stageDirectory(n fileNode, items []svn.StatusItem) tea.Cmd {
+	if acts := directoryStageActions(n, items); len(acts) > 0 {
+		return stageManyCmd(m.client, stagedChangelist, acts)
+	}
+	if acts := directoryUnstageActions(n, items); len(acts) > 0 {
+		return stageManyCmd(m.client, stagedChangelist, acts)
+	}
+	m.showToast("nothing to stage or unstage under "+dirLabel(n), component.LevelWarning)
+	return nil
+}
+
+// directoryStageActions builds the stage actions that stage every stageable file
+// beneath a directory row: an unversioned file is added and staged, an
+// unassigned pending change is staged, and a file already staged or in a named
+// changelist is left as it is. items is the tree's source set.
+func directoryStageActions(n fileNode, items []svn.StatusItem) []stageAction {
+	var acts []stageAction
+	for _, it := range filesUnder(n, items) {
+		switch {
+		case it.State == svn.StateUnversioned:
+			acts = append(acts, stageAction{path: it.Path, add: true, stage: true})
+		case it.Changelist == "" && stageable(it.State):
+			acts = append(acts, stageAction{path: it.Path, stage: true})
+		}
+	}
+	return acts
+}
+
+// directoryUnstageActions builds the actions that remove every file beneath a
+// directory row from its changelist — the staged bucket or a named changelist
+// alike — so a directory-level toggle clears assignments the same way space does
+// for a single file. Files in no changelist have nothing to remove. items is the
+// tree's source set.
+func directoryUnstageActions(n fileNode, items []svn.StatusItem) []stageAction {
+	var acts []stageAction
+	for _, it := range filesUnder(n, items) {
+		if it.Changelist != "" {
+			acts = append(acts, stageAction{path: it.Path, stage: false})
+		}
+	}
+	return acts
 }
 
 // stageAction describes how a stage keypress should change one file.
@@ -1203,26 +1259,12 @@ func (m *Model) changelistDetail() string {
 // how many pending files sit beneath it (within items, the tree's source set),
 // and the collapse hint. The "/" root covers the whole set.
 func (m *Model) directoryDetail(n fileNode, items []svn.StatusItem) string {
-	label := n.Name
-	if !strings.HasSuffix(label, "/") {
-		label += "/"
-	}
-	count := 0
-	if n.Path == fileTreeRoot {
-		count = len(items)
-	} else {
-		prefix := n.Path + "/"
-		for _, it := range items {
-			if strings.HasPrefix(it.Path, prefix) {
-				count++
-			}
-		}
-	}
+	count := len(filesUnder(n, items))
 	action := "enter collapse"
 	if n.Collapsed {
 		action = "enter expand"
 	}
-	return fmt.Sprintf("%s\n%d change(s) under this directory\n\n%s", label, count, action)
+	return fmt.Sprintf("%s\n%d change(s) under this directory\n\n%s", dirLabel(n), count, action)
 }
 
 // fileDetail renders the selected file's diff, prefixed by its changelist when

@@ -127,6 +127,31 @@ func firstFileIndex(rows []fileNode) int {
 	return -1
 }
 
+// dirLabel is a directory row's display label: its segment name with a single
+// trailing slash (the "/" root already carries one).
+func dirLabel(n fileNode) string {
+	if strings.HasSuffix(n.Name, "/") {
+		return n.Name
+	}
+	return n.Name + "/"
+}
+
+// filesUnder returns the status items beneath a directory row n: the whole set
+// for the "/" root, otherwise every item whose path lies under n.Path.
+func filesUnder(n fileNode, items []svn.StatusItem) []svn.StatusItem {
+	if n.Path == fileTreeRoot {
+		return items
+	}
+	prefix := n.Path + "/"
+	var out []svn.StatusItem
+	for _, it := range items {
+		if strings.HasPrefix(it.Path, prefix) {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
 // renderFileNode adapts a tree row for the reusable List: directory rows show a
 // chevron (▾ expanded, ▸ collapsed) and the segment name with a trailing slash
 // (the root row shows just "/"); file rows reuse the flat status rendering
@@ -139,12 +164,8 @@ func renderFileNode(th theme.Theme) func(fileNode) string {
 			if n.Collapsed {
 				chevron = "▸"
 			}
-			label := n.Name
-			if !strings.HasSuffix(label, "/") {
-				label += "/"
-			}
 			marker := lipgloss.NewStyle().Foreground(th.Muted).Render(chevron)
-			name := lipgloss.NewStyle().Foreground(th.Info).Bold(true).Render(label)
+			name := lipgloss.NewStyle().Foreground(th.Info).Bold(true).Render(dirLabel(n))
 			return indent + marker + " " + name
 		}
 		return indent + statusRow(th, *n.Item, n.Name)
