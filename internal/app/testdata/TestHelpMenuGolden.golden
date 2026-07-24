@@ -1,5 +1,5 @@
 ╭─ [1] Status ─────────────────╮╭─ Main ───────────────────────────────────────╮
-│https://svn.example.com/repo/t││modified.go                                   │
+│https://svn.example.com/repo/t││Loading diff…                                 │
 │r42                ╭─ Keybindings ────────────────────────╮                   │
 │1 change(s)        │> Stage / unstage                space│                   │
 │━━━━━━━━━━━━━━━━━━━│  Assign changelist                  n│                   │

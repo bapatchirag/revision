@@ -18,6 +18,7 @@ type Viewport struct {
 	lines        []string
 	offset       int
 	xOffset      int
+	gutter       int
 	contentWidth int
 	width        int
 	height       int
@@ -60,6 +61,17 @@ func (v *Viewport) SetSize(width, height int) {
 	v.width, v.height = width, height
 	v.clampOffset()
 	v.clampXOffset()
+}
+
+// SetGutter pins the first n display columns so they stay fixed while the body
+// scrolls horizontally (n <= 0 disables the pin). It keeps a leading marker
+// column — such as a unified diff's +/-/space gutter — visible no matter how far
+// right the content is scrolled.
+func (v *Viewport) SetGutter(n int) {
+	if n < 0 {
+		n = 0
+	}
+	v.gutter = n
 }
 
 // Focus implements tui.Focusable.
@@ -165,10 +177,10 @@ func (v *Viewport) horizontalBar(innerW int, corner bool) string {
 }
 
 // window renders the horizontal slice [xOffset, xOffset+width) of a line, padded
-// to width. Tabs are expanded first so the offset counts display cells, mirroring
-// fitLine's fixed-width expansion.
+// to width, keeping the first v.gutter columns pinned. Tabs are expanded first so
+// the offset counts display cells, mirroring fitLine's fixed-width expansion.
 func (v *Viewport) window(s string, width int) string {
-	return windowLine(s, v.xOffset, width)
+	return windowLineGutter(s, v.gutter, v.xOffset, width)
 }
 
 // hScrollStep is the column count a single Left/Right press scrolls.
@@ -245,6 +257,23 @@ func windowLine(s string, xOffset, width int) string {
 		s = ansi.Cut(s, xOffset, xOffset+width)
 	}
 	return fitLine(s, width)
+}
+
+// windowLineGutter renders s into width cells like windowLine, but pins the first
+// `gutter` display columns so they never scroll: the leading gutter cells are
+// always drawn from the start of the line and only the remainder past them slides
+// by xOffset. This keeps a fixed left column — e.g. a unified diff's +/-/space
+// marker — in view while the body scrolls horizontally. With gutter <= 0 (or when
+// the pane is too narrow to spare room past the gutter) it is identical to
+// windowLine.
+func windowLineGutter(s string, gutter, xOffset, width int) string {
+	if gutter <= 0 || xOffset <= 0 || gutter >= width {
+		return windowLine(s, xOffset, width)
+	}
+	s = strings.ReplaceAll(s, "\t", tabSpaces)
+	head := ansi.Cut(s, 0, gutter)
+	tail := ansi.Cut(s, gutter+xOffset, gutter+xOffset+width-gutter)
+	return fitLine(head+tail, width)
 }
 
 // horizontalBarRow renders a horizontal scrollbar spanning innerW cells for

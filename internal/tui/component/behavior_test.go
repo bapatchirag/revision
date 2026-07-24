@@ -75,6 +75,34 @@ func TestViewportHorizontalScroll(t *testing.T) {
 	}
 }
 
+// TestViewportGutterPinsLeadingColumn drives horizontal scroll with a one-column
+// pinned gutter, asserting the leading marker stays fixed at column 0 while the
+// body past it slides — the behavior that keeps a diff's +/- marker in view.
+func TestViewportGutterPinsLeadingColumn(t *testing.T) {
+	v := component.NewViewport(testTheme(), testKeys())
+	v.SetGutter(1)
+	v.SetContent("-0123456789ABCDEFGHIJ") // 1 marker cell + 20 body cells
+	v.SetSize(10, 1)
+	v.Focus()
+
+	// At the origin the gutter is naturally visible; the window is the left slice.
+	if got, want := v.View(), "-012345678"; got != want {
+		t.Fatalf("initial window = %q, want %q", got, want)
+	}
+
+	// Scrolling right slides the body but keeps the '-' marker pinned at column 0.
+	v.Update(keyRight())
+	if got, want := v.View(), "-123456789"; got != want {
+		t.Fatalf("after Right = %q, want %q", got, want)
+	}
+
+	// Even jumped fully right, the marker stays pinned while the tail is shown.
+	v.Update(keyEnd())
+	if got, want := v.View(), "-BCDEFGHIJ"; got != want {
+		t.Fatalf("after End = %q, want %q", got, want)
+	}
+}
+
 // TestViewportScrollbars renders a scrollbar on each overflowing axis and moves
 // the thumb as the content scrolls.
 func TestViewportScrollbars(t *testing.T) {

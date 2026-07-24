@@ -990,6 +990,10 @@ func (m *Model) updateStatus() {
 
 // updateMain fills the Main panel from whichever side panel currently drives it.
 func (m *Model) updateMain() {
+	// Only a unified diff carries the one-column +/-/space marker that must stay
+	// pinned while the body scrolls horizontally; error/loading placeholders and
+	// log/changelist detail have no gutter.
+	m.main.SetGutter(0)
 	switch {
 	case m.err != nil:
 		m.main.SetContent("Error: " + m.err.Error() + "\n\nPress R to retry.")
@@ -1002,6 +1006,9 @@ func (m *Model) updateMain() {
 		m.main.SetContent(m.logDetail())
 		return
 	}
+	if m.filesShowDiff() {
+		m.main.SetGutter(1)
+	}
 	m.main.SetContent(m.filesMain())
 }
 
@@ -1013,6 +1020,21 @@ func (m *Model) filesMain() string {
 		return m.changelistDetail()
 	}
 	return m.fileDetail()
+}
+
+// filesShowDiff reports whether filesMain currently renders a unified diff — the
+// only Main view with a +/-/space gutter to pin. It mirrors the default branch of
+// fileDetail: the Files panel is showing files (not the Changelists overview) and
+// the selected file is dirty with a non-empty, freshly-loaded diff.
+func (m *Model) filesShowDiff() bool {
+	if m.filesViewIsChangelists() && !m.inChangelistDrill() {
+		return false
+	}
+	it, ok := m.selectedFile()
+	if !ok || !it.State.IsDirty() {
+		return false
+	}
+	return m.diffPath == it.Path && strings.TrimSpace(m.diffText) != ""
 }
 
 // changelistDetail summarizes the selected changelist: its label, file count and
@@ -1038,21 +1060,18 @@ func (m *Model) changelistDetail() string {
 	return strings.Join(lines, "\n")
 }
 
-// fileDetail renders the selected file's header followed by its diff, or a
-// placeholder while the diff loads or when the state has no textual diff.
+// fileDetail renders the selected file's diff, prefixed by its changelist when
+// it belongs to one, or a placeholder while the diff loads or when the state has
+// no textual diff.
 func (m *Model) fileDetail() string {
 	it, ok := m.selectedFile()
 	if !ok {
 		return "Working copy is clean — no changes."
 	}
-	head := []string{
-		it.Path,
-		fmt.Sprintf("state: %s (%s)", it.State, it.State.Code()),
-	}
+	var head []string
 	if it.Changelist != "" {
-		head = append(head, "changelist: "+displayCL(it.Changelist))
+		head = append(head, "changelist: "+displayCL(it.Changelist), "")
 	}
-	head = append(head, "")
 	switch {
 	case !it.State.IsDirty():
 		return strings.Join(append(head, "(no textual diff for this state)"), "\n")
@@ -1061,7 +1080,7 @@ func (m *Model) fileDetail() string {
 	case strings.TrimSpace(m.diffText) == "":
 		return strings.Join(append(head, "(no changes to display)"), "\n")
 	default:
-		return strings.Join(head, "\n") + "\n" + m.diffText
+		return strings.Join(append(head, colorizeDiff(m.theme, m.diffText)), "\n")
 	}
 }
 

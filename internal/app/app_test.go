@@ -15,6 +15,7 @@ import (
 
 	"github.com/bapatchirag/revision/internal/svn"
 	uimsg "github.com/bapatchirag/revision/internal/tui/msg"
+	"github.com/bapatchirag/revision/internal/tui/theme"
 )
 
 func TestMain(m *testing.M) {
@@ -87,7 +88,10 @@ func TestSelectionUpdatesMain(t *testing.T) {
 		{Path: "committed.txt", State: svn.StateModified},
 	})
 
-	if main := m.main.View(); !strings.Contains(main, "added.txt") {
+	// The first item is selected, so its diff lands in Main.
+	next, _ := m.Update(diffLoadedMsg{path: "added.txt", diff: "@@ -0,0 +1 @@\n+alpha"})
+	m = next.(*Model)
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "+alpha") {
 		t.Fatalf("main should start on the first item, got:\n%s", main)
 	}
 
@@ -100,10 +104,13 @@ func TestSelectionUpdatesMain(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected SelectedMsg, got %T", cmd())
 	}
-	next, _ := m.Update(sel)
+	next, _ = m.Update(sel)
 	m = next.(*Model)
 
-	if main := m.main.View(); !strings.Contains(main, "committed.txt") {
+	// The second item's diff follows the selection into Main.
+	next, _ = m.Update(diffLoadedMsg{path: "committed.txt", diff: "@@ -1 +1 @@\n+beta"})
+	m = next.(*Model)
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "+beta") {
 		t.Errorf("main should follow selection to the second item, got:\n%s", main)
 	}
 }
@@ -120,8 +127,8 @@ func TestFileDiffLoadsIntoMain(t *testing.T) {
 	next, _ := m.Update(diffLoadedMsg{path: "committed.txt", diff: "@@ -1 +1 @@\n-old\n+new"})
 	m = next.(*Model)
 	main := stripANSI(m.main.View())
-	if !strings.Contains(main, "committed.txt") || !strings.Contains(main, "+new") {
-		t.Errorf("main should show the file header and diff, got:\n%s", main)
+	if !strings.Contains(main, "+new") {
+		t.Errorf("main should show the diff, got:\n%s", main)
 	}
 }
 
@@ -152,6 +159,82 @@ func TestDiffWithTabsDoesNotOverflowWidth(t *testing.T) {
 	for i, line := range strings.Split(m.View(), "\n") {
 		if w := ansi.StringWidth(line); w != 80 {
 			t.Errorf("line %d width = %d, want 80: %q", i, w, stripANSI(line))
+		}
+	}
+}
+
+// TestDiffGutterStaysPinnedWhenScrolled proves the Main viewport keeps a unified
+// diff's +/- marker column pinned to the left while the body scrolls: after
+// scrolling fully right, the added and removed rows still begin with their marker.
+func TestDiffGutterStaysPinnedWhenScrolled(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "wide.txt", State: svn.StateModified},
+	})
+	// Body lines far wider than the Main pane, so the diff scrolls horizontally
+	// and an unpinned marker would otherwise slide out of view.
+	long := strings.Repeat("abcdefghij", 12) // 120 columns
+	next, _ := m.Update(diffLoadedMsg{
+		path: "wide.txt",
+		diff: "@@ -1 +1 @@\n-" + long + "\n+" + long,
+	})
+	m = next.(*Model)
+	before := stripANSI(m.main.View())
+
+	// Scroll the Main viewport as far right as it goes.
+	m.main.Focus()
+	m.main.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	after := stripANSI(m.main.View())
+
+	if before == after {
+		t.Fatal("diff did not scroll horizontally; the gutter cannot be observed")
+	}
+	var minus, plus bool
+	for _, ln := range strings.Split(after, "\n") {
+		switch {
+		case strings.HasPrefix(ln, "-"):
+			minus = true
+		case strings.HasPrefix(ln, "+"):
+			plus = true
+		}
+	}
+	if !minus || !plus {
+		t.Errorf("scrolled diff lost its +/- gutter:\n%s", after)
+	}
+}
+
+func TestColorizeDiff(t *testing.T) {
+	// Emit ANSI so the styling is observable, then restore the Ascii profile the
+	// rest of the suite relies on.
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	diff := "Index: a.txt\n--- a.txt\t(revision 1)\n+++ a.txt\t(working copy)\n" +
+		"@@ -1,2 +1,2 @@\n context\n-old\n+new"
+	got := colorizeDiff(theme.Default(), diff)
+
+	// Coloring must only add styling, never alter the underlying text.
+	if plain := stripANSI(got); plain != diff {
+		t.Fatalf("colorize changed content:\n got: %q\nwant: %q", plain, diff)
+	}
+
+	// Metadata, hunk, add and delete lines are colored; context lines are not.
+	wantColored := map[string]bool{
+		"Index: a.txt":              true,
+		"--- a.txt\t(revision 1)":   true,
+		"+++ a.txt\t(working copy)": true,
+		"@@ -1,2 +1,2 @@":           true,
+		"-old":                      true,
+		"+new":                      true,
+		" context":                  false,
+	}
+	for _, ln := range strings.Split(got, "\n") {
+		plain := stripANSI(ln)
+		want, tracked := wantColored[plain]
+		if !tracked {
+			continue
+		}
+		if colored := ln != plain; colored != want {
+			t.Errorf("line %q colored=%v, want %v", plain, colored, want)
 		}
 	}
 }
