@@ -61,6 +61,9 @@ func run(path string) error {
 	defer cancel()
 	info, err := client.Info(ctx)
 	if err != nil {
+		if svn.IsAuthError(err) {
+			return fmt.Errorf("cannot read the working copy at %q: %s", abs, svn.AuthHint)
+		}
 		return fmt.Errorf("%q does not appear to be an SVN working copy: %w", abs, err)
 	}
 

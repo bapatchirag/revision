@@ -508,3 +508,378 @@ func TestModalConfirmGolden(t *testing.T) {
 	m = next.(*Model)
 	golden.RequireEqual(t, []byte(m.View()))
 }
+
+func TestHelpMenuOpensAndCloses(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+
+	// "?" floats the keybindings menu over the layout.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = next.(*Model)
+	if !m.helping {
+		t.Fatal("expected the help menu to open on ?")
+	}
+	view := stripANSI(m.View())
+	for _, want := range []string{"Keybindings", "Stage / unstage", "space", "Quit"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("help view missing %q\n---\n%s", want, view)
+		}
+	}
+
+	// While help is open, other keys are captured by the menu — q must not quit.
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}); cmd != nil {
+		if _, ok := cmd().(tea.QuitMsg); ok {
+			t.Error("q should not quit while the help menu is open")
+		}
+	}
+	if !m.helping {
+		t.Error("the help menu should stay open on a non-dismiss key")
+	}
+
+	// enter must NOT close the help menu — it is a read-only reference.
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd()) // deliver the resulting ActivatedMsg
+		m = next.(*Model)
+	}
+	if !m.helping {
+		t.Error("enter should not close the help menu")
+	}
+
+	// esc closes the help menu.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*Model)
+	if m.helping {
+		t.Error("the help menu should close after esc")
+	}
+	if view := stripANSI(m.View()); strings.Contains(view, "Keybindings") {
+		t.Error("the layout should return after closing help")
+	}
+}
+
+func TestHelpMenuTogglesClosedWithQuestionMark(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = next.(*Model)
+	if !m.helping {
+		t.Fatal("? should open the help menu")
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = next.(*Model)
+	if m.helping {
+		t.Error("? should toggle the help menu closed")
+	}
+}
+
+func TestAuthFailureShowsHint(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified, Changelist: "revision:staged"},
+	})
+	authErr := errors.New("svn commit: E170001: No more credentials or we tried too many times.")
+	next, _ := m.Update(committedMsg{err: authErr})
+	m = next.(*Model)
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "authentication required") {
+		t.Errorf("expected an auth hint toast, got:\n%s", view)
+	}
+	if strings.Contains(view, "E170001") {
+		t.Errorf("the raw svn error should be replaced by the hint, got:\n%s", view)
+	}
+}
+
+func TestHelpMenuGolden(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = next.(*Model)
+	golden.RequireEqual(t, []byte(m.View()))
+}
+
+func TestChangelistGrouping(t *testing.T) {
+	groups := groupChangelists([]svn.StatusItem{
+		{Path: "z.go", State: svn.StateModified, Changelist: "feature"},
+		{Path: "a.go", State: svn.StateModified, Changelist: "revision:staged"},
+		{Path: "b.go", State: svn.StateModified},
+		{Path: "c.go", State: svn.StateModified, Changelist: "alpha"},
+	})
+	// Named changelists first (alphabetical), then staged, then the unstaged default.
+	want := []string{"alpha", "feature", "(staged)", "(unstaged)"}
+	if len(groups) != len(want) {
+		t.Fatalf("want %d groups, got %d: %+v", len(want), len(groups), groups)
+	}
+	for i, w := range want {
+		if groups[i].Label() != w {
+			t.Errorf("group %d = %q, want %q", i, groups[i].Label(), w)
+		}
+	}
+	if !groups[0].Committable() {
+		t.Error("a named changelist should be committable")
+	}
+	if groups[3].Committable() {
+		t.Error("the unstaged default group should not be committable")
+	}
+}
+
+func TestFilesViewSwitchesToChangelists(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "a.go", State: svn.StateModified, Changelist: "feature"},
+		{Path: "b.go", State: svn.StateModified, Changelist: "revision:staged"},
+	})
+	// Files panel is focused by default; ] cycles to the Changelists view.
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd()) // deliver ViewSelectedMsg
+		m = next.(*Model)
+	}
+	if name := m.filesViews.ActiveName(); name != "Changelists" {
+		t.Fatalf("active files view = %q, want Changelists", name)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "feature") || !strings.Contains(view, "(staged)") {
+		t.Errorf("the changelists view should list the groups, got:\n%s", view)
+	}
+}
+
+func TestAssignChangelistPromptAndSubmit(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "mod.go", State: svn.StateModified},
+	})
+	// n opens the changelist-name prompt.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = next.(*Model)
+	if !m.naming {
+		t.Fatal("n should open the changelist-name prompt")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "Changelist name") {
+		t.Errorf("expected the name prompt, got:\n%s", view)
+	}
+
+	// Type a name; enter submits it (single-line input).
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("feature-x")})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected a SubmitMsg from the name prompt")
+	}
+	sub, ok := cmd().(uimsg.SubmitMsg)
+	if !ok || sub.ID != changelistEditorID {
+		t.Fatalf("expected a changelist SubmitMsg, got %T (%+v)", cmd(), cmd())
+	}
+	if sub.Value != "feature-x" {
+		t.Errorf("submitted name = %q, want feature-x", sub.Value)
+	}
+
+	next, cmd = m.Update(sub)
+	m = next.(*Model)
+	if m.naming {
+		t.Error("the prompt should close after submit")
+	}
+	if cmd == nil {
+		t.Error("expected an assign command after submit")
+	}
+}
+
+func TestAssignChangelistAllowsStagedFile(t *testing.T) {
+	// A file in the anonymous staged bucket can be moved into a named changelist.
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "staged.go", State: svn.StateModified, Changelist: "revision:staged"},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = next.(*Model)
+	if !m.naming {
+		t.Fatal("a staged file should be assignable to a named changelist")
+	}
+}
+
+func TestAssignChangelistOffersExistingNames(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "loose.go", State: svn.StateModified},
+		{Path: "a.go", State: svn.StateModified, Changelist: "feature"},
+		{Path: "b.go", State: svn.StateModified, Changelist: "revision:staged"},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = next.(*Model)
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "Existing changelists:") || !strings.Contains(view, "feature") {
+		t.Errorf("the prompt should list existing named changelists, got:\n%s", view)
+	}
+	// The anonymous buckets are not offered as pickable names.
+	if strings.Contains(view, "(staged)") || strings.Contains(view, "(unstaged)") {
+		t.Errorf("anonymous buckets should not appear as options, got:\n%s", view)
+	}
+}
+
+func TestAssignChangelistGuardsNamedChangelist(t *testing.T) {
+	// A file already in a *named* changelist cannot be reassigned (unstage first).
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "a.go", State: svn.StateModified, Changelist: "feature"},
+	})
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = next.(*Model)
+	if m.naming {
+		t.Error("a file already in a named changelist should not open the prompt")
+	}
+	if cmd != nil {
+		t.Error("the guard should not produce a command")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "already in") {
+		t.Errorf("expected an already-assigned guard toast, got:\n%s", view)
+	}
+}
+
+func TestAssignChangelistCancels(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "mod.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = next.(*Model)
+	// Esc emits DismissMsg, which the app handles to close the prompt.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, _ = m.Update(cmd())
+	m = next.(*Model)
+	if m.naming {
+		t.Error("the prompt should close on cancel")
+	}
+	if view := stripANSI(m.View()); strings.Contains(view, "Changelist name") {
+		t.Error("the layout should return after cancelling the prompt")
+	}
+}
+
+func TestChangelistDrillExpandsAndCollapses(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "a.go", State: svn.StateModified, Changelist: "feature"},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	m = next.(*Model)
+
+	// enter drills into the selected changelist.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected an ActivatedMsg from the changelists list")
+	}
+	next, _ = m.Update(cmd())
+	m = next.(*Model)
+	if m.filesViews.Depth() == 0 {
+		t.Fatal("enter should drill into the changelist")
+	}
+	if m.drilledCL != "feature" {
+		t.Errorf("drilled changelist = %q, want feature", m.drilledCL)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "a.go") {
+		t.Errorf("the drill should list the changelist's files, got:\n%s", view)
+	}
+
+	// esc collapses back out.
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd == nil {
+		t.Fatal("expected a SubViewPoppedMsg on esc")
+	}
+	next, _ = m.Update(cmd())
+	m = next.(*Model)
+	if m.filesViews.Depth() != 0 {
+		t.Error("esc should collapse the drill")
+	}
+	if m.drilledCL != "" {
+		t.Error("the drilled changelist should be cleared on collapse")
+	}
+}
+
+func TestCommitChangelistFromView(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "a.go", State: svn.StateModified, Changelist: "feature"},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	m = next.(*Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = next.(*Model)
+	if !m.editing {
+		t.Fatal("c should open the commit editor for the selected changelist")
+	}
+	if m.commitCL != "feature" {
+		t.Errorf("commit target = %q, want feature", m.commitCL)
+	}
+}
+
+func TestCommitUnstagedGroupRefused(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "a.go", State: svn.StateModified}, // no changelist → (unstaged)
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	m = next.(*Model)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = next.(*Model)
+	if m.editing {
+		t.Error("committing the unstaged group should be refused")
+	}
+	if cmd != nil {
+		t.Error("no command should run for the unstaged group")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "isn't a changelist") {
+		t.Errorf("expected a refusal toast, got:\n%s", view)
+	}
+}
+
+func TestNamedChangelistFileShowsAccentMarker(t *testing.T) {
+	// A named-changelist file is marked in the Changes view (distinct from the
+	// staged bucket's marker), so both render the dot.
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "feature.go", State: svn.StateModified, Changelist: "feature"},
+	})
+	if view := stripANSI(m.View()); !strings.Contains(view, "●") {
+		t.Errorf("expected a changelist marker in the files list, got:\n%s", view)
+	}
+}
+
+func TestChangelistsViewGolden(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "added.txt", State: svn.StateAdded, Changelist: "revision:staged"},
+		{Path: "feature.go", State: svn.StateModified, Changelist: "feature-x"},
+		{Path: "loose.txt", State: svn.StateModified},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	m = next.(*Model)
+	golden.RequireEqual(t, []byte(m.View()))
+}
+
+func TestChangelistDrillLocksViewSwitch(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "a.go", State: svn.StateModified, Changelist: "feature"},
+	})
+	// Switch to Changelists, then drill in.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	m = next.(*Model)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = m.Update(cmd())
+	m = next.(*Model)
+	if m.filesViews.Depth() == 0 {
+		t.Fatal("expected to be drilled into the changelist")
+	}
+
+	// While drilled, [ and ] must not switch the Files view.
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	if name := m.filesViews.ActiveName(); name != "Changelists" {
+		t.Errorf("view switched while drilled (now %q); it should stay locked", name)
+	}
+	if m.filesViews.Depth() == 0 {
+		t.Error("the drill should remain open while view switching is locked")
+	}
+}
+
+func TestChangelistDrillHeaderGolden(t *testing.T) {
+	// Expanding a changelist labels the panel header with just the changelist
+	// name (no tabs, no chevron).
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "feature.go", State: svn.StateModified, Changelist: "feature-x"},
+		{Path: "other.go", State: svn.StateAdded, Changelist: "feature-x"},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	m = next.(*Model)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = m.Update(cmd())
+	m = next.(*Model)
+	golden.RequireEqual(t, []byte(m.View()))
+}

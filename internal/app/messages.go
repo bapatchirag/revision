@@ -34,9 +34,10 @@ type logLoadedMsg struct {
 
 // stagedMsg carries the result of staging or unstaging a single path.
 type stagedMsg struct {
-	path   string
-	staged bool
-	err    error
+	path       string
+	staged     bool
+	changelist string // non-empty when a named changelist was assigned
+	err        error
 }
 
 // committedMsg carries the result of a commit.
@@ -128,6 +129,23 @@ func commitCmd(client *svn.Client, message, changelist string) tea.Cmd {
 		defer cancel()
 		rev, err := client.Commit(ctx, message, changelist)
 		return committedMsg{revision: rev, err: err}
+	}
+}
+
+// assignChangelistCmd adds path to the named changelist off the UI goroutine,
+// running `svn add` first for a previously unversioned file. The result rides on
+// stagedMsg (carrying the changelist name so the app can confirm the assignment).
+func assignChangelistCmd(client *svn.Client, name, path string, add bool) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if add {
+			if err := client.Add(ctx, path); err != nil {
+				return stagedMsg{path: path, staged: true, changelist: name, err: err}
+			}
+		}
+		err := client.AddToChangelist(ctx, name, path)
+		return stagedMsg{path: path, staged: true, changelist: name, err: err}
 	}
 }
 

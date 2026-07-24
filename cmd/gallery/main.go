@@ -85,6 +85,17 @@ func newModel() model {
 	panel := component.NewPanel("Files", 2, inner, th)
 	panel.Focus()
 
+	changes := component.NewList[string]("gallery-changes", func(s string) string { return s }, th, keys)
+	changes.SetItems([]string{"internal/app/app.go", "internal/tui/component/views.go", "PLAN.md"})
+	staged := component.NewList[string]("gallery-staged", func(s string) string { return s }, th, keys)
+	staged.SetItems([]string{"internal/tui/component/views.go"})
+	views := component.NewViews("gallery-views", []component.View{
+		{Name: "Changes", Content: changes},
+		{Name: "Staged", Content: staged},
+	}, th, keys)
+	viewsPanel := component.NewPanel("Files", 2, views, th)
+	viewsPanel.Focus()
+
 	modal := component.NewModal("gallery-modal", "Delete file?", "src/main.go will be removed.", th, keys)
 	modal.Focus()
 
@@ -103,6 +114,11 @@ func newModel() model {
 	editor.SetValue("Add reusable TextArea component\n\nEmits SubmitMsg on ctrl+s; edits multi-line text.")
 	editor.Focus()
 
+	prompt := component.NewPrompt("gallery-prompt", "Changelist name", "e.g. feature-x", th, keys)
+	prompt.SetOptions("Existing changelists:", []string{"feature-x", "hotfix", "docs"})
+	prompt.SetValue("feature-")
+	prompt.Focus()
+
 	return model{
 		keys: keys,
 		demos: []demo{
@@ -111,10 +127,12 @@ func newModel() model {
 			{"Table (log)", table},
 			{"StatusBar", bar},
 			{"Panel + List", panel},
+			{"Views (tabs)", viewsPanel},
 			{"Modal", modal},
 			{"Toast", toast},
 			{"Menu", menu},
 			{"TextArea", editor},
+			{"Prompt (pick)", prompt},
 		},
 	}
 }
