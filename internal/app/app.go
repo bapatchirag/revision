@@ -1061,7 +1061,7 @@ func (m *Model) fileDetail() string {
 	case strings.TrimSpace(m.diffText) == "":
 		return strings.Join(append(head, "(no changes to display)"), "\n")
 	default:
-		return strings.Join(head, "\n") + "\n" + m.diffText
+		return strings.Join(head, "\n") + "\n" + colorizeDiff(m.theme, m.diffText)
 	}
 }
 

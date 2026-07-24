@@ -15,6 +15,7 @@ import (
 
 	"github.com/bapatchirag/revision/internal/svn"
 	uimsg "github.com/bapatchirag/revision/internal/tui/msg"
+	"github.com/bapatchirag/revision/internal/tui/theme"
 )
 
 func TestMain(m *testing.M) {
@@ -152,6 +153,43 @@ func TestDiffWithTabsDoesNotOverflowWidth(t *testing.T) {
 	for i, line := range strings.Split(m.View(), "\n") {
 		if w := ansi.StringWidth(line); w != 80 {
 			t.Errorf("line %d width = %d, want 80: %q", i, w, stripANSI(line))
+		}
+	}
+}
+
+func TestColorizeDiff(t *testing.T) {
+	// Emit ANSI so the styling is observable, then restore the Ascii profile the
+	// rest of the suite relies on.
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	diff := "Index: a.txt\n--- a.txt\t(revision 1)\n+++ a.txt\t(working copy)\n" +
+		"@@ -1,2 +1,2 @@\n context\n-old\n+new"
+	got := colorizeDiff(theme.Default(), diff)
+
+	// Coloring must only add styling, never alter the underlying text.
+	if plain := stripANSI(got); plain != diff {
+		t.Fatalf("colorize changed content:\n got: %q\nwant: %q", plain, diff)
+	}
+
+	// Metadata, hunk, add and delete lines are colored; context lines are not.
+	wantColored := map[string]bool{
+		"Index: a.txt":              true,
+		"--- a.txt\t(revision 1)":   true,
+		"+++ a.txt\t(working copy)": true,
+		"@@ -1,2 +1,2 @@":           true,
+		"-old":                      true,
+		"+new":                      true,
+		" context":                  false,
+	}
+	for _, ln := range strings.Split(got, "\n") {
+		plain := stripANSI(ln)
+		want, tracked := wantColored[plain]
+		if !tracked {
+			continue
+		}
+		if colored := ln != plain; colored != want {
+			t.Errorf("line %q colored=%v, want %v", plain, colored, want)
 		}
 	}
 }
