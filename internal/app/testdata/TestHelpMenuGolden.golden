@@ -1,24 +1,24 @@
 ╭─ [1] Status ─────────────────╮╭─ Main ───────────────────────────────────────╮
 │https://svn.example.com/repo/t││modified.go                                   │
 │r42                           ││state: modified (M)                           │
-│1 change(s)                   ││                                              │
-╰──────────────────────────────╯│Loading diff…                                 │
-╭─ [2] Files ───────╭─ Keybindings ────────────────────────╮                   │
-│>   M modified.go  │> Stage / unstage                space│                   │
-│                   │  Commit staged                      c│                   │
+│1 change(s)        ╭─ Keybindings ────────────────────────╮                   │
+╰───────────────────│> Stage / unstage                space│                   │
+╭─ [2] ─ Changes ───│  Assign changelist                  n│                   │
+│>   M modified.go  │  Commit staged / changelist         c│                   │
+│                   │  Switch file view               [ / ]│                   │
+│                   │  Expand changelist              enter│                   │
 │                   │  Revert file                        r│                   │
 │                   │  Delete file                        d│                   │
 │                   │  Update working copy                u│                   │
 │                   │  Refresh                            R│                   │
-│                   │  Jump to panel                1 2 3 0│                   │
-╰───────────────────│  Cycle panels         tab / shift+tab│                   │
-╭─ [3] Log ─────────│  Move up / down                 k / j│                   │
-│  Rev    Author    │  Scroll main                    K / J│                   │
+╰───────────────────│  Jump to panel                1 2 3 0│                   │
+╭─ [3] Log ─────────│  Cycle panels         tab / shift+tab│                   │
+│  Rev    Author    │  Move up / down                 k / j│                   │
+│                   │  Scroll main                    K / J│                   │
 │                   │  Toggle help                        ?│                   │
 │                   │  Quit                               q│                   │
 │                   ╰──────────────────────────────────────╯                   │
 │                              ││                                              │
 │                              ││                                              │
-│                              ││                                              │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-space stage · c commit · r revert · d delete · u update · ? help · q quit       
+space stage · n changelist · c commit · r revert · d delete · ? help            

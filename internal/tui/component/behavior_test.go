@@ -376,3 +376,135 @@ func TestViewsRendersContentWithoutStrip(t *testing.T) {
 		t.Errorf("expected depth 1 after push, got %d", vs.Depth())
 	}
 }
+
+func TestViewsLocksSwitchWhileDrilled(t *testing.T) {
+	vs, _, _ := newStringViews()
+	sub := component.NewList[string]("detail", func(s string) string { return s }, testTheme(), testKeys())
+	sub.SetItems([]string{"d1"})
+	vs.Push(sub)
+
+	// While drilled in, [ / ] must not switch the active view.
+	if cmd := vs.Update(runes("]")); cmd != nil {
+		t.Error("] should be inert while drilled into a sub-view")
+	}
+	if cmd := vs.Update(runes("[")); cmd != nil {
+		t.Error("[ should be inert while drilled into a sub-view")
+	}
+	if vs.ActiveIndex() != 0 {
+		t.Errorf("active view changed while drilled: %d", vs.ActiveIndex())
+	}
+	// esc still pops out, and then switching works again.
+	mustCmd(t, vs.Update(keyEsc()))
+	if vs.Depth() != 0 {
+		t.Fatalf("esc should pop the sub-view, depth = %d", vs.Depth())
+	}
+	if cmd := vs.Update(runes("]")); cmd == nil {
+		t.Error("] should switch again once popped back to the base view")
+	}
+}
+
+func TestViewsCrumbTitle(t *testing.T) {
+	vs, _, _ := newStringViews()
+	if vs.CrumbTitle() != "" {
+		t.Errorf("base view should have no crumb title, got %q", vs.CrumbTitle())
+	}
+	sub := component.NewList[string]("detail", func(s string) string { return s }, testTheme(), testKeys())
+	sub.SetItems([]string{"d1"})
+	vs.PushTitled("feature-x", sub)
+	if vs.CrumbTitle() != "feature-x" {
+		t.Errorf("drilled crumb title = %q, want feature-x", vs.CrumbTitle())
+	}
+	mustCmd(t, vs.Update(keyEsc()))
+	if vs.CrumbTitle() != "" {
+		t.Errorf("crumb title should clear after popping, got %q", vs.CrumbTitle())
+	}
+}
+
+func TestPromptEmitsSubmitAndDismiss(t *testing.T) {
+	p := component.NewPrompt("changelist", "Changelist name", "e.g. feature-x", testTheme(), testKeys())
+	p.Focus()
+	p.Update(runes("feature-x"))
+
+	submit := mustCmd(t, p.Update(keyEnter()))
+	sub, ok := submit.(msg.SubmitMsg)
+	if !ok {
+		t.Fatalf("expected SubmitMsg, got %T", submit)
+	}
+	if sub.ID != "changelist" || sub.Value != "feature-x" {
+		t.Errorf("got %+v, want {changelist feature-x}", sub)
+	}
+
+	dismiss := mustCmd(t, p.Update(keyEsc()))
+	if d, ok := dismiss.(msg.DismissMsg); !ok || d.ID != "changelist" {
+		t.Errorf("expected DismissMsg{changelist}, got %#v", dismiss)
+	}
+}
+
+func TestPromptTabTogglesListAndScrolls(t *testing.T) {
+	p := component.NewPrompt("changelist", "Changelist name", "", testTheme(), testKeys())
+	p.SetOptions("Existing:", []string{"alpha", "beta"})
+	p.Focus()
+
+	// In the input field, up/down are inert — they only scroll the list.
+	p.Update(keyDown())
+	if p.Value() != "" {
+		t.Errorf("up/down should be inert in the input field, value = %q", p.Value())
+	}
+	// Tab moves focus into the list and highlights the first option.
+	p.Update(keyTab())
+	if p.Value() != "alpha" {
+		t.Errorf("tab should enter the list and pick the first option, value = %q", p.Value())
+	}
+	// Down/up scroll the list.
+	p.Update(keyDown())
+	if p.Value() != "beta" {
+		t.Errorf("down should scroll to the next option, value = %q", p.Value())
+	}
+	p.Update(keyUp())
+	if p.Value() != "alpha" {
+		t.Errorf("up should scroll back, value = %q", p.Value())
+	}
+	// Tab returns to the input field, where typing edits the value again.
+	p.Update(keyTab())
+	p.Update(runes("!"))
+	if p.Value() != "alpha!" {
+		t.Errorf("tab should return to the input field for editing, value = %q", p.Value())
+	}
+	// Enter submits the current value.
+	submit := mustCmd(t, p.Update(keyEnter()))
+	if sub, ok := submit.(msg.SubmitMsg); !ok || sub.Value != "alpha!" {
+		t.Errorf("expected SubmitMsg{alpha!}, got %#v", submit)
+	}
+}
+
+func TestPromptTabInertWithoutOptions(t *testing.T) {
+	p := component.NewPrompt("changelist", "Changelist name", "", testTheme(), testKeys())
+	p.Focus()
+	p.Update(runes("feat"))
+	// With no options, tab does nothing and typing continues to edit.
+	p.Update(keyTab())
+	p.Update(runes("ure"))
+	if p.Value() != "feature" {
+		t.Errorf("tab should be inert without options, value = %q", p.Value())
+	}
+}
+
+func TestPromptTypesNavLettersLiterally(t *testing.T) {
+	p := component.NewPrompt("changelist", "Changelist name", "", testTheme(), testKeys())
+	p.Focus()
+	// j/k/y/n are literal text in the input, not navigation/confirm keys.
+	p.Update(runes("jkyn"))
+	if p.Value() != "jkyn" {
+		t.Errorf("value = %q, want jkyn (nav letters should be literal)", p.Value())
+	}
+}
+
+func TestPromptIgnoresInputWhenBlurred(t *testing.T) {
+	p := component.NewPrompt("changelist", "Changelist name", "", testTheme(), testKeys())
+	if cmd := p.Update(runes("x")); cmd != nil {
+		t.Error("a blurred prompt should ignore key input")
+	}
+	if p.Value() != "" {
+		t.Errorf("blurred prompt captured input: %q", p.Value())
+	}
+}

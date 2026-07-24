@@ -162,3 +162,14 @@ func TestTeatestViewsSwitch(t *testing.T) {
 	// After ] the Staged view is active (border tab) and shows its item.
 	assertContains(t, finalOutput(t, tm), "Staged", "bravo")
 }
+
+func TestTeatestPromptTypesAndPicks(t *testing.T) {
+	p := component.NewPrompt("changelist", "Changelist name", "e.g. feature-x", testTheme(), testKeys())
+	p.SetOptions("Existing changelists:", []string{"feature-x", "hotfix"})
+	p.SetSize(34, 0)
+	p.Focus()
+
+	tm := teatest.NewTestModel(t, asModel(p), teatest.WithInitialTermSize(44, 12))
+	tm.Send(runes("docs"))
+	assertContains(t, finalOutput(t, tm), "Changelist name", "Existing changelists:", "feature-x", "docs")
+}

@@ -170,3 +170,49 @@ func TestGoldenViewsDrilled(t *testing.T) {
 	vs.Push(sub)
 	golden.RequireEqual(t, []byte(p.View()))
 }
+
+func TestGoldenViewsDrilledTitled(t *testing.T) {
+	base := component.NewList[string]("files", func(s string) string { return s }, testTheme(), testKeys())
+	base.SetItems([]string{"feature-x (2)", "(staged) (1)"})
+	vs := component.NewViews("files-views", []component.View{
+		{Name: "Changes", Content: base},
+		{Name: "Changelists", Content: base},
+	}, testTheme(), testKeys())
+	p := component.NewPanel("Files", 2, vs, testTheme())
+	p.SetSize(34, 7)
+	p.Focus()
+	// Drill into a titled sub-view: the Panel border shows just that title in
+	// place of the tabs (no chevron).
+	sub := component.NewList[string]("cl-files", func(s string) string { return s }, testTheme(), testKeys())
+	sub.SetItems([]string{"M app.go", "A views.go"})
+	vs.PushTitled("feature-x", sub)
+	golden.RequireEqual(t, []byte(p.View()))
+}
+
+func TestGoldenPrompt(t *testing.T) {
+	p := component.NewPrompt("changelist", "Changelist name", "e.g. feature-x", testTheme(), testKeys())
+	p.SetOptions("Existing changelists:", []string{"feature-x", "hotfix"})
+	p.SetValue("feat")
+	p.SetSize(40, 0)
+	p.Focus()
+	golden.RequireEqual(t, []byte(p.View()))
+}
+
+func TestGoldenPromptNoOptions(t *testing.T) {
+	p := component.NewPrompt("changelist", "Changelist name", "e.g. feature-x", testTheme(), testKeys())
+	p.SetSize(40, 0)
+	p.Focus()
+	golden.RequireEqual(t, []byte(p.View()))
+}
+
+func TestGoldenPromptListFocused(t *testing.T) {
+	p := component.NewPrompt("changelist", "Changelist name", "e.g. feature-x", testTheme(), testKeys())
+	p.SetOptions("Existing changelists:", []string{"feature-x", "hotfix"})
+	p.SetSize(40, 0)
+	p.Focus()
+	// Tab into the list, then scroll to the second option; the input mirrors the
+	// highlighted option and the hint switches to the list-mode variant.
+	p.Update(keyTab())
+	p.Update(keyDown())
+	golden.RequireEqual(t, []byte(p.View()))
+}

@@ -32,6 +32,7 @@ type Views struct {
 	id      string
 	views   []View
 	stacks  [][]tui.Component // per-view drill stacks of unnamed sub-views
+	titles  [][]string        // per-view titles for each pushed sub-view
 	active  int
 	width   int
 	height  int
@@ -54,6 +55,7 @@ func NewViews(id string, views []View, th theme.Theme, keys keymap.KeyMap) *View
 		id:     id,
 		views:  views,
 		stacks: make([][]tui.Component, len(views)),
+		titles: make([][]string, len(views)),
 		theme:  th,
 		keys:   keys,
 	}
@@ -74,7 +76,8 @@ func (v *Views) Init() tea.Cmd {
 
 // Update, while focused, consumes the view-switch keys ([ / ]) and the pop key
 // (esc, when drilled in); every other message is forwarded to the component on
-// top so it can act as usual.
+// top so it can act as usual. View switching is locked while drilled into a
+// sub-view — esc back out first.
 func (v *Views) Update(m tea.Msg) tea.Cmd {
 	if !v.focused || len(v.views) == 0 {
 		return nil
@@ -82,9 +85,15 @@ func (v *Views) Update(m tea.Msg) tea.Cmd {
 	if km, ok := m.(tea.KeyMsg); ok {
 		switch {
 		case key.Matches(km, v.keys.NextView):
-			return v.switchView(v.active + 1)
+			if v.Depth() == 0 {
+				return v.switchView(v.active + 1)
+			}
+			return nil
 		case key.Matches(km, v.keys.PrevView):
-			return v.switchView(v.active - 1)
+			if v.Depth() == 0 {
+				return v.switchView(v.active - 1)
+			}
+			return nil
 		case key.Matches(km, v.keys.Back):
 			if v.Depth() > 0 {
 				return v.Pop()
@@ -143,12 +152,18 @@ func (v *Views) Depth() int {
 
 // Push drills the active view into an unnamed sub-view (a detail cascade),
 // focusing and sizing it, and returns the sub-view's Init command.
-func (v *Views) Push(sub tui.Component) tea.Cmd {
+func (v *Views) Push(sub tui.Component) tea.Cmd { return v.PushTitled("", sub) }
+
+// PushTitled drills the active view into a sub-view carrying a title, which the
+// host Panel can inlay into its border (see CrumbTitle) in place of the tabs
+// while drilled in. An empty title keeps the breadcrumb-chevron rendering.
+func (v *Views) PushTitled(title string, sub tui.Component) tea.Cmd {
 	if len(v.views) == 0 || sub == nil {
 		return nil
 	}
 	v.blurTop()
 	v.stacks[v.active] = append(v.stacks[v.active], sub)
+	v.titles[v.active] = append(v.titles[v.active], title)
 	v.focusTop()
 	v.sizeTop()
 	return sub.Init()
@@ -163,10 +178,25 @@ func (v *Views) Pop() tea.Cmd {
 	}
 	v.blurTop()
 	v.stacks[v.active] = st[:len(st)-1]
+	v.titles[v.active] = v.titles[v.active][:len(v.titles[v.active])-1]
 	v.focusTop()
 	v.sizeTop()
 	id, depth := v.id, v.Depth()
 	return func() tea.Msg { return msg.SubViewPoppedMsg{ID: id, Depth: depth} }
+}
+
+// CrumbTitle returns the title of the active view's deepest pushed sub-view, or
+// "" at the base view (or when the sub-view was pushed untitled). The host Panel
+// uses it to label a drilled-in panel.
+func (v *Views) CrumbTitle() string {
+	if len(v.views) == 0 {
+		return ""
+	}
+	t := v.titles[v.active]
+	if len(t) == 0 {
+		return ""
+	}
+	return t[len(t)-1]
 }
 
 // SetSize stores the container size and sizes the active component, reserving a

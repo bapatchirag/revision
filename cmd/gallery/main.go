@@ -114,6 +114,11 @@ func newModel() model {
 	editor.SetValue("Add reusable TextArea component\n\nEmits SubmitMsg on ctrl+s; edits multi-line text.")
 	editor.Focus()
 
+	prompt := component.NewPrompt("gallery-prompt", "Changelist name", "e.g. feature-x", th, keys)
+	prompt.SetOptions("Existing changelists:", []string{"feature-x", "hotfix", "docs"})
+	prompt.SetValue("feature-")
+	prompt.Focus()
+
 	return model{
 		keys: keys,
 		demos: []demo{
@@ -127,6 +132,7 @@ func newModel() model {
 			{"Toast", toast},
 			{"Menu", menu},
 			{"TextArea", editor},
+			{"Prompt (pick)", prompt},
 		},
 	}
 }
