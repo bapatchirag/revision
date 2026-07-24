@@ -339,6 +339,177 @@ func TestSpaceIgnoresIgnoredFile(t *testing.T) {
 	}
 }
 
+// selectDirRow parks the Files-panel cursor on the tree row for the named
+// directory segment, failing the test when no such directory row exists.
+func selectDirRow(t *testing.T, m *Model, name string) {
+	t.Helper()
+	for i, n := range m.files.Items() {
+		if n.Item == nil && n.Name == name {
+			m.files.SetIndex(i)
+			return
+		}
+	}
+	t.Fatalf("no directory row named %q in the file tree", name)
+}
+
+func TestSpaceStagesDirectory(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "src/b.go", State: svn.StateModified},
+		{Path: "readme.md", State: svn.StateModified},
+	})
+	// The cursor opens on the first file; move it onto the src/ directory row.
+	selectDirRow(t, m, "src")
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace}); cmd == nil {
+		t.Error("expected a stage command when space is pressed on a directory row")
+	}
+}
+
+func TestSpaceStagesRootDirectory(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "readme.md", State: svn.StateModified},
+	})
+	m.files.SetIndex(0) // the synthetic "/" root row covers the whole tree
+	root, ok := m.files.Selected()
+	if !ok || root.Path != fileTreeRoot {
+		t.Fatalf("expected cursor on the / root row, got %+v (ok=%v)", root, ok)
+	}
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace}); cmd == nil {
+		t.Error("expected a stage command when space is pressed on the root row")
+	}
+	if acts := directoryStageActions(root, m.fileItems); len(acts) != 2 {
+		t.Errorf("root should stage all 2 files, got %d: %+v", len(acts), acts)
+	}
+}
+
+func TestSpaceOnFullyStagedDirectoryUnstages(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified, Changelist: stagedChangelist},
+		{Path: "src/b.go", State: svn.StateModified, Changelist: stagedChangelist},
+	})
+	selectDirRow(t, m, "src")
+	// Everything under src/ is already staged, so pressing space again unstages
+	// the whole subtree.
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace}); cmd == nil {
+		t.Error("expected an unstage command when a fully staged directory is toggled")
+	}
+	acts := directoryUnstageActions(fileNode{Name: "src", Path: "src"}, m.fileItems)
+	if len(acts) != 2 {
+		t.Fatalf("expected 2 unstage actions under src/, got %d: %+v", len(acts), acts)
+	}
+	for _, a := range acts {
+		if a.stage || a.add {
+			t.Errorf("an unstage action should neither stage nor add, got %+v", a)
+		}
+	}
+}
+
+func TestSpaceOnDirectoryInNamedChangelistsRemovesThem(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified, Changelist: "feature"},
+		{Path: "src/b.go", State: svn.StateModified, Changelist: "bugfix"},
+	})
+	selectDirRow(t, m, "src")
+	// Every file under src/ already belongs to a named changelist; nothing is left
+	// to stage, so space removes them all from their changelists.
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace}); cmd == nil {
+		t.Error("expected a command removing named-changelist files under the directory")
+	}
+	acts := directoryUnstageActions(fileNode{Name: "src", Path: "src"}, m.fileItems)
+	if len(acts) != 2 {
+		t.Fatalf("expected 2 removals under src/, got %d: %+v", len(acts), acts)
+	}
+	for _, a := range acts {
+		if a.stage || a.add {
+			t.Errorf("a removal should neither stage nor add, got %+v", a)
+		}
+	}
+}
+
+func TestSpaceOnDirectoryWithNothingToToggle(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		// An ignored file can be neither staged nor removed from a changelist, so the
+		// directory toggle has nothing to do.
+		{Path: "src/build.log", State: svn.StateIgnored},
+	})
+	selectDirRow(t, m, "src")
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace}); cmd != nil {
+		t.Error("a directory with only ignored files should produce no command")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "nothing to stage or unstage under src/") {
+		t.Errorf("expected a nothing-to-toggle toast, got:\n%s", view)
+	}
+}
+
+func TestDirectoryStageActionsSelectsStageableFiles(t *testing.T) {
+	items := []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "src/new.txt", State: svn.StateUnversioned},
+		{Path: "src/staged.go", State: svn.StateModified, Changelist: stagedChangelist},
+		{Path: "src/named.go", State: svn.StateModified, Changelist: "feature"},
+		{Path: "src/build.log", State: svn.StateIgnored},
+		{Path: "docs/readme.md", State: svn.StateModified},
+	}
+	acts := directoryStageActions(fileNode{Name: "src", Path: "src"}, items)
+
+	byPath := map[string]stageAction{}
+	for _, a := range acts {
+		byPath[a.path] = a
+	}
+	if len(acts) != 2 {
+		t.Fatalf("expected 2 stage actions under src/, got %d: %+v", len(acts), acts)
+	}
+	if a, ok := byPath["src/a.go"]; !ok || a.add || !a.stage {
+		t.Errorf("src/a.go: got %+v (ok=%v), want a plain stage", a, ok)
+	}
+	if a, ok := byPath["src/new.txt"]; !ok || !a.add || !a.stage {
+		t.Errorf("src/new.txt: got %+v (ok=%v), want add+stage", a, ok)
+	}
+	if _, ok := byPath["src/staged.go"]; ok {
+		t.Error("an already-staged file should be skipped")
+	}
+	if _, ok := byPath["src/named.go"]; ok {
+		t.Error("a file in a named changelist should be skipped")
+	}
+	if _, ok := byPath["src/build.log"]; ok {
+		t.Error("an ignored file should be skipped")
+	}
+	if _, ok := byPath["docs/readme.md"]; ok {
+		t.Error("a file outside src/ should be excluded")
+	}
+}
+
+func TestDirectoryUnstageActionsSelectsChangelistFiles(t *testing.T) {
+	items := []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified, Changelist: stagedChangelist},
+		{Path: "src/b.go", State: svn.StateModified},
+		{Path: "src/named.go", State: svn.StateModified, Changelist: "feature"},
+		{Path: "docs/c.go", State: svn.StateModified, Changelist: stagedChangelist},
+	}
+	acts := directoryUnstageActions(fileNode{Name: "src", Path: "src"}, items)
+
+	byPath := map[string]stageAction{}
+	for _, a := range acts {
+		byPath[a.path] = a
+	}
+	if len(acts) != 2 {
+		t.Fatalf("expected 2 unstage actions under src/, got %d: %+v", len(acts), acts)
+	}
+	if a, ok := byPath["src/a.go"]; !ok || a.stage || a.add {
+		t.Errorf("src/a.go (staged): got %+v (ok=%v), want a plain unstage", a, ok)
+	}
+	if a, ok := byPath["src/named.go"]; !ok || a.stage || a.add {
+		t.Errorf("src/named.go (named changelist): got %+v (ok=%v), want a plain unstage", a, ok)
+	}
+	if _, ok := byPath["src/b.go"]; ok {
+		t.Error("a file in no changelist has nothing to remove and should be skipped")
+	}
+	if _, ok := byPath["docs/c.go"]; ok {
+		t.Error("a file outside src/ should be excluded")
+	}
+}
+
 func TestStagedFileShowsMarker(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "staged.go", State: svn.StateModified, Changelist: "revision:staged"},
@@ -587,9 +758,79 @@ func TestModalConfirmGolden(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "internal/app/app.go", State: svn.StateModified},
 	})
+	// The cursor opens on the app.go leaf (the tree skips the / root and the
+	// internal/ and app/ directory rows), so delete targets the file directly.
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
 	m = next.(*Model)
 	golden.RequireEqual(t, []byte(m.View()))
+}
+
+func TestChangesTreeShowsDirectoryTree(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "internal/app/app.go", State: svn.StateModified},
+		{Path: "internal/svn/client.go", State: svn.StateModified},
+		{Path: "README.md", State: svn.StateModified},
+	})
+	// Inspect the built tree rows directly, independent of the panel's visible
+	// window: every path segment is its own row and files are basenames.
+	var names []string
+	for _, n := range m.files.Items() {
+		names = append(names, n.Name)
+		if n.Item != nil && strings.Contains(n.Name, "/") {
+			t.Errorf("file leaf %q should be a basename, not a nested path", n.Name)
+		}
+	}
+	for _, want := range []string{"/", "internal", "app", "svn", "app.go", "client.go", "README.md"} {
+		found := false
+		for _, name := range names {
+			if name == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("tree rows missing %q, got: %v", want, names)
+		}
+	}
+}
+
+func TestEnterCollapsesDirectory(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "internal/app/app.go", State: svn.StateModified},
+		{Path: "internal/svn/client.go", State: svn.StateModified},
+	})
+	if view := stripANSI(m.View()); !strings.Contains(view, "app.go") {
+		t.Fatalf("expected file leaves visible before collapse, got:\n%s", view)
+	}
+
+	// The cursor opens on the first file; move it onto the internal/ directory row.
+	for i, n := range m.files.Items() {
+		if n.Name == "internal" {
+			m.files.SetIndex(i)
+			break
+		}
+	}
+
+	// Enter emits an ActivatedMsg the model turns into a collapse toggle.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected an ActivatedMsg command from enter on a directory")
+	}
+	act, ok := cmd().(uimsg.ActivatedMsg)
+	if !ok {
+		t.Fatalf("expected ActivatedMsg, got %T", cmd())
+	}
+	next, _ := m.Update(act)
+	m = next.(*Model)
+
+	// Collapsing internal/ hides its descendants but keeps the directory row.
+	view := stripANSI(m.View())
+	if strings.Contains(view, "app.go") || strings.Contains(view, "client.go") {
+		t.Errorf("collapsing internal/ should hide its descendants, got:\n%s", view)
+	}
+	if !strings.Contains(view, "internal/") {
+		t.Errorf("the collapsed directory row should remain, got:\n%s", view)
+	}
 }
 
 func TestHelpMenuOpensAndCloses(t *testing.T) {
@@ -777,6 +1018,44 @@ func TestAssignChangelistAllowsStagedFile(t *testing.T) {
 	}
 }
 
+func TestAssignChangelistNamesAllStagedFiles(t *testing.T) {
+	// Naming a changelist while several files are staged moves the whole staged
+	// set as a unit, not just the highlighted file; an unstaged file is left out.
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "a.go", State: svn.StateModified, Changelist: "revision:staged"},
+		{Path: "b.go", State: svn.StateModified, Changelist: "revision:staged"},
+		{Path: "c.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = next.(*Model)
+	if !m.naming {
+		t.Fatal("n should open the changelist-name prompt when files are staged")
+	}
+	got := map[string]bool{}
+	for _, tgt := range m.nameTargets {
+		got[tgt.path] = true
+	}
+	if len(m.nameTargets) != 2 || !got["a.go"] || !got["b.go"] {
+		t.Errorf("nameTargets = %+v, want exactly the staged files a.go and b.go", m.nameTargets)
+	}
+}
+
+func TestAssignChangelistFallsBackToSelectedFile(t *testing.T) {
+	// With nothing staged, naming still targets just the selected file so the
+	// single-file workflow keeps working.
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "lone.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = next.(*Model)
+	if !m.naming {
+		t.Fatal("n should open the prompt for the selected file when nothing is staged")
+	}
+	if len(m.nameTargets) != 1 || m.nameTargets[0].path != "lone.go" {
+		t.Errorf("nameTargets = %+v, want just lone.go", m.nameTargets)
+	}
+}
+
 func TestAssignChangelistOffersExistingNames(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "loose.go", State: svn.StateModified},
@@ -867,6 +1146,66 @@ func TestChangelistDrillExpandsAndCollapses(t *testing.T) {
 	}
 	if m.drilledCL != "" {
 		t.Error("the drilled changelist should be cleared on collapse")
+	}
+}
+
+func TestChangelistDrillShowsTree(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "internal/app/app.go", State: svn.StateModified, Changelist: "feature"},
+		{Path: "internal/svn/client.go", State: svn.StateModified, Changelist: "feature"},
+	})
+	// Switch to Changelists and drill into "feature".
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	m = next.(*Model)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected an ActivatedMsg from the changelists list")
+	}
+	next, _ = m.Update(cmd())
+	m = next.(*Model)
+	if m.filesViews.Depth() == 0 {
+		t.Fatal("expected to be drilled into the changelist")
+	}
+
+	// The drill renders the same "/"-rooted tree: a root row, directory rows, and
+	// basename leaves (never a full nested path on one row).
+	var names []string
+	for _, n := range m.clFiles.Items() {
+		names = append(names, n.Name)
+		if n.Item != nil && strings.Contains(n.Name, "/") {
+			t.Errorf("drill file leaf %q should be a basename", n.Name)
+		}
+	}
+	for _, want := range []string{"/", "internal", "app", "svn", "app.go", "client.go"} {
+		found := false
+		for _, name := range names {
+			if name == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("drill tree missing %q, got: %v", want, names)
+		}
+	}
+
+	// Enter on the internal/ directory row collapses it, hiding its descendants.
+	for i, n := range m.clFiles.Items() {
+		if n.Name == "internal" {
+			m.clFiles.SetIndex(i)
+			break
+		}
+	}
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected an ActivatedMsg from enter on a drill directory")
+	}
+	next, _ = m.Update(cmd())
+	m = next.(*Model)
+	for _, n := range m.clFiles.Items() {
+		if n.Name == "app.go" || n.Name == "client.go" {
+			t.Errorf("collapsing internal/ in the drill should hide its files, got: %v", m.clFiles.Items())
+		}
 	}
 }
 

@@ -5,8 +5,8 @@
 │━━━━━━━━━━━━━━━━━━━│  Assign changelist                  n│                   │
 ╰───────────────────│  Commit staged / changelist         c│                   │
 ╭─ [2] ─ Changes ───│  Switch file view               [ / ]│                   │
-│>   M modified.go  │  Expand changelist              enter│                   │
-│                   │  Revert file                        r│                   │
+│  ▾ /              │  Expand changelist              enter│                   │
+│>     M modified.go│  Revert file                        r│                   │
 │                   │  Delete file                        d│                   │
 │                   │  Update working copy                u│                   │
 │                   │  Refresh                            R│                   │

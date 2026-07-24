@@ -5,10 +5,10 @@
 │━━━━━━━━━━━━━━━━━━━━━━━━━━────││                                              │
 ╰──────────────────────────────╯│                                              │
 ╭─ [2] ─ Changes ─── Changelist╮│                                              │
-│>   M internal/app/app.go     ││                                              │
-│                   ╭─ Delete file? ───────────────────────╮                   │
-│                   │internal/app/app.go will be scheduled │                   │
-│                   │for deletion (removed on the next     │                   │
+│  ▾ /                         ││                                              │
+│    ▾ internal/    ╭─ Delete file? ───────────────────────╮                   │
+│      ▾ app/       │internal/app/app.go will be scheduled │                   │
+│>         M app.go │for deletion (removed on the next     │                   │
 │                   │commit).                              │                   │
 │                   │                                      │                   │
 ╰───────────────────│enter confirm · esc cancel            │                   │

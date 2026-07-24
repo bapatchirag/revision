@@ -99,7 +99,7 @@ The footer shows the most common actions, and `?` opens the full keybindings men
 | `Home` / `End` | Jump to the start / end of the line in the Main panel |
 | `[` / `]` | Switch the Files panel between the Changes and Changelists views |
 | `space` | Stage / unstage the selected file (an untracked file is `svn add`ed first) |
-| `n` | Assign the selected file to a named changelist |
+| `n` | Assign the staged files — or just the selected file when nothing is staged — to a named changelist |
 | `enter` | Expand the selected changelist into its files |
 | `c` | Commit the staged files, or the selected changelist (opens the message editor) |
 | `r` | Revert the selected file (with confirmation) |
@@ -115,7 +115,7 @@ In the commit editor, `Ctrl+S` submits and `Esc` cancels. In the changelist-name
 
 SVN has no local staging index. `revision` emulates one using an SVN **changelist** named `revision:staged`: staging a file adds it to that changelist, unstaging removes it, and `c` commits the staged set as a unit. This maps a git-like stage/commit flow onto native SVN.
 
-You can also group work into **named changelists** with `n`: each maps to a real SVN changelist, appears in the Changelists view, and can be committed on its own. A file belongs to at most one changelist at a time — unstage it (`space`) before moving it elsewhere.
+You can also group work into **named changelists** with `n`: it moves the staged files (or just the selected file when nothing is staged) into a real SVN changelist, which appears in the Changelists view and can be committed on its own. A file belongs to at most one changelist at a time — unstage it (`space`) before moving it elsewhere.
 
 ## Authentication
 

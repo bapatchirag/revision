@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -122,6 +123,36 @@ func stageCmd(client *svn.Client, changelist string, act stageAction) tea.Cmd {
 	}
 }
 
+// stageManyCmd applies several stage actions in one pass off the UI goroutine:
+// for each action it optionally runs `svn add` first (for a previously
+// unversioned file), then adds the path to (stage) or removes it from (unstage)
+// the staged changelist. It stops on the first error. Success rides on a single
+// stagedMsg with no changelist name, so — like acting on a single file — it shows
+// no toast; the follow-up status reload makes the change visible.
+func stageManyCmd(client *svn.Client, changelist string, acts []stageAction) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		for _, act := range acts {
+			if act.add {
+				if err := client.Add(ctx, act.path); err != nil {
+					return stagedMsg{path: act.path, staged: act.stage, err: err}
+				}
+			}
+			var err error
+			if act.stage {
+				err = client.AddToChangelist(ctx, changelist, act.path)
+			} else {
+				err = client.RemoveFromChangelist(ctx, act.path)
+			}
+			if err != nil {
+				return stagedMsg{path: act.path, staged: act.stage, err: err}
+			}
+		}
+		return stagedMsg{staged: true}
+	}
+}
+
 // commitCmd commits the staged changelist off the UI goroutine.
 func commitCmd(client *svn.Client, message, changelist string) tea.Cmd {
 	return func() tea.Msg {
@@ -132,21 +163,36 @@ func commitCmd(client *svn.Client, message, changelist string) tea.Cmd {
 	}
 }
 
-// assignChangelistCmd adds path to the named changelist off the UI goroutine,
-// running `svn add` first for a previously unversioned file. The result rides on
-// stagedMsg (carrying the changelist name so the app can confirm the assignment).
-func assignChangelistCmd(client *svn.Client, name, path string, add bool) tea.Cmd {
+// assignChangelistCmd moves every target into the named changelist off the UI
+// goroutine, running `svn add` first for any previously unversioned file. The
+// result rides on stagedMsg (carrying the changelist name so the app can confirm
+// the assignment); the reported path is the sole file when one was named, or an
+// "N files" count when several were named together.
+func assignChangelistCmd(client *svn.Client, name string, targets []changelistTarget) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if add {
-			if err := client.Add(ctx, path); err != nil {
-				return stagedMsg{path: path, staged: true, changelist: name, err: err}
+		for _, t := range targets {
+			if t.add {
+				if err := client.Add(ctx, t.path); err != nil {
+					return stagedMsg{path: t.path, staged: true, changelist: name, err: err}
+				}
+			}
+			if err := client.AddToChangelist(ctx, name, t.path); err != nil {
+				return stagedMsg{path: t.path, staged: true, changelist: name, err: err}
 			}
 		}
-		err := client.AddToChangelist(ctx, name, path)
-		return stagedMsg{path: path, staged: true, changelist: name, err: err}
+		return stagedMsg{path: assignedLabel(targets), staged: true, changelist: name}
 	}
+}
+
+// assignedLabel summarizes which files an assign touched for the success toast:
+// the sole path when one file was named, otherwise an "N files" count.
+func assignedLabel(targets []changelistTarget) string {
+	if len(targets) == 1 {
+		return targets[0].path
+	}
+	return fmt.Sprintf("%d files", len(targets))
 }
 
 // revertCmd discards local modifications to path off the UI goroutine.

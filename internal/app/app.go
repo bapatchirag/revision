@@ -75,9 +75,9 @@ type Model struct {
 	keys  keymap.KeyMap
 
 	status      *component.Viewport
-	files       *component.List[svn.StatusItem]
+	files       *component.List[fileNode]
 	changelists *component.List[changelistGroup]
-	clFiles     *component.List[svn.StatusItem]
+	clFiles     *component.List[fileNode]
 	filesViews  *component.Views
 	log         *component.Table[svn.LogEntry]
 	main        *component.Viewport
@@ -91,14 +91,19 @@ type Model struct {
 	toast      *component.Toast
 	focus      *focus.Manager
 
+	fileItems        []svn.StatusItem
+	collapsedDirs    map[string]bool
+	filesInitialized bool
+	clItems          []svn.StatusItem
+	clCollapsedDirs  map[string]bool
+
 	source       mainSource
 	diffPath     string
 	diffText     string
 	logErr       error
 	editing      bool
 	naming       bool
-	namePath     string
-	nameAdd      bool
+	nameTargets  []changelistTarget
 	drilledCL    string
 	commitCL     string
 	confirming   bool
@@ -120,9 +125,9 @@ func New(client *svn.Client, info *svn.Info) *Model {
 	keys := keymap.Default()
 
 	status := component.NewViewport(th, keys)
-	files := component.NewList[svn.StatusItem]("files", renderStatusItem(th), th, keys)
+	files := component.NewList[fileNode]("files", renderFileNode(th), th, keys)
 	changelists := component.NewList[changelistGroup](changelistsListID, renderChangelistGroup(th), th, keys)
-	clFiles := component.NewList[svn.StatusItem](changelistFilesID, renderStatusItem(th), th, keys)
+	clFiles := component.NewList[fileNode](changelistFilesID, renderFileNode(th), th, keys)
 	filesViews := component.NewViews(filesViewsID, []component.View{
 		{Name: "Changes", Content: files},
 		{Name: "Changelists", Content: changelists},
@@ -138,27 +143,29 @@ func New(client *svn.Client, info *svn.Info) *Model {
 	}
 
 	m := &Model{
-		client:      client,
-		info:        info,
-		theme:       th,
-		keys:        keys,
-		status:      status,
-		files:       files,
-		changelists: changelists,
-		clFiles:     clFiles,
-		filesViews:  filesViews,
-		log:         logTable,
-		main:        main,
-		panels:      panels,
-		bar:         component.NewStatusBar(th),
-		editor:      component.NewTextArea(commitEditorID, "Commit message", "Enter a commit message…", th, keys),
-		nameEditor:  component.NewPrompt(changelistEditorID, "Changelist name", "e.g. feature-x", th, keys),
-		modal:       component.NewModal(confirmModalID, "", "", th, keys),
-		menu:        component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
-		toast:       component.NewToast(th),
-		source:      sourceFiles,
-		commitCL:    stagedChangelist,
-		loading:     true,
+		client:          client,
+		info:            info,
+		theme:           th,
+		keys:            keys,
+		status:          status,
+		files:           files,
+		changelists:     changelists,
+		clFiles:         clFiles,
+		filesViews:      filesViews,
+		log:             logTable,
+		main:            main,
+		panels:          panels,
+		bar:             component.NewStatusBar(th),
+		editor:          component.NewTextArea(commitEditorID, "Commit message", "Enter a commit message…", th, keys),
+		nameEditor:      component.NewPrompt(changelistEditorID, "Changelist name", "e.g. feature-x", th, keys),
+		modal:           component.NewModal(confirmModalID, "", "", th, keys),
+		menu:            component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
+		toast:           component.NewToast(th),
+		collapsedDirs:   map[string]bool{},
+		clCollapsedDirs: map[string]bool{},
+		source:          sourceFiles,
+		commitCL:        stagedChangelist,
+		loading:         true,
 	}
 	m.focus = focus.New(panels[panelStatus], panels[panelFiles], panels[panelLog], panels[panelMain])
 	m.focus.Focus(panelFiles)
@@ -197,7 +204,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.err = nil
 		m.diffPath, m.diffText = "", ""
-		m.files.SetItems(msg.items)
+		m.fileItems = msg.items
+		m.rebuildFileTree()
+		m.focusFirstFile()
 		m.changelists.SetItems(groupChangelists(msg.items))
 		m.syncDrill()
 		m.refreshChrome()
@@ -293,10 +302,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleSelection(msg)
 
 	case uimsg.ActivatedMsg:
-		// Enter on a changelist row drills into its files; enter on the help
-		// menu is inert (it is a read-only keybindings reference).
-		if msg.ID == changelistsListID {
+		// Enter on a changelist row drills into its files; enter on a directory in
+		// the Changes tree or a drilled-in changelist tree collapses/expands it;
+		// enter on the help menu is inert (a read-only keybindings reference).
+		switch msg.ID {
+		case changelistsListID:
 			return m, m.drillChangelist()
+		case "files":
+			return m, m.toggleCollapse()
+		case changelistFilesID:
+			return m, m.toggleClCollapse()
 		}
 		return m, nil
 
@@ -494,10 +509,16 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	return nil, false
 }
 
-// stageSelected toggles the staged state of the file under the current file
-// selection (the Changes view or a drilled-in changelist), returning the command
-// that performs the change (or nil when the selection is not stageable).
+// stageSelected acts on the current Files-panel selection: on a directory row it
+// toggles staging for every file beneath that directory (stage all, then unstage
+// all once everything stageable is staged), and on a file leaf it toggles that
+// file's staged state (the Changes view or a drilled-in changelist). It returns
+// the command that performs the change (or nil when the selection is not
+// stageable).
 func (m *Model) stageSelected() tea.Cmd {
+	if n, items, ok := m.selectedTreeNode(); ok && n.Item == nil {
+		return m.stageDirectory(n, items)
+	}
 	act, ok := m.stageTarget()
 	if !ok {
 		if it, sel := m.selectedFile(); sel {
@@ -506,6 +527,56 @@ func (m *Model) stageSelected() tea.Cmd {
 		return nil
 	}
 	return stageCmd(m.client, stagedChangelist, act)
+}
+
+// stageDirectory toggles staging for the files beneath the selected directory
+// row. While any file can still be staged it stages them all (adding unversioned
+// files first); once nothing is left to stage, a second press removes every file
+// under the directory from whatever changelist it belongs to — the staged bucket
+// or a named one — mirroring how space clears a single file's changelist. A
+// directory holding only clean or ignored files has nothing to do and warns
+// instead of running svn.
+func (m *Model) stageDirectory(n fileNode, items []svn.StatusItem) tea.Cmd {
+	if acts := directoryStageActions(n, items); len(acts) > 0 {
+		return stageManyCmd(m.client, stagedChangelist, acts)
+	}
+	if acts := directoryUnstageActions(n, items); len(acts) > 0 {
+		return stageManyCmd(m.client, stagedChangelist, acts)
+	}
+	m.showToast("nothing to stage or unstage under "+dirLabel(n), component.LevelWarning)
+	return nil
+}
+
+// directoryStageActions builds the stage actions that stage every stageable file
+// beneath a directory row: an unversioned file is added and staged, an
+// unassigned pending change is staged, and a file already staged or in a named
+// changelist is left as it is. items is the tree's source set.
+func directoryStageActions(n fileNode, items []svn.StatusItem) []stageAction {
+	var acts []stageAction
+	for _, it := range filesUnder(n, items) {
+		switch {
+		case it.State == svn.StateUnversioned:
+			acts = append(acts, stageAction{path: it.Path, add: true, stage: true})
+		case it.Changelist == "" && stageable(it.State):
+			acts = append(acts, stageAction{path: it.Path, stage: true})
+		}
+	}
+	return acts
+}
+
+// directoryUnstageActions builds the actions that remove every file beneath a
+// directory row from its changelist — the staged bucket or a named changelist
+// alike — so a directory-level toggle clears assignments the same way space does
+// for a single file. Files in no changelist have nothing to remove. items is the
+// tree's source set.
+func directoryUnstageActions(n fileNode, items []svn.StatusItem) []stageAction {
+	var acts []stageAction
+	for _, it := range filesUnder(n, items) {
+		if it.Changelist != "" {
+			acts = append(acts, stageAction{path: it.Path, stage: false})
+		}
+	}
+	return acts
 }
 
 // stageAction describes how a stage keypress should change one file.
@@ -519,6 +590,14 @@ type stageAction struct {
 type deleteAction struct {
 	path        string
 	unversioned bool // remove from disk (untracked) vs. svn delete (versioned)
+}
+
+// changelistTarget is one file an assign-to-changelist action moves into a named
+// changelist: its path plus whether it must be `svn add`ed first (an unversioned
+// file being named directly, without staging it beforehand).
+type changelistTarget struct {
+	path string
+	add  bool // svn add first (unversioned → versioned)
 }
 
 // stageTarget resolves what a stage action would do for the current file
@@ -546,13 +625,18 @@ func (m *Model) stageTarget() (stageAction, bool) {
 
 // drillChangelist expands the selected changelist into its file list as a
 // drill-down sub-view, labeling the panel with the changelist and tracking which
-// one is open so a status reload can keep it in sync.
+// one is open so a status reload can keep it in sync. The files render as the
+// same "/"-rooted tree as the Changes view, opening on the first file.
 func (m *Model) drillChangelist() tea.Cmd {
 	g, ok := m.changelists.Selected()
 	if !ok {
 		return nil
 	}
-	m.clFiles.SetItems(g.Items)
+	m.clItems = g.Items
+	m.rebuildClTree()
+	if idx := firstFileIndex(m.clFiles.Items()); idx >= 0 {
+		m.clFiles.SetIndex(idx)
+	}
 	m.drilledCL = g.Name
 	cmd := m.filesViews.PushTitled(g.Label(), m.clFiles)
 	m.updateBar()
@@ -574,21 +658,92 @@ func (m *Model) submitChangelist(name string) tea.Cmd {
 	}
 	m.naming = false
 	m.nameEditor.Blur()
-	return assignChangelistCmd(m.client, name, m.namePath, m.nameAdd)
+	return assignChangelistCmd(m.client, name, m.nameTargets)
 }
 
 // selectedFile returns the file the current Files-panel view points at: the
-// Changes list selection, or the selection within a drilled-in changelist. At
-// the Changelists overview (a group is selected, not a file) there is no single
-// file, so ok is false.
+// Changes tree selection (only when the cursor is on a file leaf, not a
+// directory row), or the selection within a drilled-in changelist. At the
+// Changelists overview (a group is selected) or on a directory row there is no
+// single file, so ok is false.
 func (m *Model) selectedFile() (svn.StatusItem, bool) {
 	if m.filesViewIsChangelists() {
 		if m.inChangelistDrill() {
-			return m.clFiles.Selected()
+			if n, ok := m.clFiles.Selected(); ok && n.Item != nil {
+				return *n.Item, true
+			}
 		}
 		return svn.StatusItem{}, false
 	}
-	return m.files.Selected()
+	if n, ok := m.files.Selected(); ok && n.Item != nil {
+		return *n.Item, true
+	}
+	return svn.StatusItem{}, false
+}
+
+// rebuildFileTree re-flattens the current status items into the Changes tree,
+// honoring the remembered per-directory collapse state. The List clamps the
+// cursor, so it stays in range as rows appear or disappear.
+func (m *Model) rebuildFileTree() {
+	m.files.SetItems(buildFileTree(m.fileItems, m.collapsedDirs))
+}
+
+// focusFirstFile parks the Changes-tree cursor on the first file leaf the first
+// time files appear, skipping the leading "/" root and directory rows so the
+// panel opens on an actionable file (as it did before the tree). Later reloads
+// leave the cursor where the user put it.
+func (m *Model) focusFirstFile() {
+	if m.filesInitialized {
+		return
+	}
+	if idx := firstFileIndex(m.files.Items()); idx >= 0 {
+		m.files.SetIndex(idx)
+		m.filesInitialized = true
+	}
+}
+
+// toggleCollapse expands or collapses the directory under the Changes-tree
+// cursor and rebuilds the tree. It is inert on a file leaf or while the Files
+// panel shows the Changelists view.
+func (m *Model) toggleCollapse() tea.Cmd {
+	if m.filesViewIsChangelists() {
+		return nil
+	}
+	n, ok := m.files.Selected()
+	if !ok || n.Item != nil {
+		return nil
+	}
+	if m.collapsedDirs[n.Path] {
+		delete(m.collapsedDirs, n.Path)
+	} else {
+		m.collapsedDirs[n.Path] = true
+	}
+	m.rebuildFileTree()
+	m.updateMain()
+	return nil
+}
+
+// rebuildClTree re-flattens the drilled-in changelist's items into its tree,
+// honoring the drill's own per-directory collapse state.
+func (m *Model) rebuildClTree() {
+	m.clFiles.SetItems(buildFileTree(m.clItems, m.clCollapsedDirs))
+}
+
+// toggleClCollapse expands or collapses the directory under the drilled-in
+// changelist tree's cursor and rebuilds it. It is inert on a file leaf.
+func (m *Model) toggleClCollapse() tea.Cmd {
+	n, ok := m.clFiles.Selected()
+	if !ok || n.Item != nil {
+		return nil
+	}
+	if m.clCollapsedDirs[n.Path] {
+		delete(m.clCollapsedDirs, n.Path)
+	} else {
+		m.clCollapsedDirs[n.Path] = true
+	}
+	m.rebuildClTree()
+	m.updateMain()
+	return nil
 }
 
 // filesViewIsChangelists reports whether the Files panel's active view is the
@@ -603,33 +758,51 @@ func (m *Model) inChangelistDrill() bool {
 	return m.filesViewIsChangelists() && m.filesViews.Depth() > 0
 }
 
-// assignChangelist opens the changelist-name prompt for the selected file, so it
-// can be added to a named changelist. A file already in a named changelist is
-// refused (one named changelist per file — unstage it first); files in the
-// anonymous staged/unstaged buckets may be moved into a named changelist. A
-// state that cannot be staged is refused too. The prompt lists the existing
+// assignChangelist opens the changelist-name prompt for the files that will move
+// into a named changelist. When any files are staged (in the anonymous staged
+// bucket) the whole staged set is named as a unit; otherwise it falls back to
+// the single selected file. In that fallback a lone selected file already in a
+// named changelist is refused (one named changelist per file — unstage it
+// first), as is a state that cannot be staged. The prompt lists the existing
 // named changelists to pick from.
 func (m *Model) assignChangelist() tea.Cmd {
-	it, ok := m.selectedFile()
-	if !ok {
-		return nil
-	}
-	if isNamedChangelist(it.Changelist) {
-		m.showToast(it.Path+" already in "+displayCL(it.Changelist)+" — unstage first (space)", component.LevelWarning)
-		return nil
-	}
-	if it.State != svn.StateUnversioned && !stageable(it.State) {
-		m.showToast("can't add "+it.Path+" to a changelist ("+it.State.Code()+")", component.LevelWarning)
-		return nil
+	targets := m.stagedTargets()
+	if len(targets) == 0 {
+		it, ok := m.selectedFile()
+		if !ok {
+			return nil
+		}
+		if isNamedChangelist(it.Changelist) {
+			m.showToast(it.Path+" already in "+displayCL(it.Changelist)+" — unstage first (space)", component.LevelWarning)
+			return nil
+		}
+		if it.State != svn.StateUnversioned && !stageable(it.State) {
+			m.showToast("can't add "+it.Path+" to a changelist ("+it.State.Code()+")", component.LevelWarning)
+			return nil
+		}
+		targets = []changelistTarget{{path: it.Path, add: it.State == svn.StateUnversioned}}
 	}
 	m.naming = true
-	m.namePath = it.Path
-	m.nameAdd = it.State == svn.StateUnversioned
+	m.nameTargets = targets
 	m.nameEditor.Reset()
 	m.nameEditor.SetOptions("Existing changelists:", m.namedChangelists())
 	m.nameEditor.Focus()
 	m.sizeNameEditor()
 	return nil
+}
+
+// stagedTargets collects every file currently in the anonymous staged bucket as
+// changelist targets, so naming a changelist moves the whole staged set as a
+// unit. Staged files are already versioned, so in practice none need an
+// `svn add` first.
+func (m *Model) stagedTargets() []changelistTarget {
+	var targets []changelistTarget
+	for _, it := range m.fileItems {
+		if it.Changelist == stagedChangelist {
+			targets = append(targets, changelistTarget{path: it.Path, add: it.State == svn.StateUnversioned})
+		}
+	}
+	return targets
 }
 
 // syncDrill refreshes a drilled-in changelist after a status reload: it
@@ -641,7 +814,8 @@ func (m *Model) syncDrill() {
 	}
 	for _, g := range m.changelists.Items() {
 		if g.Name == m.drilledCL {
-			m.clFiles.SetItems(g.Items)
+			m.clItems = g.Items
+			m.rebuildClTree()
 			return
 		}
 	}
@@ -699,7 +873,7 @@ func (m *Model) commitTarget() (cl, label string, ok bool) {
 // changelist.
 func (m *Model) countInChangelist(name string) int {
 	n := 0
-	for _, it := range m.files.Items() {
+	for _, it := range m.fileItems {
 		if it.Changelist == name {
 			n++
 		}
@@ -984,7 +1158,7 @@ func (m *Model) updateStatus() {
 	if m.info != nil {
 		lines = append(lines, m.info.URL, "r"+m.info.Revision)
 	}
-	lines = append(lines, fmt.Sprintf("%d change(s)", len(m.files.Items())))
+	lines = append(lines, fmt.Sprintf("%d change(s)", len(m.fileItems)))
 	m.status.SetContent(strings.Join(lines, "\n"))
 }
 
@@ -998,7 +1172,7 @@ func (m *Model) updateMain() {
 	case m.err != nil:
 		m.main.SetContent("Error: " + m.err.Error() + "\n\nPress R to retry.")
 		return
-	case m.loading && len(m.files.Items()) == 0:
+	case m.loading && len(m.fileItems) == 0:
 		m.main.SetContent("Loading working-copy status…")
 		return
 	}
@@ -1013,13 +1187,34 @@ func (m *Model) updateMain() {
 }
 
 // filesMain renders the Main content for the Files panel, which depends on its
-// active view: the Changelists overview shows a changelist summary, everything
-// else (the Changes view or a drilled-in changelist) shows the selected file.
+// active view: the Changelists overview shows a changelist summary, a directory
+// row in the Changes tree shows a directory summary, and everything else (a file
+// in the Changes tree or a drilled-in changelist) shows the selected file.
 func (m *Model) filesMain() string {
 	if m.filesViewIsChangelists() && !m.inChangelistDrill() {
 		return m.changelistDetail()
 	}
+	if n, items, ok := m.selectedTreeNode(); ok && n.Item == nil {
+		return m.directoryDetail(n, items)
+	}
 	return m.fileDetail()
+}
+
+// selectedTreeNode returns the tree row under the active Files-panel cursor —
+// from the Changes tree, or a drilled-in changelist tree — together with the
+// item set that tree was built from (used to count a directory's files). It
+// reports ok=false at the Changelists overview, where the selection is a
+// changelist group rather than a tree row.
+func (m *Model) selectedTreeNode() (fileNode, []svn.StatusItem, bool) {
+	if m.filesViewIsChangelists() {
+		if m.inChangelistDrill() {
+			n, ok := m.clFiles.Selected()
+			return n, m.clItems, ok
+		}
+		return fileNode{}, nil, false
+	}
+	n, ok := m.files.Selected()
+	return n, m.fileItems, ok
 }
 
 // filesShowDiff reports whether filesMain currently renders a unified diff — the
@@ -1058,6 +1253,18 @@ func (m *Model) changelistDetail() string {
 		lines = append(lines, fmt.Sprintf("  %s %s", it.State.Code(), it.Path))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// directoryDetail summarizes a selected directory row in a file tree: its path,
+// how many pending files sit beneath it (within items, the tree's source set),
+// and the collapse hint. The "/" root covers the whole set.
+func (m *Model) directoryDetail(n fileNode, items []svn.StatusItem) string {
+	count := len(filesUnder(n, items))
+	action := "enter collapse"
+	if n.Collapsed {
+		action = "enter expand"
+	}
+	return fmt.Sprintf("%s\n%d change(s) under this directory\n\n%s", dirLabel(n), count, action)
 }
 
 // fileDetail renders the selected file's diff, prefixed by its changelist when
