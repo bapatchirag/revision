@@ -63,6 +63,14 @@ func (l *List[T]) Items() []T { return l.items }
 // Index returns the cursor position.
 func (l *List[T]) Index() int { return l.cursor }
 
+// SetIndex moves the cursor to i, clamped into range, keeping the scroll offset
+// in sync. It is a no-op on an empty list.
+func (l *List[T]) SetIndex(i int) {
+	l.cursor = i
+	l.clampCursor()
+	l.clampOffset()
+}
+
 // Selected returns the item under the cursor and whether one exists.
 func (l *List[T]) Selected() (T, bool) {
 	if l.cursor >= 0 && l.cursor < len(l.items) {

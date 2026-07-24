@@ -587,9 +587,79 @@ func TestModalConfirmGolden(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "internal/app/app.go", State: svn.StateModified},
 	})
+	// The cursor opens on the app.go leaf (the tree skips the / root and the
+	// internal/ and app/ directory rows), so delete targets the file directly.
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
 	m = next.(*Model)
 	golden.RequireEqual(t, []byte(m.View()))
+}
+
+func TestChangesTreeShowsDirectoryTree(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "internal/app/app.go", State: svn.StateModified},
+		{Path: "internal/svn/client.go", State: svn.StateModified},
+		{Path: "README.md", State: svn.StateModified},
+	})
+	// Inspect the built tree rows directly, independent of the panel's visible
+	// window: every path segment is its own row and files are basenames.
+	var names []string
+	for _, n := range m.files.Items() {
+		names = append(names, n.Name)
+		if n.Item != nil && strings.Contains(n.Name, "/") {
+			t.Errorf("file leaf %q should be a basename, not a nested path", n.Name)
+		}
+	}
+	for _, want := range []string{"/", "internal", "app", "svn", "app.go", "client.go", "README.md"} {
+		found := false
+		for _, name := range names {
+			if name == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("tree rows missing %q, got: %v", want, names)
+		}
+	}
+}
+
+func TestEnterCollapsesDirectory(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "internal/app/app.go", State: svn.StateModified},
+		{Path: "internal/svn/client.go", State: svn.StateModified},
+	})
+	if view := stripANSI(m.View()); !strings.Contains(view, "app.go") {
+		t.Fatalf("expected file leaves visible before collapse, got:\n%s", view)
+	}
+
+	// The cursor opens on the first file; move it onto the internal/ directory row.
+	for i, n := range m.files.Items() {
+		if n.Name == "internal" {
+			m.files.SetIndex(i)
+			break
+		}
+	}
+
+	// Enter emits an ActivatedMsg the model turns into a collapse toggle.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected an ActivatedMsg command from enter on a directory")
+	}
+	act, ok := cmd().(uimsg.ActivatedMsg)
+	if !ok {
+		t.Fatalf("expected ActivatedMsg, got %T", cmd())
+	}
+	next, _ := m.Update(act)
+	m = next.(*Model)
+
+	// Collapsing internal/ hides its descendants but keeps the directory row.
+	view := stripANSI(m.View())
+	if strings.Contains(view, "app.go") || strings.Contains(view, "client.go") {
+		t.Errorf("collapsing internal/ should hide its descendants, got:\n%s", view)
+	}
+	if !strings.Contains(view, "internal/") {
+		t.Errorf("the collapsed directory row should remain, got:\n%s", view)
+	}
 }
 
 func TestHelpMenuOpensAndCloses(t *testing.T) {
@@ -867,6 +937,66 @@ func TestChangelistDrillExpandsAndCollapses(t *testing.T) {
 	}
 	if m.drilledCL != "" {
 		t.Error("the drilled changelist should be cleared on collapse")
+	}
+}
+
+func TestChangelistDrillShowsTree(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "internal/app/app.go", State: svn.StateModified, Changelist: "feature"},
+		{Path: "internal/svn/client.go", State: svn.StateModified, Changelist: "feature"},
+	})
+	// Switch to Changelists and drill into "feature".
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	m = next.(*Model)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected an ActivatedMsg from the changelists list")
+	}
+	next, _ = m.Update(cmd())
+	m = next.(*Model)
+	if m.filesViews.Depth() == 0 {
+		t.Fatal("expected to be drilled into the changelist")
+	}
+
+	// The drill renders the same "/"-rooted tree: a root row, directory rows, and
+	// basename leaves (never a full nested path on one row).
+	var names []string
+	for _, n := range m.clFiles.Items() {
+		names = append(names, n.Name)
+		if n.Item != nil && strings.Contains(n.Name, "/") {
+			t.Errorf("drill file leaf %q should be a basename", n.Name)
+		}
+	}
+	for _, want := range []string{"/", "internal", "app", "svn", "app.go", "client.go"} {
+		found := false
+		for _, name := range names {
+			if name == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("drill tree missing %q, got: %v", want, names)
+		}
+	}
+
+	// Enter on the internal/ directory row collapses it, hiding its descendants.
+	for i, n := range m.clFiles.Items() {
+		if n.Name == "internal" {
+			m.clFiles.SetIndex(i)
+			break
+		}
+	}
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected an ActivatedMsg from enter on a drill directory")
+	}
+	next, _ = m.Update(cmd())
+	m = next.(*Model)
+	for _, n := range m.clFiles.Items() {
+		if n.Name == "app.go" || n.Name == "client.go" {
+			t.Errorf("collapsing internal/ in the drill should hide its files, got: %v", m.clFiles.Items())
+		}
 	}
 }
 

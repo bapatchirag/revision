@@ -5,8 +5,8 @@
 │━━━━━━━━━━━━━━━━━━━━━━━━━━────││                                              │
 ╰──────────────────────────────╯│                                              │
 ╭─ [2] ─ Changes╭─ Commit message ─────────────────────────────╮               │
-│> ● M modified.│Fix status parsing                            │               │
-│               │                                              │               │
+│  ▾ /          │Fix status parsing                            │               │
+│>   ● M modifie│                                              │               │
 │               │                                              │               │
 │               │                                              │               │
 │               │                                              │               │
