@@ -95,6 +95,8 @@ The footer shows the most common actions, and `?` opens the full keybindings men
 | `↑`/`k`, `↓`/`j` | Move the selection up / down |
 | `g` / `G` | Jump to the top / bottom of a list |
 | `K` / `J` | Scroll the Main panel up / down a page |
+| `←`/`h`, `→`/`l` | Scroll the Main panel left / right (one column) |
+| `Home` / `End` | Jump to the start / end of the line in the Main panel |
 | `[` / `]` | Switch the Files panel between the Changes and Changelists views |
 | `space` | Stage / unstage the selected file (an untracked file is `svn add`ed first) |
 | `n` | Assign the selected file to a named changelist |

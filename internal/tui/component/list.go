@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/bapatchirag/revision/internal/tui"
 	"github.com/bapatchirag/revision/internal/tui/keymap"
@@ -17,16 +18,18 @@ import (
 // display strings by the injected render func, which keeps the component
 // domain-agnostic: it never needs to know what T is.
 type List[T any] struct {
-	id      string
-	items   []T
-	render  func(T) string
-	cursor  int
-	offset  int
-	width   int
-	height  int
-	focused bool
-	theme   theme.Theme
-	keys    keymap.KeyMap
+	id           string
+	items        []T
+	render       func(T) string
+	cursor       int
+	offset       int
+	xOffset      int
+	contentWidth int
+	width        int
+	height       int
+	focused      bool
+	theme        theme.Theme
+	keys         keymap.KeyMap
 }
 
 var (
@@ -48,8 +51,10 @@ func (l *List[T]) Init() tea.Cmd { return nil }
 // SetItems replaces the list contents, keeping the cursor in range.
 func (l *List[T]) SetItems(items []T) {
 	l.items = items
+	l.contentWidth = l.measureContentWidth()
 	l.clampCursor()
 	l.clampOffset()
+	l.clampXOffset()
 }
 
 // Items returns the current items.
@@ -71,6 +76,7 @@ func (l *List[T]) Selected() (T, bool) {
 func (l *List[T]) SetSize(width, height int) {
 	l.width, l.height = width, height
 	l.clampOffset()
+	l.clampXOffset()
 }
 
 // Focus implements tui.Focusable.
@@ -105,6 +111,14 @@ func (l *List[T]) Update(m tea.Msg) tea.Cmd {
 		l.cursor = 0
 	case key.Matches(km, l.keys.Bottom):
 		l.cursor = len(l.items) - 1
+	case key.Matches(km, l.keys.Left):
+		l.xOffset -= hScrollStep
+	case key.Matches(km, l.keys.Right):
+		l.xOffset += hScrollStep
+	case key.Matches(km, l.keys.LineStart):
+		l.xOffset = 0
+	case key.Matches(km, l.keys.LineEnd):
+		l.xOffset = l.contentWidth
 	case key.Matches(km, l.keys.Enter):
 		if _, ok := l.Selected(); ok {
 			id, idx := l.id, l.cursor
@@ -117,6 +131,7 @@ func (l *List[T]) Update(m tea.Msg) tea.Cmd {
 
 	l.clampCursor()
 	l.clampOffset()
+	l.clampXOffset()
 	if l.cursor != prev {
 		id, idx := l.id, l.cursor
 		return func() tea.Msg { return msg.SelectedMsg{ID: id, Index: idx} }
@@ -125,26 +140,45 @@ func (l *List[T]) Update(m tea.Msg) tea.Cmd {
 }
 
 // View renders the visible window of rows, marking the cursor while focused.
+// Vertical and horizontal scrollbars occupy the right column and bottom row
+// whenever the items overflow that axis.
 func (l *List[T]) View() string {
 	if len(l.items) == 0 {
 		return ""
 	}
+	innerW, innerH, vBar, hBar := scrollLayout(len(l.items), l.contentWidth, l.width, l.height, 0)
+
 	end := len(l.items)
-	if l.height > 0 && l.offset+l.height < end {
-		end = l.offset + l.height
+	if innerH > 0 && l.offset+innerH < end {
+		end = l.offset + innerH
 	}
 
 	sel := lipgloss.NewStyle().Foreground(l.theme.Selection).Bold(true)
-	lines := make([]string, 0, end-l.offset)
+	rows := make([]string, 0, end-l.offset)
 	for i := l.offset; i < end; i++ {
 		row := l.render(l.items[i])
 		if i == l.cursor && l.focused {
-			lines = append(lines, sel.Render("> ")+row)
+			row = sel.Render("> ") + row
 		} else {
-			lines = append(lines, "  "+row)
+			row = "  " + row
+		}
+		if vBar || hBar {
+			row = windowLine(row, l.xOffset, innerW)
+		}
+		rows = append(rows, row)
+	}
+	if hBar {
+		for len(rows) < innerH {
+			rows = append(rows, windowLine("", l.xOffset, innerW))
 		}
 	}
-	return strings.Join(lines, "\n")
+	if vBar {
+		appendVScrollbar(rows, len(l.items), l.offset)
+	}
+	if hBar {
+		rows = append(rows, horizontalBarRow(l.contentWidth, l.xOffset, innerW, vBar))
+	}
+	return strings.Join(rows, "\n")
 }
 
 func (l *List[T]) clampCursor() {
@@ -157,17 +191,18 @@ func (l *List[T]) clampCursor() {
 }
 
 func (l *List[T]) clampOffset() {
-	if l.height <= 0 {
+	_, innerH, _, _ := scrollLayout(len(l.items), l.contentWidth, l.width, l.height, 0)
+	if innerH <= 0 {
 		l.offset = 0
 		return
 	}
 	if l.cursor < l.offset {
 		l.offset = l.cursor
 	}
-	if l.cursor >= l.offset+l.height {
-		l.offset = l.cursor - l.height + 1
+	if l.cursor >= l.offset+innerH {
+		l.offset = l.cursor - innerH + 1
 	}
-	maxOff := len(l.items) - l.height
+	maxOff := len(l.items) - innerH
 	if maxOff < 0 {
 		maxOff = 0
 	}
@@ -177,4 +212,30 @@ func (l *List[T]) clampOffset() {
 	if l.offset < 0 {
 		l.offset = 0
 	}
+}
+
+func (l *List[T]) clampXOffset() {
+	innerW, _, _, _ := scrollLayout(len(l.items), l.contentWidth, l.width, l.height, 0)
+	maxX := l.contentWidth - innerW
+	if maxX < 0 {
+		maxX = 0
+	}
+	if l.xOffset > maxX {
+		l.xOffset = maxX
+	}
+	if l.xOffset < 0 {
+		l.xOffset = 0
+	}
+}
+
+// measureContentWidth returns the widest natural row width (cursor prefix plus
+// rendered item), the horizontal extent the list can scroll across.
+func (l *List[T]) measureContentWidth() int {
+	m := 0
+	for _, it := range l.items {
+		if w := ansi.StringWidth(l.render(it)) + 2; w > m {
+			m = w
+		}
+	}
+	return m
 }
