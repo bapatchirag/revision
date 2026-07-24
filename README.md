@@ -1,4 +1,20 @@
-# revision
+<p align="center">
+  <img src="docs/logo.png" alt="revision logo" width="120" />
+</p>
+
+<h1 align="center">revision</h1>
+
+<p align="center">
+  <a href="https://github.com/bapatchirag/revision/actions/workflows/ci.yml">
+    <img src="https://github.com/bapatchirag/revision/actions/workflows/ci.yml/badge.svg" alt="CI status" />
+  </a>
+  <a href="https://github.com/bapatchirag/revision/blob/main/go.mod">
+    <img src="https://img.shields.io/github/go-mod/go-version/bapatchirag/revision" alt="Go version" />
+  </a>
+  <a href="https://github.com/bapatchirag/revision/blob/main/LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="MIT License" />
+  </a>
+</p>
 
 A lazygit-style terminal UI for Subversion (SVN). `revision` gives you a fast, keyboard-driven interface over the `svn` command line — review changes, stage with changelists, commit, update, and browse history without leaving your terminal.
 
