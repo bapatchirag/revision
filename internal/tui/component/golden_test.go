@@ -35,6 +35,33 @@ func TestGoldenViewport(t *testing.T) {
 	golden.RequireEqual(t, []byte(v.View()))
 }
 
+func TestGoldenViewportHScroll(t *testing.T) {
+	v := component.NewViewport(testTheme(), testKeys())
+	v.SetContent("the quick brown fox jumps over the lazy dog and keeps running")
+	v.SetSize(20, 3)
+	v.Focus()
+	// Scroll right to expose the horizontal window past the left edge.
+	for i := 0; i < 8; i++ {
+		v.Update(keyRight())
+	}
+	golden.RequireEqual(t, []byte(v.View()))
+}
+
+func TestGoldenViewportScrollbars(t *testing.T) {
+	v := component.NewViewport(testTheme(), testKeys())
+	v.SetContent("the quick brown fox jumps over the lazy dog\npack my box with five dozen liquor jugs\nhow vexingly quick daft zebras jump\nthe five boxing wizards jump quickly\nsphinx of black quartz judge my vow\njackdaws love my big sphinx of quartz")
+	v.SetSize(24, 4)
+	v.Focus()
+	// Scroll on both axes so each thumb sits away from the origin.
+	for i := 0; i < 3; i++ {
+		v.Update(keyDown())
+	}
+	for i := 0; i < 6; i++ {
+		v.Update(keyRight())
+	}
+	golden.RequireEqual(t, []byte(v.View()))
+}
+
 func TestGoldenTable(t *testing.T) {
 	tb := component.NewTable[[]string]("log", []component.Column{
 		{Title: "Rev", Width: 6},
@@ -65,6 +92,39 @@ func TestGoldenTableScrolled(t *testing.T) {
 	// Move the cursor past the bottom of the window to force scrolling.
 	for i := 0; i < 4; i++ {
 		tb.Update(keyDown())
+	}
+	golden.RequireEqual(t, []byte(tb.View()))
+}
+
+func TestGoldenListHScroll(t *testing.T) {
+	l := component.NewList[string]("files", func(s string) string { return s }, testTheme(), testKeys())
+	l.SetItems([]string{
+		"internal/tui/component/viewport.go",
+		"internal/tui/component/list.go",
+		"internal/app/app.go",
+	})
+	l.SetSize(20, 5)
+	l.Focus()
+	for i := 0; i < 8; i++ {
+		l.Update(keyRight())
+	}
+	golden.RequireEqual(t, []byte(l.View()))
+}
+
+func TestGoldenTableHScroll(t *testing.T) {
+	tb := component.NewTable[[]string]("log", []component.Column{
+		{Title: "Rev", Width: 4},
+		{Title: "Message", Width: 0},
+	}, func(r []string) []string { return r }, testTheme(), testKeys())
+	tb.SetItems([][]string{
+		{"r3", "add horizontal scrolling to the list and table panels"},
+		{"r2", "reuse the viewport scroll helpers"},
+		{"r1", "initial import"},
+	})
+	tb.SetSize(24, 5)
+	tb.Focus()
+	for i := 0; i < 8; i++ {
+		tb.Update(keyRight())
 	}
 	golden.RequireEqual(t, []byte(tb.View()))
 }

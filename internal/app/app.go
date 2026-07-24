@@ -815,7 +815,10 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Jump to panel", Key: "1 2 3 0"},
 		{Label: "Cycle panels", Key: "tab / shift+tab"},
 		{Label: "Move up / down", Key: "k / j"},
-		{Label: "Scroll main", Key: "K / J"},
+		{Label: "Jump top / bottom", Key: "g / G"},
+		{Label: "Scroll main up / down", Key: "K / J"},
+		{Label: "Scroll main left / right", Key: "h / l"},
+		{Label: "Line start / end", Key: "home / end"},
 		{Label: "Toggle help", Key: "?"},
 		{Label: "Quit", Key: "q"},
 	}
@@ -954,7 +957,7 @@ func (m *Model) layout() {
 	leftWidth := clamp(m.width*2/5, 24, m.width-20)
 	rightWidth := m.width - leftWidth
 
-	statusHeight := clamp(5, 3, max(bodyHeight-6, 3))
+	statusHeight := clamp(6, 3, max(bodyHeight-6, 3))
 	rest := bodyHeight - statusHeight
 	filesHeight := rest / 2
 	logHeight := rest - filesHeight

@@ -7,14 +7,16 @@ import "github.com/charmbracelet/bubbles/key"
 
 // KeyMap is the full set of bindings the UI understands.
 type KeyMap struct {
-	Up       key.Binding
-	Down     key.Binding
-	Left     key.Binding
-	Right    key.Binding
-	PageUp   key.Binding
-	PageDown key.Binding
-	Top      key.Binding
-	Bottom   key.Binding
+	Up        key.Binding
+	Down      key.Binding
+	Left      key.Binding
+	Right     key.Binding
+	PageUp    key.Binding
+	PageDown  key.Binding
+	Top       key.Binding
+	Bottom    key.Binding
+	LineStart key.Binding
+	LineEnd   key.Binding
 
 	Enter   key.Binding
 	Confirm key.Binding
@@ -42,8 +44,10 @@ func Default() KeyMap {
 		Right:     key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "right")),
 		PageUp:    key.NewBinding(key.WithKeys("pgup", "K"), key.WithHelp("PgUp", "page up")),
 		PageDown:  key.NewBinding(key.WithKeys("pgdown", "J"), key.WithHelp("PgDn", "page down")),
-		Top:       key.NewBinding(key.WithKeys("home", "g"), key.WithHelp("g", "top")),
-		Bottom:    key.NewBinding(key.WithKeys("end", "G"), key.WithHelp("G", "bottom")),
+		Top:       key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "top")),
+		Bottom:    key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "bottom")),
+		LineStart: key.NewBinding(key.WithKeys("home", "^"), key.WithHelp("home", "line start")),
+		LineEnd:   key.NewBinding(key.WithKeys("end", "$"), key.WithHelp("end", "line end")),
 		Enter:     key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
 		Confirm:   key.NewBinding(key.WithKeys("enter", "y"), key.WithHelp("enter", "confirm")),
 		Cancel:    key.NewBinding(key.WithKeys("esc", "n"), key.WithHelp("esc", "cancel")),

@@ -55,6 +55,11 @@ func keyTab() tea.KeyMsg   { return tea.KeyMsg{Type: tea.KeyTab} }
 func keyEnter() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyEnter} }
 func keyEsc() tea.KeyMsg   { return tea.KeyMsg{Type: tea.KeyEsc} }
 
+func keyLeft() tea.KeyMsg  { return tea.KeyMsg{Type: tea.KeyLeft} }
+func keyRight() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRight} }
+func keyHome() tea.KeyMsg  { return tea.KeyMsg{Type: tea.KeyHome} }
+func keyEnd() tea.KeyMsg   { return tea.KeyMsg{Type: tea.KeyEnd} }
+
 func keyBackspace() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyBackspace} }
 func keyCtrlS() tea.KeyMsg     { return tea.KeyMsg{Type: tea.KeyCtrlS} }
 

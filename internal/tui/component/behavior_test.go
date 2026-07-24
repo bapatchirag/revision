@@ -31,6 +31,78 @@ func TestFitLineExpandsTabs(t *testing.T) {
 	}
 }
 
+// TestViewportHorizontalScroll drives the Left/Right scroll and Home/End jumps
+// over a line wider than the viewport, asserting the visible window slides and
+// clamps at both edges.
+func TestViewportHorizontalScroll(t *testing.T) {
+	v := component.NewViewport(testTheme(), testKeys())
+	v.SetContent("0123456789ABCDEFGHIJ") // 20 cells, twice the width
+	v.SetSize(10, 1)
+	v.Focus()
+
+	if got, want := v.View(), "0123456789"; got != want {
+		t.Fatalf("initial window = %q, want %q", got, want)
+	}
+
+	v.Update(keyRight())
+	if got, want := v.View(), "123456789A"; got != want {
+		t.Fatalf("after Right = %q, want %q", got, want)
+	}
+
+	v.Update(keyLeft())
+	if got, want := v.View(), "0123456789"; got != want {
+		t.Fatalf("after Left = %q, want %q", got, want)
+	}
+
+	v.Update(keyLeft()) // already at the left edge: clamps, no underflow
+	if got, want := v.View(), "0123456789"; got != want {
+		t.Fatalf("Left at edge = %q, want %q", got, want)
+	}
+
+	v.Update(keyEnd())
+	if got, want := v.View(), "ABCDEFGHIJ"; got != want {
+		t.Fatalf("after End = %q, want %q", got, want)
+	}
+
+	v.Update(keyRight()) // past the end: clamps at the far-right window
+	if got, want := v.View(), "ABCDEFGHIJ"; got != want {
+		t.Fatalf("Right past end = %q, want %q", got, want)
+	}
+
+	v.Update(keyHome())
+	if got, want := v.View(), "0123456789"; got != want {
+		t.Fatalf("after Home = %q, want %q", got, want)
+	}
+}
+
+// TestViewportScrollbars renders a scrollbar on each overflowing axis and moves
+// the thumb as the content scrolls.
+func TestViewportScrollbars(t *testing.T) {
+	v := component.NewViewport(testTheme(), testKeys())
+	// Six lines each wider than the viewport, so both axes overflow.
+	v.SetContent("aaaaaaaaaa\nbbbbbbbbbb\ncccccccccc\ndddddddddd\neeeeeeeeee\nffffffffff")
+	v.SetSize(6, 4)
+	v.Focus()
+
+	top := v.View()
+	if !strings.Contains(top, "┃") || !strings.Contains(top, "━") {
+		t.Fatalf("expected vertical (┃) and horizontal (━) scrollbar thumbs, got:\n%s", top)
+	}
+
+	v.Update(keyDown())
+	v.Update(keyDown())
+	if v.View() == top {
+		t.Error("vertical thumb should move after scrolling down")
+	}
+
+	right := v.View()
+	v.Update(keyRight())
+	v.Update(keyRight())
+	if v.View() == right {
+		t.Error("horizontal thumb should move after scrolling right")
+	}
+}
+
 func TestListEmitsSelected(t *testing.T) {
 	l := component.NewList[string]("files", func(s string) string { return s }, testTheme(), testKeys())
 	l.SetItems([]string{"a", "b", "c"})
@@ -73,6 +145,30 @@ func TestListIgnoresInputWhenBlurred(t *testing.T) {
 	}
 	if l.Index() != 0 {
 		t.Errorf("cursor moved while blurred: %d", l.Index())
+	}
+}
+
+// TestListHorizontalScroll scrolls a list whose items are wider than the
+// viewport and checks the horizontal scrollbar appears and the window shifts.
+func TestListHorizontalScroll(t *testing.T) {
+	l := component.NewList[string]("files", func(s string) string { return s }, testTheme(), testKeys())
+	l.SetItems([]string{"aaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbb"})
+	l.SetSize(10, 4)
+	l.Focus()
+
+	top := l.View()
+	if !strings.Contains(top, "━") {
+		t.Fatalf("expected a horizontal scrollbar (━), got:\n%s", top)
+	}
+	l.Update(keyRight())
+	l.Update(keyRight())
+	if l.View() == top {
+		t.Error("horizontal scroll should change the view")
+	}
+	l.Update(keyLeft())
+	l.Update(keyLeft())
+	if l.View() != top {
+		t.Error("scrolling back to the left edge should restore the view")
 	}
 }
 
@@ -125,6 +221,28 @@ func TestTableIgnoresInputWhenBlurred(t *testing.T) {
 	}
 	if tb.Index() != 0 {
 		t.Errorf("cursor moved while blurred: %d", tb.Index())
+	}
+}
+
+// TestTableHorizontalScroll scrolls a table whose message column overflows and
+// checks the horizontal scrollbar appears and the window shifts.
+func TestTableHorizontalScroll(t *testing.T) {
+	tb := newStringTable()
+	tb.SetItems([][]string{
+		{"r2", "a very long commit message that runs past the panel edge"},
+		{"r1", "another message that does not fit within the column width"},
+	})
+	tb.SetSize(20, 4)
+	tb.Focus()
+
+	top := tb.View()
+	if !strings.Contains(top, "━") {
+		t.Fatalf("expected a horizontal scrollbar (━), got:\n%s", top)
+	}
+	tb.Update(keyRight())
+	tb.Update(keyRight())
+	if tb.View() == top {
+		t.Error("horizontal scroll should change the view")
 	}
 }
 

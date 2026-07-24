@@ -67,6 +67,19 @@ func TestTeatestViewportScroll(t *testing.T) {
 	assertContains(t, finalOutput(t, tm), "L2", "L4")
 }
 
+func TestTeatestViewportHScroll(t *testing.T) {
+	v := component.NewViewport(testTheme(), testKeys())
+	v.SetContent("0123456789ABCDEFGHIJ")
+	v.SetSize(10, 1)
+	v.Focus()
+
+	tm := teatest.NewTestModel(t, asModel(v), teatest.WithInitialTermSize(40, 10))
+	tm.Send(keyRight())
+	tm.Send(keyRight())
+	// After scrolling two columns the window starts at '2'.
+	assertContains(t, finalOutput(t, tm), "23456789AB")
+}
+
 func TestTeatestTableNavigation(t *testing.T) {
 	tb := component.NewTable[[]string]("log", []component.Column{
 		{Title: "Rev", Width: 5},
