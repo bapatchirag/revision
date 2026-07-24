@@ -157,6 +157,45 @@ func TestDiffWithTabsDoesNotOverflowWidth(t *testing.T) {
 	}
 }
 
+// TestDiffGutterStaysPinnedWhenScrolled proves the Main viewport keeps a unified
+// diff's +/- marker column pinned to the left while the body scrolls: after
+// scrolling fully right, the added and removed rows still begin with their marker.
+func TestDiffGutterStaysPinnedWhenScrolled(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "wide.txt", State: svn.StateModified},
+	})
+	// Body lines far wider than the Main pane, so the diff scrolls horizontally
+	// and an unpinned marker would otherwise slide out of view.
+	long := strings.Repeat("abcdefghij", 12) // 120 columns
+	next, _ := m.Update(diffLoadedMsg{
+		path: "wide.txt",
+		diff: "@@ -1 +1 @@\n-" + long + "\n+" + long,
+	})
+	m = next.(*Model)
+	before := stripANSI(m.main.View())
+
+	// Scroll the Main viewport as far right as it goes.
+	m.main.Focus()
+	m.main.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	after := stripANSI(m.main.View())
+
+	if before == after {
+		t.Fatal("diff did not scroll horizontally; the gutter cannot be observed")
+	}
+	var minus, plus bool
+	for _, ln := range strings.Split(after, "\n") {
+		switch {
+		case strings.HasPrefix(ln, "-"):
+			minus = true
+		case strings.HasPrefix(ln, "+"):
+			plus = true
+		}
+	}
+	if !minus || !plus {
+		t.Errorf("scrolled diff lost its +/- gutter:\n%s", after)
+	}
+}
+
 func TestColorizeDiff(t *testing.T) {
 	// Emit ANSI so the styling is observable, then restore the Ascii profile the
 	// rest of the suite relies on.
