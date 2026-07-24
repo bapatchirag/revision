@@ -847,6 +847,44 @@ func TestAssignChangelistAllowsStagedFile(t *testing.T) {
 	}
 }
 
+func TestAssignChangelistNamesAllStagedFiles(t *testing.T) {
+	// Naming a changelist while several files are staged moves the whole staged
+	// set as a unit, not just the highlighted file; an unstaged file is left out.
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "a.go", State: svn.StateModified, Changelist: "revision:staged"},
+		{Path: "b.go", State: svn.StateModified, Changelist: "revision:staged"},
+		{Path: "c.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = next.(*Model)
+	if !m.naming {
+		t.Fatal("n should open the changelist-name prompt when files are staged")
+	}
+	got := map[string]bool{}
+	for _, tgt := range m.nameTargets {
+		got[tgt.path] = true
+	}
+	if len(m.nameTargets) != 2 || !got["a.go"] || !got["b.go"] {
+		t.Errorf("nameTargets = %+v, want exactly the staged files a.go and b.go", m.nameTargets)
+	}
+}
+
+func TestAssignChangelistFallsBackToSelectedFile(t *testing.T) {
+	// With nothing staged, naming still targets just the selected file so the
+	// single-file workflow keeps working.
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "lone.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = next.(*Model)
+	if !m.naming {
+		t.Fatal("n should open the prompt for the selected file when nothing is staged")
+	}
+	if len(m.nameTargets) != 1 || m.nameTargets[0].path != "lone.go" {
+		t.Errorf("nameTargets = %+v, want just lone.go", m.nameTargets)
+	}
+}
+
 func TestAssignChangelistOffersExistingNames(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "loose.go", State: svn.StateModified},

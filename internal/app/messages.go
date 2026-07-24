@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -132,21 +133,36 @@ func commitCmd(client *svn.Client, message, changelist string) tea.Cmd {
 	}
 }
 
-// assignChangelistCmd adds path to the named changelist off the UI goroutine,
-// running `svn add` first for a previously unversioned file. The result rides on
-// stagedMsg (carrying the changelist name so the app can confirm the assignment).
-func assignChangelistCmd(client *svn.Client, name, path string, add bool) tea.Cmd {
+// assignChangelistCmd moves every target into the named changelist off the UI
+// goroutine, running `svn add` first for any previously unversioned file. The
+// result rides on stagedMsg (carrying the changelist name so the app can confirm
+// the assignment); the reported path is the sole file when one was named, or an
+// "N files" count when several were named together.
+func assignChangelistCmd(client *svn.Client, name string, targets []changelistTarget) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if add {
-			if err := client.Add(ctx, path); err != nil {
-				return stagedMsg{path: path, staged: true, changelist: name, err: err}
+		for _, t := range targets {
+			if t.add {
+				if err := client.Add(ctx, t.path); err != nil {
+					return stagedMsg{path: t.path, staged: true, changelist: name, err: err}
+				}
+			}
+			if err := client.AddToChangelist(ctx, name, t.path); err != nil {
+				return stagedMsg{path: t.path, staged: true, changelist: name, err: err}
 			}
 		}
-		err := client.AddToChangelist(ctx, name, path)
-		return stagedMsg{path: path, staged: true, changelist: name, err: err}
+		return stagedMsg{path: assignedLabel(targets), staged: true, changelist: name}
 	}
+}
+
+// assignedLabel summarizes which files an assign touched for the success toast:
+// the sole path when one file was named, otherwise an "N files" count.
+func assignedLabel(targets []changelistTarget) string {
+	if len(targets) == 1 {
+		return targets[0].path
+	}
+	return fmt.Sprintf("%d files", len(targets))
 }
 
 // revertCmd discards local modifications to path off the UI goroutine.

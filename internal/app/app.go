@@ -103,8 +103,7 @@ type Model struct {
 	logErr       error
 	editing      bool
 	naming       bool
-	namePath     string
-	nameAdd      bool
+	nameTargets  []changelistTarget
 	drilledCL    string
 	commitCL     string
 	confirming   bool
@@ -537,6 +536,14 @@ type deleteAction struct {
 	unversioned bool // remove from disk (untracked) vs. svn delete (versioned)
 }
 
+// changelistTarget is one file an assign-to-changelist action moves into a named
+// changelist: its path plus whether it must be `svn add`ed first (an unversioned
+// file being named directly, without staging it beforehand).
+type changelistTarget struct {
+	path string
+	add  bool // svn add first (unversioned → versioned)
+}
+
 // stageTarget resolves what a stage action would do for the current file
 // selection. An unversioned file is added and staged in one step; a file already
 // in any changelist (the anonymous staged bucket or a named list) is removed from
@@ -595,7 +602,7 @@ func (m *Model) submitChangelist(name string) tea.Cmd {
 	}
 	m.naming = false
 	m.nameEditor.Blur()
-	return assignChangelistCmd(m.client, name, m.namePath, m.nameAdd)
+	return assignChangelistCmd(m.client, name, m.nameTargets)
 }
 
 // selectedFile returns the file the current Files-panel view points at: the
@@ -695,33 +702,51 @@ func (m *Model) inChangelistDrill() bool {
 	return m.filesViewIsChangelists() && m.filesViews.Depth() > 0
 }
 
-// assignChangelist opens the changelist-name prompt for the selected file, so it
-// can be added to a named changelist. A file already in a named changelist is
-// refused (one named changelist per file — unstage it first); files in the
-// anonymous staged/unstaged buckets may be moved into a named changelist. A
-// state that cannot be staged is refused too. The prompt lists the existing
+// assignChangelist opens the changelist-name prompt for the files that will move
+// into a named changelist. When any files are staged (in the anonymous staged
+// bucket) the whole staged set is named as a unit; otherwise it falls back to
+// the single selected file. In that fallback a lone selected file already in a
+// named changelist is refused (one named changelist per file — unstage it
+// first), as is a state that cannot be staged. The prompt lists the existing
 // named changelists to pick from.
 func (m *Model) assignChangelist() tea.Cmd {
-	it, ok := m.selectedFile()
-	if !ok {
-		return nil
-	}
-	if isNamedChangelist(it.Changelist) {
-		m.showToast(it.Path+" already in "+displayCL(it.Changelist)+" — unstage first (space)", component.LevelWarning)
-		return nil
-	}
-	if it.State != svn.StateUnversioned && !stageable(it.State) {
-		m.showToast("can't add "+it.Path+" to a changelist ("+it.State.Code()+")", component.LevelWarning)
-		return nil
+	targets := m.stagedTargets()
+	if len(targets) == 0 {
+		it, ok := m.selectedFile()
+		if !ok {
+			return nil
+		}
+		if isNamedChangelist(it.Changelist) {
+			m.showToast(it.Path+" already in "+displayCL(it.Changelist)+" — unstage first (space)", component.LevelWarning)
+			return nil
+		}
+		if it.State != svn.StateUnversioned && !stageable(it.State) {
+			m.showToast("can't add "+it.Path+" to a changelist ("+it.State.Code()+")", component.LevelWarning)
+			return nil
+		}
+		targets = []changelistTarget{{path: it.Path, add: it.State == svn.StateUnversioned}}
 	}
 	m.naming = true
-	m.namePath = it.Path
-	m.nameAdd = it.State == svn.StateUnversioned
+	m.nameTargets = targets
 	m.nameEditor.Reset()
 	m.nameEditor.SetOptions("Existing changelists:", m.namedChangelists())
 	m.nameEditor.Focus()
 	m.sizeNameEditor()
 	return nil
+}
+
+// stagedTargets collects every file currently in the anonymous staged bucket as
+// changelist targets, so naming a changelist moves the whole staged set as a
+// unit. Staged files are already versioned, so in practice none need an
+// `svn add` first.
+func (m *Model) stagedTargets() []changelistTarget {
+	var targets []changelistTarget
+	for _, it := range m.fileItems {
+		if it.Changelist == stagedChangelist {
+			targets = append(targets, changelistTarget{path: it.Path, add: it.State == svn.StateUnversioned})
+		}
+	}
+	return targets
 }
 
 // syncDrill refreshes a drilled-in changelist after a status reload: it
