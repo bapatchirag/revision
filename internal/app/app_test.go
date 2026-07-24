@@ -88,7 +88,10 @@ func TestSelectionUpdatesMain(t *testing.T) {
 		{Path: "committed.txt", State: svn.StateModified},
 	})
 
-	if main := m.main.View(); !strings.Contains(main, "added.txt") {
+	// The first item is selected, so its diff lands in Main.
+	next, _ := m.Update(diffLoadedMsg{path: "added.txt", diff: "@@ -0,0 +1 @@\n+alpha"})
+	m = next.(*Model)
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "+alpha") {
 		t.Fatalf("main should start on the first item, got:\n%s", main)
 	}
 
@@ -101,10 +104,13 @@ func TestSelectionUpdatesMain(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected SelectedMsg, got %T", cmd())
 	}
-	next, _ := m.Update(sel)
+	next, _ = m.Update(sel)
 	m = next.(*Model)
 
-	if main := m.main.View(); !strings.Contains(main, "committed.txt") {
+	// The second item's diff follows the selection into Main.
+	next, _ = m.Update(diffLoadedMsg{path: "committed.txt", diff: "@@ -1 +1 @@\n+beta"})
+	m = next.(*Model)
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "+beta") {
 		t.Errorf("main should follow selection to the second item, got:\n%s", main)
 	}
 }
@@ -121,8 +127,8 @@ func TestFileDiffLoadsIntoMain(t *testing.T) {
 	next, _ := m.Update(diffLoadedMsg{path: "committed.txt", diff: "@@ -1 +1 @@\n-old\n+new"})
 	m = next.(*Model)
 	main := stripANSI(m.main.View())
-	if !strings.Contains(main, "committed.txt") || !strings.Contains(main, "+new") {
-		t.Errorf("main should show the file header and diff, got:\n%s", main)
+	if !strings.Contains(main, "+new") {
+		t.Errorf("main should show the diff, got:\n%s", main)
 	}
 }
 

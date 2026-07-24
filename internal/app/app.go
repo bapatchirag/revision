@@ -1060,21 +1060,18 @@ func (m *Model) changelistDetail() string {
 	return strings.Join(lines, "\n")
 }
 
-// fileDetail renders the selected file's header followed by its diff, or a
-// placeholder while the diff loads or when the state has no textual diff.
+// fileDetail renders the selected file's diff, prefixed by its changelist when
+// it belongs to one, or a placeholder while the diff loads or when the state has
+// no textual diff.
 func (m *Model) fileDetail() string {
 	it, ok := m.selectedFile()
 	if !ok {
 		return "Working copy is clean — no changes."
 	}
-	head := []string{
-		it.Path,
-		fmt.Sprintf("state: %s (%s)", it.State, it.State.Code()),
-	}
+	var head []string
 	if it.Changelist != "" {
-		head = append(head, "changelist: "+displayCL(it.Changelist))
+		head = append(head, "changelist: "+displayCL(it.Changelist), "")
 	}
-	head = append(head, "")
 	switch {
 	case !it.State.IsDirty():
 		return strings.Join(append(head, "(no textual diff for this state)"), "\n")
@@ -1083,7 +1080,7 @@ func (m *Model) fileDetail() string {
 	case strings.TrimSpace(m.diffText) == "":
 		return strings.Join(append(head, "(no changes to display)"), "\n")
 	default:
-		return strings.Join(head, "\n") + "\n" + colorizeDiff(m.theme, m.diffText)
+		return strings.Join(append(head, colorizeDiff(m.theme, m.diffText)), "\n")
 	}
 }
 
