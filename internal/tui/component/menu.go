@@ -47,6 +47,10 @@ func NewMenu(id, title string, items []MenuItem, th theme.Theme, keys keymap.Key
 // Init implements tui.Component.
 func (mn *Menu) Init() tea.Cmd { return nil }
 
+// SetTitle replaces the menu's heading so a single menu can be reused with a
+// context-dependent title (e.g. embedding a version number).
+func (mn *Menu) SetTitle(title string) { mn.title = title }
+
 // Index returns the cursor position.
 func (mn *Menu) Index() int { return mn.cursor }
 

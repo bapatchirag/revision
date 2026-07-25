@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/bapatchirag/revision/internal/selfupdate"
 	"github.com/bapatchirag/revision/internal/svn"
 )
 
@@ -63,6 +64,28 @@ type deletedMsg struct {
 type updatedMsg struct {
 	revision string
 	err      error
+}
+
+// updateAvailableMsg is emitted when the startup check finds a newer release
+// than the running binary. It is only produced on release builds.
+type updateAvailableMsg struct {
+	rel selfupdate.Release
+}
+
+// checkUpdateCmd asks GitHub, off the UI goroutine, whether a newer release
+// exists. It emits updateAvailableMsg only when one does; a development build,
+// an up-to-date binary, or any network/parse failure yields no message so the
+// check can never disrupt startup.
+func checkUpdateCmd(build selfupdate.Build) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		rel, newer, err := selfupdate.Check(ctx, build)
+		if err != nil || !newer {
+			return nil
+		}
+		return updateAvailableMsg{rel: rel}
+	}
 }
 
 // loadStatusCmd runs `svn status` off the UI goroutine and reports the result.
