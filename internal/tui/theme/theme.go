@@ -11,6 +11,7 @@ type Theme struct {
 	Muted         lipgloss.Color // secondary / subtle text
 	Accent        lipgloss.Color // titles, highlights
 	Selection     lipgloss.Color // selected row foreground
+	SelectionBg   lipgloss.Color // selected row highlight-bar background
 	Border        lipgloss.Color // unfocused panel border
 	BorderFocused lipgloss.Color // focused panel border
 	Success       lipgloss.Color
@@ -26,6 +27,7 @@ func Default() Theme {
 		Muted:         lipgloss.Color("241"),
 		Accent:        lipgloss.Color("39"),
 		Selection:     lipgloss.Color("212"),
+		SelectionBg:   lipgloss.Color("238"),
 		Border:        lipgloss.Color("240"),
 		BorderFocused: lipgloss.Color("39"),
 		Success:       lipgloss.Color("42"),

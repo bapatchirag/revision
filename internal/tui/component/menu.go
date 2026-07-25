@@ -100,13 +100,19 @@ func (mn *Menu) View() string {
 		innerW = mn.intrinsicWidth()
 	}
 	sel := lipgloss.NewStyle().Foreground(mn.theme.Selection).Bold(true)
+	bar := lipgloss.NewStyle().Background(mn.theme.SelectionBg)
 	rows := make([]string, len(mn.items))
 	for i, it := range mn.items {
 		prefix := "  "
-		if i == mn.cursor && mn.focused {
+		selected := i == mn.cursor
+		if selected && mn.focused {
 			prefix = sel.Render("> ")
 		}
-		rows[i] = prefix + mn.itemBody(it, innerW-2)
+		row := prefix + mn.itemBody(it, innerW-2)
+		if selected {
+			row = highlightLine(row, innerW, bar)
+		}
+		rows[i] = row
 	}
 	return box(strings.Join(rows, "\n"), mn.title, innerW, len(mn.items), mn.theme, mn.focused)
 }

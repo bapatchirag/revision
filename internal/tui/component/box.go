@@ -58,6 +58,29 @@ func maxWidth(lines []string) int {
 	return m
 }
 
+// ansiReset is the SGR sequence that clears all styling; lipgloss ends every
+// rendered span with it. A background wrapped around already-colored content is
+// therefore cleared at each inner span boundary, so highlightLine re-applies it.
+const ansiReset = "\x1b[0m"
+
+// highlightLine paints style (typically a background) across the full width of a
+// rendered row while preserving the foreground colors already baked into it.
+// The row is first fit to exactly width cells so the highlight spans the whole
+// row, then style's opening sequence is re-applied after every reset the inner
+// spans emit — a lipgloss reset clears the background mid-row otherwise. With no
+// active color profile (styling is a no-op, as in golden tests) it returns the
+// fitted line unchanged.
+func highlightLine(s string, width int, style lipgloss.Style) string {
+	s = fitLine(s, width)
+	probe := style.Render(" ")
+	space := strings.IndexByte(probe, ' ')
+	if space <= 0 {
+		return s
+	}
+	open := probe[:space]
+	return open + strings.ReplaceAll(s, ansiReset, ansiReset+open) + ansiReset
+}
+
 // box renders content inside a rounded border with an optional title inlaid on
 // the top edge. content is fit to exactly innerW×innerH cells.
 func box(content, title string, innerW, innerH int, th theme.Theme, focused bool) string {
