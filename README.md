@@ -19,7 +19,7 @@
 A lazygit-style terminal UI for Subversion (SVN). `revision` gives you a fast, keyboard-driven interface over the `svn` command line — review changes, stage with changelists, commit, update, and browse history without leaving your terminal.
 
 <p align="center">
-  <img src="docs/hero.gif" alt="revision in action — browsing diffs, staging, named changelists, history, and committing" width="100%" />
+  <img src="docs/hero.gif" alt="revision in action — a directory tree of changes, colour-coded diffs, directory staging, named changelists, history, and committing" width="100%" />
 </p>
 
 ## Why
@@ -28,15 +28,16 @@ SVN's command line is powerful but verbose for day-to-day work. `revision` wraps
 
 ## Features
 
-- **lazygit-style layout** — a left column of Status, Files, and Log panels beside a Main detail view, with number-key and `Tab` focus switching
+- **lazygit-style layout** — a left column of Status, Files, and Log panels beside a Main detail view, with number-key and `Tab` focus switching; scroll any panel on both axes, with scrollbars that show what's off-screen
 - Working-copy **status** at a glance — changes colored by state, over a live repo/revision header
-- Per-file **diff** viewer that follows your selection in the Main panel
-- **Staging** via a SVN changelist (a git-index-like workflow) — stage or unstage with a single keystroke
-- **Named changelists** — group related changes in a tabbed Changelists view, drill into any list, and commit it as a unit
+- Changed files as a **collapsible directory tree** — each change grouped under its folder, expanded or collapsed with `enter`
+- **Colour-coded diff** viewer that follows your selection — additions, deletions, hunk headers, and metadata each tinted, with the `+`/`-` gutter pinned as you scroll; highlight a directory for the **combined diff** of everything beneath it
+- **Staging** via a SVN changelist (a git-index-like workflow) — stage or unstage a single file, or a whole directory subtree, with one keystroke
+- **Named changelists** — group the whole staged set (or just one file) in a tabbed Changelists view, drill into any list, and commit it as a unit
 - **Commit** the staged set (or a chosen changelist) through an inline message editor
 - **Update** the working copy to HEAD
 - **Add / revert / delete** files, with confirmation prompts before anything destructive
-- Read-only **log / history** viewer with per-revision detail (author, date, message, changed paths)
+- Read-only **log / history** viewer with full revision numbers and authors, plus per-revision detail (date, message, changed paths)
 - **Discoverable keybindings** — a contextual footer plus a full `?` help menu
 - **Toast notifications** for every action, success or failure
 - **Non-blocking authentication** — clear, actionable hints instead of a hung credential prompt
@@ -95,12 +96,12 @@ The footer shows the most common actions, and `?` opens the full keybindings men
 | `↑`/`k`, `↓`/`j` | Move the selection up / down |
 | `g` / `G` | Jump to the top / bottom of a list |
 | `K` / `J` | Scroll the Main panel up / down a page |
-| `←`/`h`, `→`/`l` | Scroll the Main panel left / right (one column) |
-| `Home` / `End` | Jump to the start / end of the line in the Main panel |
+| `←`/`h`, `→`/`l` | Scroll the focused panel left / right (one column) |
+| `Home` / `End` (`^` / `$`) | Jump to the start / end of the line in the focused panel |
 | `[` / `]` | Switch the Files panel between the Changes and Changelists views |
-| `space` | Stage / unstage the selected file (an untracked file is `svn add`ed first) |
-| `n` | Assign the staged files — or just the selected file when nothing is staged — to a named changelist |
-| `enter` | Expand the selected changelist into its files |
+| `space` | Stage / unstage the selected file — or every change under the selected directory (an untracked file is `svn add`ed first) |
+| `n` | Assign the staged set — or just the selected file when nothing is staged — to a named changelist |
+| `enter` | Expand / collapse the selected directory, or expand a changelist into its files |
 | `c` | Commit the staged files, or the selected changelist (opens the message editor) |
 | `r` | Revert the selected file (with confirmation) |
 | `d` | Delete the selected file (with confirmation) |
@@ -113,7 +114,7 @@ In the commit editor, `Ctrl+S` submits and `Esc` cancels. In the changelist-name
 
 ## How staging works
 
-SVN has no local staging index. `revision` emulates one using an SVN **changelist** named `revision:staged`: staging a file adds it to that changelist, unstaging removes it, and `c` commits the staged set as a unit. This maps a git-like stage/commit flow onto native SVN.
+SVN has no local staging index. `revision` emulates one using an SVN **changelist** named `revision:staged`: staging a file — or every change under a directory — adds it to that changelist, unstaging removes it, and `c` commits the staged set as a unit. This maps a git-like stage/commit flow onto native SVN.
 
 You can also group work into **named changelists** with `n`: it moves the staged files (or just the selected file when nothing is staged) into a real SVN changelist, which appears in the Changelists view and can be committed on its own. A file belongs to at most one changelist at a time — unstage it (`space`) before moving it elsewhere.
 

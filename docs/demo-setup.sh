@@ -2,8 +2,9 @@
 # demo-setup.sh — build a throwaway SVN working copy for the revision demo GIF.
 #
 # Creates a self-contained repository + working copy with a short commit history
-# and a realistic set of uncommitted changes (modified, added, untracked, and a
-# named changelist) so the TUI has something interesting to show.
+# and a realistic set of uncommitted changes spread across a nested source tree
+# (modified, added, and untracked files) so the TUI has a directory tree, colour
+# diffs, changelists, and history to show.
 #
 # Usage: docs/demo-setup.sh [dir]   (default: /tmp/revision-demo)
 set -euo pipefail
@@ -20,12 +21,18 @@ svn checkout "file://$REPO" "$WC" -q
 cd "$WC"
 
 # --- r1: project skeleton -------------------------------------------------
+mkdir -p cmd
+cat > go.mod <<'EOF'
+module orbit
+
+go 1.22
+EOF
 cat > README.md <<'EOF'
 # orbit
 
 A tiny HTTP service.
 EOF
-cat > main.go <<'EOF'
+cat > cmd/main.go <<'EOF'
 package main
 
 import "log"
@@ -34,58 +41,81 @@ func main() {
 	log.Println("starting orbit")
 }
 EOF
-svn add -q README.md main.go
+svn add -q go.mod README.md cmd
 svn commit -q -m "Initial import: project skeleton"
 
 # --- r2: HTTP server ------------------------------------------------------
-cat > server.go <<'EOF'
-package main
+mkdir -p internal/server
+cat > internal/server/server.go <<'EOF'
+package server
 
 import "net/http"
 
-func newServer(addr string) *http.Server {
+func New(addr string) *http.Server {
 	mux := http.NewServeMux()
 	return &http.Server{Addr: addr, Handler: mux}
 }
 EOF
-cat > main.go <<'EOF'
+cat > cmd/main.go <<'EOF'
 package main
 
-import "log"
+import (
+	"log"
+
+	"orbit/internal/server"
+)
 
 func main() {
 	log.Println("starting orbit")
-	srv := newServer(":8080")
+	srv := server.New(":8080")
 	log.Fatal(srv.ListenAndServe())
 }
 EOF
-svn add -q server.go
+svn add -q internal
 svn commit -q -m "Add HTTP server skeleton"
 
 # --- r3: configuration ----------------------------------------------------
-cat > config.yaml <<'EOF'
-addr: ":8080"
-log_level: "info"
+mkdir -p internal/config
+cat > internal/config/config.go <<'EOF'
+package config
+
+// Config holds runtime settings for the service.
+type Config struct {
+	Addr     string
+	LogLevel string
+}
+
+// Load reads configuration from the given path.
+func Load(path string) *Config {
+	return &Config{Addr: ":8080", LogLevel: "info"}
+}
 EOF
-cat > main.go <<'EOF'
+cat > cmd/main.go <<'EOF'
 package main
 
-import "log"
+import (
+	"log"
+
+	"orbit/internal/config"
+	"orbit/internal/server"
+)
 
 func main() {
-	cfg := loadConfig("config.yaml")
+	cfg := config.Load("config.yaml")
 	log.Printf("starting orbit on %s", cfg.Addr)
-	srv := newServer(cfg.Addr)
+	srv := server.New(cfg.Addr)
 	log.Fatal(srv.ListenAndServe())
 }
 EOF
-svn add -q config.yaml
+svn add -q internal/config
 svn commit -q -m "Load configuration from YAML"
 svn update -q
 
 # --- uncommitted working-copy changes ------------------------------------
-# Modified: main.go (add graceful shutdown) and server.go (register a route).
-cat > main.go <<'EOF'
+# Modified: cmd/main.go — graceful shutdown, with one deliberately long line so
+# the diff overflows the Main panel and the horizontal scrollbar + pinned gutter
+# have something to show.
+cat > cmd/main.go <<'EOF'
 package main
 
 import (
@@ -93,51 +123,60 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"syscall"
+
+	"orbit/internal/config"
+	"orbit/internal/server"
 )
 
 func main() {
-	cfg := loadConfig("config.yaml")
-	log.Printf("starting orbit on %s", cfg.Addr)
+	cfg := config.Load("config.yaml")
+	log.Printf("starting orbit on %s with log level %s and graceful shutdown via SIGINT/SIGTERM", cfg.Addr, cfg.LogLevel)
 
-	srv := newServer(cfg.Addr)
-	go func() { log.Fatal(srv.ListenAndServe()) }()
+	srv := server.New(cfg.Addr)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil {
+			log.Fatal(err)
+		}
+	}()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	<-ctx.Done()
-	log.Println("shutting down")
+	log.Println("shutting down orbit")
 }
 EOF
-cat > server.go <<'EOF'
-package main
 
-import (
-	"net/http"
-)
+# Modified: internal/server/server.go — register a health route.
+cat > internal/server/server.go <<'EOF'
+package server
 
-func newServer(addr string) *http.Server {
+import "net/http"
+
+func New(addr string) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealth)
 	return &http.Server{Addr: addr, Handler: mux}
 }
 EOF
 
-# Added + staged into a named changelist.
-cat > handler.go <<'EOF'
-package main
+# Added: internal/server/handler.go — a new, svn-added file (unassigned, so the
+# demo can stage the whole internal/server directory at once).
+cat > internal/server/handler.go <<'EOF'
+package server
 
 import "net/http"
 
+// handleHealth reports service liveness for readiness probes.
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
 }
 EOF
-svn add -q handler.go
-svn changelist feature-health handler.go -q
+svn add -q internal/server/handler.go
 
-# Untracked scratch files.
+# Untracked scratch files at the working-copy root.
 printf 'ORBIT_ADDR=:9090\nORBIT_LOG_LEVEL=debug\n' > .env
-printf 'TODO: add graceful shutdown timeout\nTODO: structured logging\n' > notes.txt
+printf 'TODO: graceful shutdown timeout\nTODO: structured logging\n' > notes.txt
 
 echo "demo ready: $WC"

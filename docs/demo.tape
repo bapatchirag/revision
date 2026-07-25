@@ -27,46 +27,57 @@ Set Theme { "name": "Tokyo Night", "background": "#1a1b26", "foreground": "#c0ca
 # --- hidden setup: build the demo working copy and put revision on PATH ---
 Hide
 Type "bash docs/demo-setup.sh /tmp/revision-demo && go build -o /tmp/revision-demo/revision ./cmd/revision && echo READY" Enter
-Sleep 8s
+Sleep 9s
 Type 'export PATH="/tmp/revision-demo:$PATH"' Enter
 Type "cd /tmp/revision-demo/wc && clear" Enter
 Show
 
 # --- launch: the lazygit-style layout (Status · Files · Log · Main) ---------
+# The changed files are shown as a collapsible directory tree rooted at "/".
 Type "revision" Enter
-Sleep 2.5s
+Sleep 2.8s
 
-# Browse the changed files; the Main panel follows the selection with a diff.
-Type "j"
-Sleep 1.6s
-Type "j"
-Sleep 1.8s
+# The Main panel follows the selection with a colour-coded diff. Focus it and
+# jump to the end of a long line: the +/- gutter stays pinned and the
+# scrollbars show how much is off-screen.
+Type "0"
+Sleep 1.1s
+Type "$"
+Sleep 1.9s
+Type "^"
+Sleep 1s
+Type "2"
+Sleep 800ms
 
-# Stage a modified file — a green dot appears and a toast confirms it.
-Space
+# Walk down into a directory; highlighting it shows the combined diff of every
+# change beneath it.
+Type "j"
+Sleep 1.5s
+Type "j"
 Sleep 2s
 
-# Move to another change and stage it too.
-Type "j"
-Sleep 700ms
-Type "j"
-Sleep 1.6s
+# Stage the whole directory with a single keystroke — every file under it gets
+# a green staged marker.
 Space
-Sleep 2s
-
-# --- named changelists live in a tabbed view inside the Files panel --------
-Type "]"
 Sleep 2.2s
 
-# Drill into a changelist to see just its files, then step back out.
+# Name the entire staged set as one changelist in a single step.
+Type "n"
+Sleep 1s
+Type "feature-health"
+Sleep 1.2s
 Enter
 Sleep 2.2s
-Escape
-Sleep 1.2s
-Type "["
-Sleep 1.2s
 
-# --- read-only history in the Log panel ------------------------------------
+# --- the changelist lives in a tabbed view inside the Files panel -----------
+Type "]"
+Sleep 2s
+
+# Drill into it to see just its files.
+Enter
+Sleep 2.2s
+
+# --- read-only history: full revision numbers and authors ------------------
 Type "3"
 Sleep 1.6s
 Type "j"
@@ -74,21 +85,21 @@ Sleep 1.6s
 
 # --- the full keybindings menu is always one '?' away ----------------------
 Type "?"
-Sleep 3.2s
+Sleep 2.8s
 Type "?"
-Sleep 900ms
+Sleep 800ms
 
-# --- commit the staged set through the message editor ----------------------
+# --- commit the changelist through the message editor ----------------------
 Type "2"
-Sleep 900ms
+Sleep 800ms
 Type "c"
+Sleep 1.3s
+Type "Add /healthz route and handler"
 Sleep 1.4s
-Type "Wire graceful shutdown and /healthz route"
-Sleep 1.6s
 Ctrl+S
-Sleep 2.6s
+Sleep 2.4s
 
 # Committed — the toast reports the new revision and the log picks it up.
-Sleep 1.4s
+Sleep 1.2s
 Type "q"
 Sleep 1s
