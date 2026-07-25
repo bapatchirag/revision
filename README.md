@@ -69,6 +69,20 @@ go install github.com/bapatchirag/revision/cmd/revision@latest
 
 Download the binary for your platform from the [Releases](https://github.com/bapatchirag/revision/releases) page and put it on your `PATH`.
 
+### Updating
+
+Release builds check for a newer version on startup. When one is available, `revision` shows a prompt offering to **update with cURL** (re-runs the install script), **update with Go** (`go install …@latest`), or skip it for now — pick one with the arrow keys and `Enter`, or press `Esc` to dismiss.
+
+You can also update from the command line at any time:
+
+```sh
+revision --update                 # check, then prompt for a method
+revision --update --update-with curl   # non-interactive: use the install script
+revision --update --update-with go     # non-interactive: use go install
+```
+
+The update check and `--update` only run on official release builds; development and locally cross-compiled builds never check for or apply updates.
+
 ## Usage
 
 ```sh
@@ -83,6 +97,8 @@ Flags:
 
 - `--path <dir>` — working copy to operate on (default: current directory)
 - `--version` — print version and exit
+- `--update` — check for a newer release and update the binary (release builds only)
+- `--update-with <curl|go>` — method for `--update` (default: prompt)
 - `--help` — show help
 
 ### Keybindings

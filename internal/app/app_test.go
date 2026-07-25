@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/muesli/termenv"
 
+	"github.com/bapatchirag/revision/internal/selfupdate"
 	"github.com/bapatchirag/revision/internal/svn"
 	uimsg "github.com/bapatchirag/revision/internal/tui/msg"
 	"github.com/bapatchirag/revision/internal/tui/theme"
@@ -29,7 +30,7 @@ func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
 
 func sizedModel(t *testing.T) *Model {
 	t.Helper()
-	m := New(nil, &svn.Info{URL: "https://svn.example.com/repo/trunk", Revision: "42"})
+	m := New(nil, &svn.Info{URL: "https://svn.example.com/repo/trunk", Revision: "42"}, selfupdate.Build{})
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return next.(*Model)
 }
@@ -971,6 +972,143 @@ func TestHelpMenuGolden(t *testing.T) {
 		{Path: "modified.go", State: svn.StateModified},
 	})
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = next.(*Model)
+	golden.RequireEqual(t, []byte(m.View()))
+}
+
+// availableRelease is the fixture release the update-prompt tests offer.
+var availableRelease = selfupdate.Release{Tag: "v1.5.0", Version: "1.5.0", URL: "https://example.test/r"}
+
+func TestUpdatePromptOpensOnAvailable(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	next, _ := m.Update(updateAvailableMsg{rel: availableRelease})
+	m = next.(*Model)
+
+	if !m.updating {
+		t.Fatal("expected the update prompt to open when a newer release is available")
+	}
+	view := stripANSI(m.View())
+	for _, want := range []string{"Update available: v1.5.0", "Update with cURL", "Update with Go", "Don't update this time"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("update prompt missing %q\n---\n%s", want, view)
+		}
+	}
+}
+
+func TestUpdatePromptCurlQuitsWithPendingMethod(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	next, _ := m.Update(updateAvailableMsg{rel: availableRelease})
+	m = next.(*Model)
+
+	// enter on the first item (Update with cURL) emits an ActivatedMsg…
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(*Model)
+	if cmd == nil {
+		t.Fatal("expected a command from selecting a menu item")
+	}
+	// …which, once delivered, records the method and quits.
+	next, cmd = m.Update(cmd())
+	m = next.(*Model)
+	if cmd == nil {
+		t.Fatal("expected a quit command after choosing an update method")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("expected tea.QuitMsg, got %T", cmd())
+	}
+	method, chosen := m.PendingUpdate()
+	if !chosen || method != selfupdate.MethodCurl {
+		t.Errorf("PendingUpdate() = (%v, %v), want (curl, true)", method, chosen)
+	}
+}
+
+func TestUpdatePromptGoQuitsWithPendingMethod(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	next, _ := m.Update(updateAvailableMsg{rel: availableRelease})
+	m = next.(*Model)
+
+	// Move to the second item (Update with Go), then select it.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(*Model)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(*Model)
+	next, _ = m.Update(cmd())
+	m = next.(*Model)
+
+	method, chosen := m.PendingUpdate()
+	if !chosen || method != selfupdate.MethodGo {
+		t.Errorf("PendingUpdate() = (%v, %v), want (go, true)", method, chosen)
+	}
+}
+
+func TestUpdatePromptDeclineDismissesWithoutUpdate(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	next, _ := m.Update(updateAvailableMsg{rel: availableRelease})
+	m = next.(*Model)
+
+	// Third item is "Don't update this time": it closes the prompt and records
+	// no pending update.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(*Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(*Model)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd())
+		m = next.(*Model)
+	}
+	if m.updating {
+		t.Error("the prompt should close after declining")
+	}
+	if _, chosen := m.PendingUpdate(); chosen {
+		t.Error("declining must not record a pending update")
+	}
+}
+
+func TestUpdatePromptEscDismisses(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	next, _ := m.Update(updateAvailableMsg{rel: availableRelease})
+	m = next.(*Model)
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd()) // deliver the DismissMsg
+		m = next.(*Model)
+	}
+	if m.updating {
+		t.Error("esc should dismiss the update prompt")
+	}
+	if _, chosen := m.PendingUpdate(); chosen {
+		t.Error("dismissing must not record a pending update")
+	}
+	if view := stripANSI(m.View()); strings.Contains(view, "Update available") {
+		t.Error("the layout should return after dismissing the update prompt")
+	}
+}
+
+func TestUpdatePromptSuppressedWhileOverlayActive(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified, Changelist: "revision:staged"},
+	})
+	// Open the commit editor, then let the update check land underneath it.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = next.(*Model)
+	if !m.editing {
+		t.Fatal("expected the commit editor to be open")
+	}
+	next, _ = m.Update(updateAvailableMsg{rel: availableRelease})
+	m = next.(*Model)
+	if m.updating {
+		t.Error("the update prompt must not steal focus from an active overlay")
+	}
+}
+
+func TestUpdatePromptGolden(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(updateAvailableMsg{rel: availableRelease})
 	m = next.(*Model)
 	golden.RequireEqual(t, []byte(m.View()))
 }

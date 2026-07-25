@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/bapatchirag/revision/internal/selfupdate"
 	"github.com/bapatchirag/revision/internal/svn"
 	"github.com/bapatchirag/revision/internal/tui/component"
 	"github.com/bapatchirag/revision/internal/tui/focus"
@@ -56,6 +57,9 @@ const confirmModalID = "confirm"
 // helpMenuID identifies the keybindings help menu on emitted messages.
 const helpMenuID = "help"
 
+// updateMenuID identifies the startup update prompt on emitted messages.
+const updateMenuID = "update"
+
 // mainSource selects which side panel's selection drives the Main viewport.
 type mainSource int
 
@@ -88,6 +92,7 @@ type Model struct {
 	nameEditor *component.Prompt
 	modal      *component.Modal
 	menu       *component.Menu
+	updateMenu *component.Menu
 	toast      *component.Toast
 	focus      *focus.Manager
 
@@ -111,6 +116,12 @@ type Model struct {
 	pending      tea.Cmd
 	showingToast bool
 
+	build        selfupdate.Build
+	updating     bool
+	updateRel    selfupdate.Release
+	updateMethod selfupdate.Method
+	updateChosen bool
+
 	width   int
 	height  int
 	loading bool
@@ -119,8 +130,10 @@ type Model struct {
 
 var _ tea.Model = (*Model)(nil)
 
-// New creates the root model for the given client and working-copy info.
-func New(client *svn.Client, info *svn.Info) *Model {
+// New creates the root model for the given client and working-copy info. build
+// carries the running binary's provenance so a release build can offer to
+// self-update on startup.
+func New(client *svn.Client, info *svn.Info, build selfupdate.Build) *Model {
 	th := theme.Default()
 	keys := keymap.Default()
 
@@ -160,11 +173,13 @@ func New(client *svn.Client, info *svn.Info) *Model {
 		nameEditor:      component.NewPrompt(changelistEditorID, "Changelist name", "e.g. feature-x", th, keys),
 		modal:           component.NewModal(confirmModalID, "", "", th, keys),
 		menu:            component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
+		updateMenu:      component.NewMenu(updateMenuID, "Update available", updateMenuItems(), th, keys),
 		toast:           component.NewToast(th),
 		collapsedDirs:   map[string]bool{},
 		clCollapsedDirs: map[string]bool{},
 		source:          sourceFiles,
 		commitCL:        stagedChangelist,
+		build:           build,
 		loading:         true,
 	}
 	m.focus = focus.New(panels[panelStatus], panels[panelFiles], panels[panelLog], panels[panelMain])
@@ -174,9 +189,14 @@ func New(client *svn.Client, info *svn.Info) *Model {
 	return m
 }
 
-// Init loads the initial working-copy status and revision history.
+// Init loads the initial working-copy status and revision history, and — on a
+// release build — checks GitHub for a newer version in the background.
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client))
+	cmds := []tea.Cmd{loadStatusCmd(m.client), loadLogCmd(m.client)}
+	if m.build.IsRelease() {
+		cmds = append(cmds, checkUpdateCmd(m.build))
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update handles messages, global keys, and forwards the rest to the focused
@@ -197,6 +217,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.helping {
 			m.sizeMenu()
+		}
+		if m.updating {
+			m.sizeUpdateMenu()
 		}
 		return m, nil
 
@@ -298,6 +321,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.diffPath, m.diffText = "", ""
 		return m, tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client))
 
+	case updateAvailableMsg:
+		// Offer the update only when nothing else is on screen, so the prompt
+		// never steals focus from an in-flight commit, confirmation, or menu.
+		if !m.overlayActive() {
+			m.openUpdate(msg.rel)
+		}
+		return m, nil
+
 	case uimsg.SelectedMsg:
 		return m, m.handleSelection(msg)
 
@@ -312,6 +343,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.toggleCollapse()
 		case changelistFilesID:
 			return m, m.toggleClCollapse()
+		case updateMenuID:
+			return m, m.chooseUpdate(msg.Index)
 		}
 		return m, nil
 
@@ -362,6 +395,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case confirmModalID:
 			m.closeConfirm()
 			m.pending = nil
+		case updateMenuID:
+			m.closeUpdate()
 		}
 		return m, nil
 
@@ -374,6 +409,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.confirming {
 			return m, m.modal.Update(msg)
+		}
+		if m.updating {
+			// The update prompt captures every key: ↑/↓ move, enter chooses a
+			// method, esc dismisses ("don't update this time").
+			return m, m.updateMenu.Update(msg)
 		}
 		if m.helping {
 			// Read-only reference: only ? and esc close it; other keys drive the
@@ -410,6 +450,8 @@ func (m *Model) View() string {
 		view = m.overlayCenter(view, m.nameEditor.View())
 	case m.confirming:
 		view = m.overlayCenter(view, m.modal.View())
+	case m.updating:
+		view = m.overlayCenter(view, m.updateMenu.View())
 	case m.helping:
 		view = m.overlayCenter(view, m.menu.View())
 	}
@@ -955,6 +997,55 @@ func (m *Model) closeHelp() {
 	m.menu.Blur()
 }
 
+// overlayActive reports whether any modal, editor, or menu is currently on
+// screen, so a background event (like the update check completing) knows not to
+// steal focus.
+func (m *Model) overlayActive() bool {
+	return m.editing || m.naming || m.confirming || m.helping || m.updating
+}
+
+// openUpdate shows the startup update prompt for the given release as a centered
+// overlay, titling it with the new version.
+func (m *Model) openUpdate(rel selfupdate.Release) {
+	m.updateRel = rel
+	m.updating = true
+	m.updateMenu.SetTitle("Update available: " + rel.Tag)
+	m.updateMenu.Focus()
+	m.sizeUpdateMenu()
+}
+
+// closeUpdate hides the update prompt without applying an update.
+func (m *Model) closeUpdate() {
+	m.updating = false
+	m.updateMenu.Blur()
+}
+
+// chooseUpdate handles a selection in the update prompt. The first two items
+// record the chosen method and quit so the update runs after the TUI tears down
+// (a self-replacing binary cannot be updated cleanly while it is on screen); the
+// last item just dismisses the prompt.
+func (m *Model) chooseUpdate(index int) tea.Cmd {
+	switch index {
+	case 0:
+		m.updateMethod = selfupdate.MethodCurl
+		m.updateChosen = true
+		return tea.Quit
+	case 1:
+		m.updateMethod = selfupdate.MethodGo
+		m.updateChosen = true
+		return tea.Quit
+	default:
+		m.closeUpdate()
+		return nil
+	}
+}
+
+// PendingUpdate reports the update method the user chose before quitting, if
+// any. The command layer runs it once the program has exited.
+func (m *Model) PendingUpdate() (selfupdate.Method, bool) {
+	return m.updateMethod, m.updateChosen
+}
+
 // showToast displays a transient notice; it stays until the next interaction.
 func (m *Model) showToast(text string, level component.Level) {
 	m.toast.Show(text, level)
@@ -995,6 +1086,16 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Line start / end", Key: "home / end"},
 		{Label: "Toggle help", Key: "?"},
 		{Label: "Quit", Key: "q"},
+	}
+}
+
+// updateMenuItems are the choices shown in the startup update prompt. Their
+// order is load-bearing: chooseUpdate maps index 0/1/2 to curl / go / dismiss.
+func updateMenuItems() []component.MenuItem {
+	return []component.MenuItem{
+		{Label: "Update with cURL"},
+		{Label: "Update with Go"},
+		{Label: "Don't update this time"},
 	}
 }
 
@@ -1055,6 +1156,12 @@ func (m *Model) sizeModal() {
 // width matters; the height follows the item count).
 func (m *Model) sizeMenu() {
 	m.menu.SetSize(clamp(m.width/2, 40, max(m.width-6, 40)), 0)
+}
+
+// sizeUpdateMenu sizes the startup update prompt like the help menu (width
+// only; the height follows the three choices).
+func (m *Model) sizeUpdateMenu() {
+	m.updateMenu.SetSize(clamp(m.width/2, 40, max(m.width-6, 40)), 0)
 }
 
 // stageable reports whether a working-copy state can be added to the staged

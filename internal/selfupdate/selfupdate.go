@@ -1,0 +1,272 @@
+// Package selfupdate checks GitHub for a newer released binary and performs the
+// upgrade through one of the project's documented install paths (the install.sh
+// script via curl, or `go install`). It is deliberately domain-agnostic: it
+// knows nothing about the TUI or the SVN layer, so both the running app and the
+// `--update` CLI path can share it.
+//
+// Update checks are gated on the build channel: only official release builds
+// (marked by the release pipeline) ever contact GitHub or upgrade themselves.
+// Development and locally cross-compiled builds are inert.
+package selfupdate
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const (
+	// repo is the GitHub "owner/name" this binary updates from.
+	repo = "bapatchirag/revision"
+
+	// installURL is the raw install script used by the curl update path. It is
+	// the same one-liner documented in the README and installs the latest
+	// release for the host OS/arch.
+	installURL = "https://raw.githubusercontent.com/bapatchirag/revision/main/install.sh"
+
+	// goModule is the module path used by the `go install` update path.
+	goModule = "github.com/bapatchirag/revision/cmd/revision"
+
+	// releaseChannel is the channel value that marks an official release build.
+	// Any other value (e.g. "dev") is treated as a development build and never
+	// checks for or applies updates.
+	releaseChannel = "release"
+)
+
+// apiBase is the GitHub REST API root. It is a variable so tests can point it at
+// a local server.
+var apiBase = "https://api.github.com"
+
+// httpClient bounds every update check so a slow or unreachable network can
+// never hang startup; callers still pass a context for finer control.
+var httpClient = &http.Client{Timeout: 8 * time.Second}
+
+// Method identifies how an update is applied.
+type Method int
+
+const (
+	// MethodCurl pipes the install script through the shell (curl | sh).
+	MethodCurl Method = iota
+	// MethodGo runs `go install <module>@latest`.
+	MethodGo
+)
+
+// Build describes the running binary's provenance, injected at build time.
+type Build struct {
+	Version string // semver such as "1.4.0" on releases; "dev" or a git-describe string otherwise
+	Channel string // "release" for official builds; anything else is a development build
+}
+
+// IsRelease reports whether this is an official release build eligible for
+// update checks. A build qualifies only when the release pipeline marked its
+// channel and stamped a parseable semver version, so development and
+// locally cross-compiled builds are always excluded.
+func (b Build) IsRelease() bool {
+	if b.Channel != releaseChannel {
+		return false
+	}
+	_, ok := parseSemver(b.Version)
+	return ok
+}
+
+// Release is the metadata for the latest published GitHub release.
+type Release struct {
+	Tag     string // release tag, e.g. "v1.4.0"
+	Version string // tag with any leading "v" stripped, e.g. "1.4.0"
+	URL     string // human-facing release page
+}
+
+// Check returns the latest release and whether it is newer than the running
+// build. On a development build it reports no update without any network call.
+func Check(ctx context.Context, b Build) (Release, bool, error) {
+	if !b.IsRelease() {
+		return Release{}, false, nil
+	}
+	rel, err := Latest(ctx)
+	if err != nil {
+		return Release{}, false, err
+	}
+	cmp, err := compareVersions(rel.Version, b.Version)
+	if err != nil {
+		return rel, false, err
+	}
+	return rel, cmp > 0, nil
+}
+
+// Latest fetches the most recent published release from the GitHub API.
+func Latest(ctx context.Context) (Release, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/releases/latest", apiBase, repo)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return Release{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "revision-selfupdate")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return Release{}, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return Release{}, fmt.Errorf("github: unexpected status %s", resp.Status)
+	}
+
+	var payload struct {
+		TagName string `json:"tag_name"`
+		HTMLURL string `json:"html_url"`
+	}
+	// Bound the body so a malformed or hostile response cannot exhaust memory.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
+		return Release{}, fmt.Errorf("github: decode response: %w", err)
+	}
+	if payload.TagName == "" {
+		return Release{}, errors.New("github: latest release has no tag")
+	}
+	return Release{
+		Tag:     payload.TagName,
+		Version: strings.TrimPrefix(payload.TagName, "v"),
+		URL:     payload.HTMLURL,
+	}, nil
+}
+
+// Run applies an update using the chosen method, streaming the underlying
+// command's output to the current terminal. It fails fast with a clear message
+// when the required tool (curl or go) is not on the PATH.
+func Run(m Method) error {
+	switch m {
+	case MethodGo:
+		return execUpdate("go", "go", "install", goModule+"@latest")
+	default:
+		return execUpdate("curl", "sh", "-c", "curl -fsSL "+installURL+" | sh")
+	}
+}
+
+// Label returns a short human name for a method, used in prompts and messages.
+func (m Method) Label() string {
+	switch m {
+	case MethodGo:
+		return "go install"
+	default:
+		return "curl"
+	}
+}
+
+// execUpdate checks that require is installed, then runs name/args with the
+// process's own stdio so the user sees live progress.
+func execUpdate(require, name string, args ...string) error {
+	if _, err := exec.LookPath(require); err != nil {
+		return fmt.Errorf("%s is required for this update method but was not found on your PATH", require)
+	}
+	cmd := exec.Command(name, args...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
+// semver is a parsed MAJOR.MINOR.PATCH with an optional pre-release.
+type semver struct {
+	major, minor, patch int
+	pre                 string
+}
+
+// parseSemver parses a version like "v1.4.0", "1.4.0" or "1.4.0-rc.1". Build
+// metadata (after "+") is ignored. It reports ok=false for anything that is not
+// a three-part numeric core, which includes the "dev" sentinel.
+func parseSemver(s string) (semver, bool) {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "v")
+	if i := strings.IndexByte(s, '+'); i >= 0 {
+		s = s[:i]
+	}
+	core := s
+	var pre string
+	if i := strings.IndexByte(s, '-'); i >= 0 {
+		core, pre = s[:i], s[i+1:]
+	}
+	parts := strings.Split(core, ".")
+	if len(parts) != 3 {
+		return semver{}, false
+	}
+	nums := make([]int, 3)
+	for i, p := range parts {
+		n, err := atoiStrict(p)
+		if err != nil {
+			return semver{}, false
+		}
+		nums[i] = n
+	}
+	return semver{major: nums[0], minor: nums[1], patch: nums[2], pre: pre}, true
+}
+
+// atoiStrict parses a run of ASCII digits, rejecting signs, spaces and empties
+// so a git-describe fragment never masquerades as a version component.
+func atoiStrict(s string) (int, error) {
+	if s == "" {
+		return 0, errors.New("empty number")
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0, fmt.Errorf("non-digit in %q", s)
+		}
+	}
+	return strconv.Atoi(s)
+}
+
+// compareVersions returns >0 if a is newer than b, 0 if equal, <0 if older.
+func compareVersions(a, b string) (int, error) {
+	av, ok := parseSemver(a)
+	if !ok {
+		return 0, fmt.Errorf("invalid version %q", a)
+	}
+	bv, ok := parseSemver(b)
+	if !ok {
+		return 0, fmt.Errorf("invalid version %q", b)
+	}
+	for _, d := range [][2]int{{av.major, bv.major}, {av.minor, bv.minor}, {av.patch, bv.patch}} {
+		if d[0] != d[1] {
+			return sign(d[0] - d[1]), nil
+		}
+	}
+	return comparePre(av.pre, bv.pre), nil
+}
+
+// comparePre orders pre-release identifiers: a build with no pre-release
+// outranks one with a pre-release (1.0.0 > 1.0.0-rc.1); otherwise they compare
+// lexically, which is sufficient for the common numeric/rc cases.
+func comparePre(a, b string) int {
+	switch {
+	case a == "" && b == "":
+		return 0
+	case a == "":
+		return 1
+	case b == "":
+		return -1
+	case a == b:
+		return 0
+	case a < b:
+		return -1
+	default:
+		return 1
+	}
+}
+
+func sign(n int) int {
+	switch {
+	case n > 0:
+		return 1
+	case n < 0:
+		return -1
+	default:
+		return 0
+	}
+}

@@ -1,0 +1,24 @@
+╭─ [1] Status ─────────────────╮╭─ Main ───────────────────────────────────────╮
+│https://svn.example.com/repo/t││Loading diff…                                 │
+│r42                           ││                                              │
+│1 change(s)                   ││                                              │
+│━━━━━━━━━━━━━━━━━━━━━━━━━━────││                                              │
+╰──────────────────────────────╯│                                              │
+╭─ [2] ─ Changes ─── Changelist╮│                                              │
+│  ▾ /                         ││                                              │
+│>     M modified.go           ││                                              │
+│                   ╭─ Update available: v1.5.0 ───────────╮                   │
+│                   │> Update with cURL                    │                   │
+│                   │  Update with Go                      │                   │
+│                   │  Don't update this time              │                   │
+╰───────────────────╰──────────────────────────────────────╯                   │
+╭─ [3] Log ────────────────────╮│                                              │
+│  Rev Author Message          ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+╰──────────────────────────────╯╰──────────────────────────────────────────────╯
+space stage · n changelist · c commit · r revert · d delete · ? help            

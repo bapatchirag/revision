@@ -295,6 +295,14 @@ func TestMenuEmitsActivatedAndDismiss(t *testing.T) {
 	}
 }
 
+func TestMenuSetTitleUpdatesView(t *testing.T) {
+	mn := component.NewMenu("update", "Update available", nil, testTheme(), testKeys())
+	mn.SetTitle("Update available: v1.5.0")
+	if view := mn.View(); !strings.Contains(view, "v1.5.0") {
+		t.Errorf("view should show the new title, got:\n%s", view)
+	}
+}
+
 func TestModalEmitsConfirmAndDismiss(t *testing.T) {
 	mo := component.NewModal("confirm", "Delete?", "gone forever", testTheme(), testKeys())
 	mo.Focus()
