@@ -10,14 +10,15 @@ import (
 // logLimit caps how many recent revisions the Log panel loads.
 const logLimit = 50
 
-// logColumns describes the Log table layout: compact fixed revision/author
-// columns and a flexible message column that consumes the remaining width. The
-// date is intentionally omitted here (it is shown in the Main detail) to keep
-// the table legible in the narrow left column.
+// logColumns describes the Log table layout: revision, author and message
+// columns are all natural-width so the complete revision number and author name
+// are shown in full; any overflow is revealed by the table's horizontal
+// scrolling rather than being truncated. The date is intentionally omitted here
+// (it is shown in the Main detail) to keep the table legible.
 func logColumns() []component.Column {
 	return []component.Column{
-		{Title: "Rev", Width: 6},
-		{Title: "Author", Width: 10},
+		{Title: "Rev", Width: 0},
+		{Title: "Author", Width: 0},
 		{Title: "Message", Width: 0},
 	}
 }

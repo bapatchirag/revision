@@ -13,7 +13,7 @@
 │                   │  Jump to panel                1 2 3 0│                   │
 ╰───────────────────│  Cycle panels         tab / shift+tab│                   │
 ╭─ [3] Log ─────────│  Move up / down                 k / j│                   │
-│  Rev    Author    │  Jump top / bottom              g / G│                   │
+│  Rev Author Messag│  Jump top / bottom              g / G│                   │
 │                   │  Scroll main up / down          K / J│                   │
 │                   │  Scroll main left / right       h / l│                   │
 │                   │  Line start / end          home / end│                   │
