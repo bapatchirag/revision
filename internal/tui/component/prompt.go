@@ -240,12 +240,19 @@ func (p *Prompt) View() string {
 		}
 		rows = append(rows, fitLine("", innerW), fitLine(lipgloss.NewStyle().Foreground(p.theme.Muted).Render(head), innerW))
 		sel := lipgloss.NewStyle().Foreground(p.theme.Selection).Bold(true)
+		bar := lipgloss.NewStyle().Background(p.theme.SelectionBg)
 		for i, opt := range p.options {
+			var row string
 			if i == p.sel && p.listFocused {
-				rows = append(rows, fitLine(sel.Render("> ")+opt, innerW))
+				row = fitLine(sel.Render("> ")+opt, innerW)
 			} else {
-				rows = append(rows, fitLine("  "+opt, innerW))
+				row = fitLine("  "+opt, innerW)
 			}
+			// Highlight the picked option so it stays marked after tabbing back.
+			if i == p.sel {
+				row = highlightLine(row, innerW, bar)
+			}
+			rows = append(rows, row)
 		}
 	}
 	hint := promptHint

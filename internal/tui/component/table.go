@@ -174,9 +174,11 @@ func (t *Table[T]) rowText(cells []string, widths []int) string {
 	return strings.Join(parts, " ")
 }
 
-// View renders the header row followed by the visible window of body rows,
-// marking the cursor while focused. Vertical and horizontal scrollbars occupy the
-// right column and bottom row whenever the rows overflow that axis.
+// View renders the header row followed by the visible window of body rows. The
+// active row is drawn as a full-width highlight bar so it stays marked even when
+// the panel is unfocused; a "> " caret additionally marks it while focused.
+// Vertical and horizontal scrollbars occupy the right column and bottom row
+// whenever the rows overflow that axis.
 func (t *Table[T]) View() string {
 	widths := t.natWidths
 	innerW, innerH, vBar, hBar := scrollLayout(len(t.items), t.contentWidth, t.width, t.height, 1)
@@ -197,15 +199,22 @@ func (t *Table[T]) View() string {
 	}
 
 	sel := lipgloss.NewStyle().Foreground(t.theme.Selection).Bold(true)
+	bar := lipgloss.NewStyle().Background(t.theme.SelectionBg)
 	body := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
 		row := t.rowText(t.render(t.items[i]), widths)
-		if i == t.cursor && t.focused {
+		selected := i == t.cursor
+		if selected && t.focused {
 			row = sel.Render("> ") + row
 		} else {
 			row = "  " + row
 		}
-		body = append(body, windowLine(row, t.xOffset, innerW))
+		row = windowLine(row, t.xOffset, innerW)
+		// Highlight the active row so it stays marked even when unfocused.
+		if selected {
+			row = highlightLine(row, innerW, bar)
+		}
+		body = append(body, row)
 	}
 	if hBar {
 		for len(body) < innerH-1 {

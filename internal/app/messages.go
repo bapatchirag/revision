@@ -78,14 +78,21 @@ func loadStatusCmd(client *svn.Client) tea.Cmd {
 	}
 }
 
-// loadDiffCmd runs `svn diff <path>` off the UI goroutine. Diff failures are
-// carried on the message rather than promoted to a fatal error so a single
-// undiffable file never tears down the UI.
+// loadDiffCmd runs `svn diff <path>` off the UI goroutine. A file path diffs that
+// file; a directory path diffs every change beneath it. The synthetic "/" root
+// (fileTreeRoot) maps to the empty path so it diffs the whole working copy, while
+// the message stays keyed by the original path so the current selection can match
+// it. Diff failures are carried on the message rather than promoted to a fatal
+// error so a single undiffable path never tears down the UI.
 func loadDiffCmd(client *svn.Client, path string) tea.Cmd {
+	target := path
+	if target == fileTreeRoot {
+		target = ""
+	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		diff, err := client.Diff(ctx, path)
+		diff, err := client.Diff(ctx, target)
 		return diffLoadedMsg{path: path, diff: diff, err: err}
 	}
 }

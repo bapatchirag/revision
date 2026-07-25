@@ -1110,9 +1110,17 @@ func (m *Model) afterFocusChange() tea.Cmd {
 	return nil
 }
 
-// diffLoadForSelection returns a command to load the diff of the selected file
-// when it is dirty and not already loaded.
+// diffLoadForSelection returns a command to load the diff that Main should show
+// for the current Files selection when it is not already loaded. A directory row
+// loads the combined diff of every change beneath it (the "/" root covers the
+// whole working copy); a file leaf loads its own diff when it is dirty.
 func (m *Model) diffLoadForSelection() tea.Cmd {
+	if n, _, ok := m.selectedTreeNode(); ok && n.Item == nil {
+		if m.diffPath == n.Path {
+			return nil
+		}
+		return loadDiffCmd(m.client, n.Path)
+	}
 	it, ok := m.selectedFile()
 	if !ok || !it.State.IsDirty() || m.diffPath == it.Path {
 		return nil
@@ -1188,21 +1196,21 @@ func (m *Model) updateMain() {
 
 // filesMain renders the Main content for the Files panel, which depends on its
 // active view: the Changelists overview shows a changelist summary, a directory
-// row in the Changes tree shows a directory summary, and everything else (a file
-// in the Changes tree or a drilled-in changelist) shows the selected file.
+// row in the Changes tree shows the combined diff beneath it, and everything else
+// (a file in the Changes tree or a drilled-in changelist) shows the selected file.
 func (m *Model) filesMain() string {
 	if m.filesViewIsChangelists() && !m.inChangelistDrill() {
 		return m.changelistDetail()
 	}
-	if n, items, ok := m.selectedTreeNode(); ok && n.Item == nil {
-		return m.directoryDetail(n, items)
+	if n, _, ok := m.selectedTreeNode(); ok && n.Item == nil {
+		return m.directoryDetail(n)
 	}
 	return m.fileDetail()
 }
 
 // selectedTreeNode returns the tree row under the active Files-panel cursor —
 // from the Changes tree, or a drilled-in changelist tree — together with the
-// item set that tree was built from (used to count a directory's files). It
+// item set that tree was built from (used to stage a directory's files). It
 // reports ok=false at the Changelists overview, where the selection is a
 // changelist group rather than a tree row.
 func (m *Model) selectedTreeNode() (fileNode, []svn.StatusItem, bool) {
@@ -1218,12 +1226,16 @@ func (m *Model) selectedTreeNode() (fileNode, []svn.StatusItem, bool) {
 }
 
 // filesShowDiff reports whether filesMain currently renders a unified diff — the
-// only Main view with a +/-/space gutter to pin. It mirrors the default branch of
-// fileDetail: the Files panel is showing files (not the Changelists overview) and
-// the selected file is dirty with a non-empty, freshly-loaded diff.
+// only Main view with a +/-/space gutter to pin. It mirrors the diff branches of
+// directoryDetail and fileDetail: the Files panel is showing files (not the
+// Changelists overview) and the selected directory row, or dirty file leaf, has a
+// non-empty, freshly-loaded diff.
 func (m *Model) filesShowDiff() bool {
 	if m.filesViewIsChangelists() && !m.inChangelistDrill() {
 		return false
+	}
+	if n, _, ok := m.selectedTreeNode(); ok && n.Item == nil {
+		return m.diffPath == n.Path && strings.TrimSpace(m.diffText) != ""
 	}
 	it, ok := m.selectedFile()
 	if !ok || !it.State.IsDirty() {
@@ -1255,16 +1267,19 @@ func (m *Model) changelistDetail() string {
 	return strings.Join(lines, "\n")
 }
 
-// directoryDetail summarizes a selected directory row in a file tree: its path,
-// how many pending files sit beneath it (within items, the tree's source set),
-// and the collapse hint. The "/" root covers the whole set.
-func (m *Model) directoryDetail(n fileNode, items []svn.StatusItem) string {
-	count := len(filesUnder(n, items))
-	action := "enter collapse"
-	if n.Collapsed {
-		action = "enter expand"
+// directoryDetail renders the combined diff of every change beneath a selected
+// directory row (the "/" root covers the whole working copy). It mirrors
+// fileDetail: a placeholder shows while the diff loads or when the directory has
+// no textual changes.
+func (m *Model) directoryDetail(n fileNode) string {
+	switch {
+	case m.diffPath != n.Path:
+		return "Loading diff…"
+	case strings.TrimSpace(m.diffText) == "":
+		return "(no textual changes under this directory)"
+	default:
+		return colorizeDiff(m.theme, m.diffText)
 	}
-	return fmt.Sprintf("%s\n%d change(s) under this directory\n\n%s", dirLabel(n), count, action)
 }
 
 // fileDetail renders the selected file's diff, prefixed by its changelist when

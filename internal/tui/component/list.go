@@ -147,9 +147,11 @@ func (l *List[T]) Update(m tea.Msg) tea.Cmd {
 	return nil
 }
 
-// View renders the visible window of rows, marking the cursor while focused.
-// Vertical and horizontal scrollbars occupy the right column and bottom row
-// whenever the items overflow that axis.
+// View renders the visible window of rows. The active row is drawn as a
+// full-width highlight bar so it stays marked even when the panel is unfocused;
+// a "> " caret additionally marks it while focused. Vertical and horizontal
+// scrollbars occupy the right column and bottom row whenever the items overflow
+// that axis.
 func (l *List[T]) View() string {
 	if len(l.items) == 0 {
 		return ""
@@ -162,16 +164,23 @@ func (l *List[T]) View() string {
 	}
 
 	sel := lipgloss.NewStyle().Foreground(l.theme.Selection).Bold(true)
+	bar := lipgloss.NewStyle().Background(l.theme.SelectionBg)
 	rows := make([]string, 0, end-l.offset)
 	for i := l.offset; i < end; i++ {
 		row := l.render(l.items[i])
-		if i == l.cursor && l.focused {
+		selected := i == l.cursor
+		if selected && l.focused {
 			row = sel.Render("> ") + row
 		} else {
 			row = "  " + row
 		}
 		if vBar || hBar {
 			row = windowLine(row, l.xOffset, innerW)
+		}
+		// Highlight the active row with a full-width bar so the current
+		// file/folder stays marked even when the panel is not focused.
+		if selected {
+			row = highlightLine(row, innerW, bar)
 		}
 		rows = append(rows, row)
 	}

@@ -144,6 +144,58 @@ func TestStaleDiffIgnoredForOtherFile(t *testing.T) {
 	}
 }
 
+func TestDirectoryDiffLoadsIntoMain(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "src/b.go", State: svn.StateModified},
+	})
+	// The cursor opens on the first file; move it onto the src/ directory row.
+	selectDirRow(t, m, "src")
+
+	// Highlighting a directory schedules a load of its combined diff.
+	if cmd := m.diffLoadForSelection(); cmd == nil {
+		t.Fatal("expected a diff-load command for the highlighted directory")
+	}
+
+	// When it arrives, Main shows the diff of every file under the directory.
+	next, _ := m.Update(diffLoadedMsg{
+		path: "src",
+		diff: "Index: src/a.go\n@@ -1 +1 @@\n+alpha\nIndex: src/b.go\n@@ -1 +1 @@\n+beta",
+	})
+	m = next.(*Model)
+	main := stripANSI(m.main.View())
+	if !strings.Contains(main, "+alpha") || !strings.Contains(main, "+beta") {
+		t.Errorf("main should show the combined directory diff, got:\n%s", main)
+	}
+}
+
+func TestRootDirectoryDiffCoversWholeWorkingCopy(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "readme.md", State: svn.StateModified},
+	})
+	m.files.SetIndex(0) // the synthetic "/" root row covers the whole tree
+	root, ok := m.files.Selected()
+	if !ok || root.Path != fileTreeRoot {
+		t.Fatalf("expected cursor on the / root row, got %+v (ok=%v)", root, ok)
+	}
+	if cmd := m.diffLoadForSelection(); cmd == nil {
+		t.Fatal("expected a diff-load command for the root row")
+	}
+
+	// The root diff is keyed by the "/" sentinel so the current selection matches
+	// it; it spans changes anywhere in the working copy, nested or not.
+	next, _ := m.Update(diffLoadedMsg{
+		path: fileTreeRoot,
+		diff: "Index: readme.md\n@@ -1 +1 @@\n+top\nIndex: src/a.go\n@@ -1 +1 @@\n+nested",
+	})
+	m = next.(*Model)
+	main := stripANSI(m.main.View())
+	if !strings.Contains(main, "+top") || !strings.Contains(main, "+nested") {
+		t.Errorf("root diff should cover the whole working copy, got:\n%s", main)
+	}
+}
+
 func TestDiffWithTabsDoesNotOverflowWidth(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "added.txt", State: svn.StateAdded},
