@@ -90,7 +90,7 @@ func run(path string, build selfupdate.Build) error {
 		return fmt.Errorf("%q does not appear to be an SVN working copy: %w", abs, err)
 	}
 
-	cfg, err := config.Load()
+	cfg, err := config.Ensure()
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "revision: using default config:", err)
 	}

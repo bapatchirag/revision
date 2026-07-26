@@ -169,6 +169,65 @@ func TestLoadInvalidJSONReturnsError(t *testing.T) {
 	}
 }
 
+func TestEnsureCreatesDefaultFileWhenMissing(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	path := filepath.Join(xdg, "revision", "config.json")
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("precondition: config should not exist yet, stat err = %v", err)
+	}
+
+	got, err := Ensure()
+	if err != nil {
+		t.Fatalf("Ensure: unexpected error %v", err)
+	}
+	if got != Default() {
+		t.Errorf("Ensure() = %+v, want Default() %+v", got, Default())
+	}
+
+	// The first run must persist the defaults so the user has a file to edit.
+	onDisk, err := loadFrom(path)
+	if err != nil {
+		t.Fatalf("loadFrom after Ensure: %v", err)
+	}
+	if onDisk != Default() {
+		t.Errorf("persisted config = %+v, want Default() %+v", onDisk, Default())
+	}
+}
+
+func TestEnsureLoadsExistingFileWithoutOverwriting(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	dir := filepath.Join(xdg, "revision")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(dir, "config.json")
+	const existing = `{"editor":"nano"}`
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatalf("write existing config: %v", err)
+	}
+
+	got, err := Ensure()
+	if err != nil {
+		t.Fatalf("Ensure: unexpected error %v", err)
+	}
+	if got.Editor != "nano" {
+		t.Errorf("Ensure() Editor = %q, want %q (existing file must be honored)", got.Editor, "nano")
+	}
+
+	// Ensure must not rewrite an existing file: the sparse document stays as-is.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config after Ensure: %v", err)
+	}
+	if string(data) != existing {
+		t.Errorf("existing config was modified: got %q, want %q", string(data), existing)
+	}
+}
+
 func TestSaveCreatesNestedDirAndLeavesNoTempFiles(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested", "revision")
 	path := filepath.Join(dir, "config.json")
