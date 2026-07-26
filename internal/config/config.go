@@ -51,16 +51,21 @@ type Config struct {
 	// Theme selects the color palette by name. Empty is normalized to the
 	// built-in default palette.
 	Theme string `json:"theme"`
+	// DirectoryDiff controls whether highlighting a directory row shows the
+	// combined diff of every change beneath it. When false, the directory diff
+	// is hidden by default and can be toggled on at runtime.
+	DirectoryDiff bool `json:"directoryDiff"`
 }
 
 // Default returns the configuration used when no file exists yet or when a
 // field is absent from the on-disk document.
 func Default() Config {
 	return Config{
-		DefaultPath: "",
-		LogLimit:    100,
-		Editor:      "",
-		Theme:       "auto",
+		DefaultPath:   "",
+		LogLimit:      100,
+		Editor:        "",
+		Theme:         "auto",
+		DirectoryDiff: true,
 	}
 }
 

@@ -15,6 +15,9 @@ func TestDefault(t *testing.T) {
 	if def.Theme != "auto" {
 		t.Errorf("Default().Theme = %q, want %q", def.Theme, "auto")
 	}
+	if !def.DirectoryDiff {
+		t.Error("Default().DirectoryDiff = false, want true")
+	}
 }
 
 func TestDirUsesXDGConfigHome(t *testing.T) {
@@ -115,6 +118,21 @@ func TestLoadFillsDefaultsForAbsentKeys(t *testing.T) {
 	}
 	if got.Theme != Default().Theme {
 		t.Errorf("Theme = %q, want default %q", got.Theme, Default().Theme)
+	}
+}
+
+func TestLoadDisablesDirectoryDiff(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"directoryDiff":false}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got, err := loadFrom(path)
+	if err != nil {
+		t.Fatalf("loadFrom: unexpected error %v", err)
+	}
+	if got.DirectoryDiff {
+		t.Error("DirectoryDiff = true, want false (disabled on disk)")
 	}
 }
 

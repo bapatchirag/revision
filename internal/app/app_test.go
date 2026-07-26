@@ -31,7 +31,12 @@ func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
 
 func sizedModel(t *testing.T) *Model {
 	t.Helper()
-	m := New(nil, &svn.Info{URL: "https://svn.example.com/repo/trunk", Revision: "42"}, selfupdate.Build{}, config.Default())
+	return sizedModelCfg(t, config.Default())
+}
+
+func sizedModelCfg(t *testing.T, cfg config.Config) *Model {
+	t.Helper()
+	m := New(nil, &svn.Info{URL: "https://svn.example.com/repo/trunk", Revision: "42"}, selfupdate.Build{}, cfg)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return next.(*Model)
 }
@@ -195,6 +200,76 @@ func TestRootDirectoryDiffCoversWholeWorkingCopy(t *testing.T) {
 	main := stripANSI(m.main.View())
 	if !strings.Contains(main, "+top") || !strings.Contains(main, "+nested") {
 		t.Errorf("root diff should cover the whole working copy, got:\n%s", main)
+	}
+}
+
+func TestDirectoryDiffDisabledByConfig(t *testing.T) {
+	cfg := config.Default()
+	cfg.DirectoryDiff = false
+	m := loadItems(t, sizedModelCfg(t, cfg), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "src/b.go", State: svn.StateModified},
+	})
+	selectDirRow(t, m, "src")
+
+	// With directory diffs off globally, highlighting a directory loads nothing.
+	if cmd := m.diffLoadForSelection(); cmd != nil {
+		t.Fatal("expected no diff-load command while directory diffs are off")
+	}
+	// Main shows a hint naming the toggle key instead of a diff.
+	m.updateMain()
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "directory diff off") {
+		t.Errorf("expected the directory-diff-off hint, got:\n%s", main)
+	}
+}
+
+func TestToggleDirDiffRevealsDirectoryDiff(t *testing.T) {
+	cfg := config.Default()
+	cfg.DirectoryDiff = false
+	m := loadItems(t, sizedModelCfg(t, cfg), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "src/b.go", State: svn.StateModified},
+	})
+	selectDirRow(t, m, "src")
+
+	// Pressing the toggle key schedules the directory diff load.
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	m = next.(*Model)
+	if cmd == nil {
+		t.Fatal("expected a diff-load command after toggling directory diffs on")
+	}
+	// When the diff arrives, Main shows it.
+	next, _ = m.Update(diffLoadedMsg{
+		path: "src",
+		diff: "Index: src/a.go\n@@ -1 +1 @@\n+alpha",
+	})
+	m = next.(*Model)
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "+alpha") {
+		t.Errorf("expected the directory diff after toggling on, got:\n%s", main)
+	}
+}
+
+func TestToggleDirDiffHidesDirectoryDiff(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "src/b.go", State: svn.StateModified},
+	})
+	selectDirRow(t, m, "src")
+	// Directory diffs are on by default, so the loaded diff shows in Main.
+	next, _ := m.Update(diffLoadedMsg{path: "src", diff: "Index: src/a.go\n@@ -1 +1 @@\n+alpha"})
+	m = next.(*Model)
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "+alpha") {
+		t.Fatalf("expected the directory diff to show, got:\n%s", main)
+	}
+
+	// Toggling off hides it behind the hint and drops the diff gutter.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	m = next.(*Model)
+	if m.filesShowDiff() {
+		t.Error("filesShowDiff() = true after toggling directory diffs off")
+	}
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "directory diff off") {
+		t.Errorf("expected the directory-diff-off hint, got:\n%s", main)
 	}
 }
 
