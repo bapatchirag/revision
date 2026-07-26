@@ -18,6 +18,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 )
 
@@ -66,6 +67,42 @@ func Default() Config {
 		Editor:        "",
 		Theme:         "auto",
 		DirectoryDiff: true,
+	}
+}
+
+// Validator inspects a loaded Config for values that parse correctly but are no
+// longer supported by the running build — for example, a theme removed in an
+// update — resetting each to its default so the new default takes precedence. It
+// returns a human-readable description of every value it resets and must leave
+// valid values untouched. Reconcile treats a nil Validator as "no domain checks".
+type Validator func(cfg *Config) []string
+
+// Reconciliation reports how Reconcile brought the on-disk config up to date so
+// the caller can inform the user. Conflicts holds one human-readable description
+// per value that was invalid under the current schema and reset to its default.
+type Reconciliation struct {
+	// Created is true when no file existed and one was written with defaults.
+	Created bool
+	// Updated is true when an existing file was rewritten, whether to merge in
+	// keys a newer build added or to reset conflicting values.
+	Updated bool
+	// Conflicts lists, in order, every value that was invalid under the current
+	// schema and reset to its default. It is empty when nothing conflicted.
+	Conflicts []string
+}
+
+// Notice returns a short, user-facing summary of any conflicts resolved during
+// reconciliation, or the empty string when there is nothing to report. Merging
+// in keys a newer build added is silent; only values reset to their defaults are
+// surfaced, since those discard a setting the user may have chosen.
+func (r Reconciliation) Notice() string {
+	switch len(r.Conflicts) {
+	case 0:
+		return ""
+	case 1:
+		return "config: " + r.Conflicts[0]
+	default:
+		return fmt.Sprintf("config: %d settings reset to defaults", len(r.Conflicts))
 	}
 }
 
@@ -128,31 +165,65 @@ func loadFrom(path string) (Config, error) {
 	return cfg, nil
 }
 
-// Ensure loads the configuration, creating the file with default values when it
-// does not yet exist. It is intended for startup: the first run persists a
-// config.json populated with defaults, giving users a documented file to edit,
-// while later runs behave exactly like Load. Only an absent file triggers a
-// write; every other case defers to Load, so normalization and error handling
-// are unchanged. A failed write returns Default alongside the error so the app
+// Reconcile loads the configuration and brings the on-disk file in line with the
+// current schema, so upgrading the application never leaves a stale config.json
+// behind. It is the startup entry point. When a newer build has introduced
+// settings the file predates, their defaults are merged in and the file is
+// rewritten. When a stored value conflicts with the current schema — it is
+// invalid, or (via validate) no longer supported — it is reset to its default,
+// the new default taking precedence, and reported on the returned Reconciliation
+// so the caller can surface a message. A missing file is created with defaults,
+// exactly like a first run. validate may be nil to skip domain-specific checks.
+// A failed write returns the reconciled config alongside the error so the app
 // can still start.
-func Ensure() (Config, error) {
+func Reconcile(validate Validator) (Config, Reconciliation, error) {
 	path, err := Path()
 	if err != nil {
-		return Default(), err
+		return Default(), Reconciliation{}, err
 	}
+	return reconcileAt(path, validate)
+}
 
-	if _, err := os.Stat(path); err != nil {
+// reconcileAt is the path-explicit core of Reconcile, kept separate so tests can
+// work in a temporary location without touching the real home directory.
+func reconcileAt(path string, validate Validator) (Config, Reconciliation, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			cfg := Default()
 			if err := saveTo(path, cfg); err != nil {
-				return cfg, err
+				return cfg, Reconciliation{}, err
 			}
-			return cfg, nil
+			return cfg, Reconciliation{Created: true}, nil
 		}
-		return Default(), fmt.Errorf("stat config %s: %w", path, err)
+		return Default(), Reconciliation{}, fmt.Errorf("read config %s: %w", path, err)
 	}
 
-	return loadFrom(path)
+	// present records which keys the document actually contains, so a key set to
+	// its zero value can be told apart from one omitted entirely.
+	var present map[string]json.RawMessage
+	if err := json.Unmarshal(data, &present); err != nil {
+		return Default(), Reconciliation{}, fmt.Errorf("parse config %s: %w", path, err)
+	}
+
+	// Decoding onto the defaults means keys omitted from the file keep their
+	// default values rather than becoming Go zero values.
+	cfg := Default()
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return Default(), Reconciliation{}, fmt.Errorf("parse config %s: %w", path, err)
+	}
+
+	rec := Reconciliation{Conflicts: cfg.reconcileValues(present, validate)}
+
+	// Rewrite the file when a newer build added keys it lacks or when a value had
+	// to be reset, so the persisted document always matches the running schema.
+	if fileMissingKeys(present) || len(rec.Conflicts) > 0 {
+		rec.Updated = true
+		if err := saveTo(path, cfg); err != nil {
+			return cfg, rec, err
+		}
+	}
+	return cfg, rec, nil
 }
 
 // normalize repairs values that are invalid on disk so callers always receive a
@@ -165,6 +236,60 @@ func (c *Config) normalize() {
 	if strings.TrimSpace(c.Theme) == "" {
 		c.Theme = def.Theme
 	}
+}
+
+// reconcileValues brings the loaded settings in line with the current schema. It
+// applies the same silent repairs as normalize (a non-positive logLimit, a blank
+// theme) and, through the optional validate hook, any domain-level ones such as a
+// theme removed in an update. Every value it resets to a default is returned as a
+// human-readable conflict so the caller can tell the user. Only keys actually
+// present on disk can conflict: an absent key already holds its default, and a
+// blank value is treated as a silent omission, so neither is reported.
+func (c *Config) reconcileValues(present map[string]json.RawMessage, validate Validator) []string {
+	def := Default()
+	var conflicts []string
+
+	// Record the original logLimit before normalize repairs it, so the message
+	// can name the offending value. Only an explicitly written value conflicts.
+	if _, ok := present["logLimit"]; ok && c.LogLimit <= 0 {
+		conflicts = append(conflicts,
+			fmt.Sprintf("logLimit %d is invalid; reset to %d", c.LogLimit, def.LogLimit))
+	}
+
+	c.normalize()
+
+	if validate != nil {
+		conflicts = append(conflicts, validate(c)...)
+	}
+	return conflicts
+}
+
+// schemaKeys returns the JSON object keys the current Config schema defines,
+// derived from the struct tags so fields added in a later build are picked up
+// automatically without maintaining a second list.
+func schemaKeys() []string {
+	t := reflect.TypeOf(Config{})
+	keys := make([]string, 0, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		name := strings.SplitN(t.Field(i).Tag.Get("json"), ",", 2)[0]
+		if name == "" || name == "-" {
+			continue
+		}
+		keys = append(keys, name)
+	}
+	return keys
+}
+
+// fileMissingKeys reports whether the on-disk document omits any key the current
+// schema defines. A missing key means a newer build introduced a setting the
+// file predates, so the file must be rewritten to include its default.
+func fileMissingKeys(present map[string]json.RawMessage) bool {
+	for _, key := range schemaKeys() {
+		if _, ok := present[key]; !ok {
+			return true
+		}
+	}
+	return false
 }
 
 // Save writes cfg to the configuration file as indented JSON, creating the
