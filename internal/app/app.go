@@ -111,6 +111,7 @@ type Model struct {
 	source       mainSource
 	diffPath     string
 	diffText     string
+	dirDiff      bool
 	logErr       error
 	editing      bool
 	naming       bool
@@ -188,6 +189,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		collapsedDirs:   map[string]bool{},
 		clCollapsedDirs: map[string]bool{},
 		source:          sourceFiles,
+		dirDiff:         cfg.DirectoryDiff,
 		commitCL:        stagedChangelist,
 		build:           build,
 		loading:         true,
@@ -580,6 +582,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, false
 	case "u":
 		return m.requestUpdate(), true
+	case "D":
+		return m.toggleDirDiff(), true
 	}
 	return nil, false
 }
@@ -1210,6 +1214,7 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Scroll main up / down", Key: "K / J"},
 		{Label: "Scroll main left / right", Key: "h / l"},
 		{Label: "Line start / end", Key: "home / end"},
+		{Label: "Toggle directory diff", Key: "D"},
 		{Label: "Toggle help", Key: "?"},
 		{Label: "Quit", Key: "q"},
 	}
@@ -1366,7 +1371,7 @@ func (m *Model) afterFocusChange() tea.Cmd {
 // whole working copy); a file leaf loads its own diff when it is dirty.
 func (m *Model) diffLoadForSelection() tea.Cmd {
 	if n, _, ok := m.selectedTreeNode(); ok && n.Item == nil {
-		if m.diffPath == n.Path {
+		if !m.dirDiff || m.diffPath == n.Path {
 			return nil
 		}
 		return loadDiffCmd(m.client, n.Path)
@@ -1376,6 +1381,24 @@ func (m *Model) diffLoadForSelection() tea.Cmd {
 		return nil
 	}
 	return loadDiffCmd(m.client, it.Path)
+}
+
+// toggleDirDiff flips whether directory rows show their combined diff. It lets a
+// working copy that disables directory diffs globally (config) reveal one on
+// demand, and hide it again. It reports the new state with a toast and, when Main
+// follows the Files panel, refreshes it — loading the diff if it now needs one.
+func (m *Model) toggleDirDiff() tea.Cmd {
+	m.dirDiff = !m.dirDiff
+	if m.dirDiff {
+		m.showToast("directory diff on", component.LevelInfo)
+	} else {
+		m.showToast("directory diff off", component.LevelInfo)
+	}
+	if m.source != sourceFiles {
+		return nil
+	}
+	m.updateMain()
+	return m.diffLoadForSelection()
 }
 
 // layout sizes the panels and bar for the current terminal dimensions.
@@ -1485,7 +1508,7 @@ func (m *Model) filesShowDiff() bool {
 		return false
 	}
 	if n, _, ok := m.selectedTreeNode(); ok && n.Item == nil {
-		return m.diffPath == n.Path && strings.TrimSpace(m.diffText) != ""
+		return m.dirDiff && m.diffPath == n.Path && strings.TrimSpace(m.diffText) != ""
 	}
 	it, ok := m.selectedFile()
 	if !ok || !it.State.IsDirty() {
@@ -1520,8 +1543,12 @@ func (m *Model) changelistDetail() string {
 // directoryDetail renders the combined diff of every change beneath a selected
 // directory row (the "/" root covers the whole working copy). It mirrors
 // fileDetail: a placeholder shows while the diff loads or when the directory has
-// no textual changes.
+// no textual changes. When directory diffs are toggled off it shows only a hint
+// naming the key that reveals the diff.
 func (m *Model) directoryDetail(n fileNode) string {
+	if !m.dirDiff {
+		return "(directory diff off — press " + m.keys.ToggleDirDiff.Help().Key + " to show it)"
+	}
 	switch {
 	case m.diffPath != n.Path:
 		return "Loading diff…"
