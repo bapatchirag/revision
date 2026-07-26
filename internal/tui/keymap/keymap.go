@@ -32,10 +32,11 @@ type KeyMap struct {
 
 	ToggleDirDiff key.Binding
 
-	Refresh key.Binding
-	Theme   key.Binding
-	Help    key.Binding
-	Quit    key.Binding
+	Refresh  key.Binding
+	Theme    key.Binding
+	Settings key.Binding
+	Help     key.Binding
+	Quit     key.Binding
 }
 
 // Default returns the standard, lazygit-flavored bindings.
@@ -63,6 +64,7 @@ func Default() KeyMap {
 		ToggleDirDiff: key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "toggle dir diff")),
 		Refresh:       key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh")),
 		Theme:         key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "theme")),
+		Settings:      key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "settings")),
 		Help:          key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:          key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	}

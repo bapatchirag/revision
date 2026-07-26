@@ -1,0 +1,9 @@
+╭─ Settings ───────────────────────────────────╮
+│> Default path   ~/code/project               │
+│  Log limit      100                          │
+│  Editor         vim                          │
+│  Theme          cipher                       │
+│  Directory diff on                           │
+│                                              │
+│ctrl+s save · ↑↓ move · esc cancel            │
+╰──────────────────────────────────────────────╯

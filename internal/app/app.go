@@ -6,6 +6,7 @@ package app
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -64,6 +65,9 @@ const updateMenuID = "update"
 // themeMenuID identifies the theme picker on emitted messages.
 const themeMenuID = "theme"
 
+// settingsFormID identifies the settings editor on emitted messages.
+const settingsFormID = "settings"
+
 // mainSource selects which side panel's selection drives the Main viewport.
 type mainSource int
 
@@ -99,6 +103,7 @@ type Model struct {
 	menu       *component.Menu
 	updateMenu *component.Menu
 	themeMenu  *component.Menu
+	form       *component.Form
 	toast      *component.Toast
 	focus      *focus.Manager
 
@@ -122,6 +127,7 @@ type Model struct {
 	confirming   bool
 	helping      bool
 	themePicking bool
+	configuring  bool
 	pending      tea.Cmd
 	showingToast bool
 
@@ -185,6 +191,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		menu:            component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
 		updateMenu:      component.NewMenu(updateMenuID, "Update available", updateMenuItems(), th, keys),
 		themeMenu:       component.NewMenu(themeMenuID, "Theme", themeMenuItems(), th, keys),
+		form:            component.NewForm(settingsFormID, "Settings", settingsFields(cfg, cfg.DirectoryDiff), th, keys),
 		toast:           component.NewToast(th),
 		collapsedDirs:   map[string]bool{},
 		clCollapsedDirs: map[string]bool{},
@@ -232,6 +239,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.updating {
 			m.sizeUpdateMenu()
+		}
+		if m.configuring {
+			m.sizeForm()
 		}
 		return m, nil
 
@@ -386,6 +396,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.submitCommit(msg.Value)
 		case changelistEditorID:
 			return m, m.submitChangelist(msg.Value)
+		case settingsFormID:
+			return m, m.submitSettings()
 		}
 		return m, nil
 
@@ -413,6 +425,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.closeUpdate()
 		case themeMenuID:
 			m.cancelThemePreview()
+		case settingsFormID:
+			m.closeSettings()
 		}
 		return m, nil
 
@@ -422,6 +436,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.naming {
 			return m, m.nameEditor.Update(msg)
+		}
+		if m.configuring {
+			return m, m.form.Update(msg)
 		}
 		if m.confirming {
 			return m, m.modal.Update(msg)
@@ -487,6 +504,8 @@ func (m *Model) View() string {
 		view = m.overlayCenter(view, m.menu.View())
 	case m.themePicking:
 		view = m.overlayCenter(view, m.themeMenu.View())
+	case m.configuring:
+		view = m.overlayCenter(view, m.form.View())
 	}
 	return view
 }
@@ -541,6 +560,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return m.afterFocusChange(), true
 	case key.Matches(k, m.keys.Theme):
 		return m.openThemeMenu(), true
+	case key.Matches(k, m.keys.Settings):
+		return m.openSettings(), true
 	case key.Matches(k, m.keys.Help):
 		return m.openHelp(), true
 	}
@@ -1061,7 +1082,7 @@ func (m *Model) closeThemeMenu() {
 // screen, so a background event (like the update check completing) knows not to
 // steal focus.
 func (m *Model) overlayActive() bool {
-	return m.editing || m.naming || m.confirming || m.helping || m.updating || m.themePicking
+	return m.editing || m.naming || m.confirming || m.helping || m.updating || m.themePicking || m.configuring
 }
 
 // openUpdate shows the startup update prompt for the given release as a centered
@@ -1129,6 +1150,7 @@ func (m *Model) previewTheme(name string) {
 	m.menu.SetTheme(th)
 	m.updateMenu.SetTheme(th)
 	m.themeMenu.SetTheme(th)
+	m.form.SetTheme(th)
 	m.toast.SetTheme(th)
 	m.files.SetRender(renderFileNode(th))
 	m.clFiles.SetRender(renderFileNode(th))
@@ -1165,6 +1187,60 @@ func (m *Model) applyTheme(name string) tea.Cmd {
 	m.cfg.Theme = name
 	if err := config.Save(m.cfg); err != nil {
 		m.showToast("couldn't save theme: "+err.Error(), component.LevelWarning)
+	}
+	return nil
+}
+
+// openSettings shows the settings editor as a centered overlay, populating it
+// from the current configuration. The directory-diff field is seeded from the
+// live runtime state so the form reflects what the user currently sees.
+func (m *Model) openSettings() tea.Cmd {
+	m.form.SetFields(settingsFields(m.cfg, m.dirDiff))
+	m.configuring = true
+	m.form.Focus()
+	m.sizeForm()
+	return nil
+}
+
+// closeSettings hides the settings editor without saving.
+func (m *Model) closeSettings() {
+	m.configuring = false
+	m.form.Blur()
+}
+
+// submitSettings reads the edited fields back into the configuration, applies the
+// changes that take effect immediately (the theme palette and the directory-diff
+// default), persists the result, and closes the editor. A blank or non-positive
+// log limit is ignored so the previous value survives; a failed save is
+// non-fatal and surfaced as a toast.
+func (m *Model) submitSettings() tea.Cmd {
+	vals := m.form.Values()
+	// Field order mirrors settingsFields.
+	cfg := m.cfg
+	cfg.DefaultPath = strings.TrimSpace(vals[0])
+	if n, err := strconv.Atoi(strings.TrimSpace(vals[1])); err == nil && n > 0 {
+		cfg.LogLimit = n
+	}
+	cfg.Editor = strings.TrimSpace(vals[2])
+	cfg.Theme = strings.TrimSpace(vals[3])
+	cfg.DirectoryDiff = vals[4] == "true"
+
+	m.closeSettings()
+
+	themeChanged := cfg.Theme != m.cfg.Theme
+	m.cfg = cfg
+	m.dirDiff = cfg.DirectoryDiff
+	if themeChanged {
+		m.previewTheme(cfg.Theme)
+	}
+	if err := config.Save(m.cfg); err != nil {
+		m.showToast("couldn't save settings: "+err.Error(), component.LevelWarning)
+		return nil
+	}
+	m.showToast("settings saved", component.LevelSuccess)
+	m.updateMain()
+	if m.source == sourceFiles {
+		return m.diffLoadForSelection()
 	}
 	return nil
 }
@@ -1207,6 +1283,7 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Update working copy", Key: "u"},
 		{Label: "Refresh", Key: "R"},
 		{Label: "Change theme", Key: "t"},
+		{Label: "Edit settings", Key: "S"},
 		{Label: "Jump to panel", Key: "1 2 3 0"},
 		{Label: "Cycle panels", Key: "tab / shift+tab"},
 		{Label: "Move up / down", Key: "k / j"},
@@ -1239,6 +1316,21 @@ func themeMenuItems() []component.MenuItem {
 		items[i] = component.MenuItem{Label: n.Label}
 	}
 	return items
+}
+
+// settingsFields builds the settings editor's fields from the configuration, in
+// the field order submitSettings relies on. The directory-diff field is seeded
+// from the live runtime state (dirDiff) rather than cfg so the form shows what
+// the user currently sees; every other field comes straight from the persisted
+// configuration.
+func settingsFields(cfg config.Config, dirDiff bool) []component.Field {
+	return []component.Field{
+		{Label: "Default path", Kind: component.FieldText, Value: cfg.DefaultPath},
+		{Label: "Log limit", Kind: component.FieldInt, Value: strconv.Itoa(cfg.LogLimit)},
+		{Label: "Editor", Kind: component.FieldText, Value: cfg.Editor},
+		{Label: "Theme", Kind: component.FieldChoice, Value: cfg.Theme, Options: theme.Names()},
+		{Label: "Directory diff", Kind: component.FieldBool, Value: strconv.FormatBool(dirDiff)},
+	}
 }
 
 // submitCommit closes the editor and commits the target changelist with the
@@ -1310,6 +1402,12 @@ func (m *Model) sizeUpdateMenu() {
 // height follows the theme count).
 func (m *Model) sizeThemeMenu() {
 	m.themeMenu.SetSize(clamp(m.width/2, 40, max(m.width-6, 40)), 0)
+}
+
+// sizeForm sizes the settings editor to a centered portion of the screen (only
+// its width matters; the height follows the field count).
+func (m *Model) sizeForm() {
+	m.form.SetSize(clamp(m.width*3/5, 40, max(m.width-4, 40)), 0)
 }
 
 // stageable reports whether a working-copy state can be added to the staged

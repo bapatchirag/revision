@@ -119,6 +119,15 @@ func newModel() model {
 	prompt.SetValue("feature-")
 	prompt.Focus()
 
+	form := component.NewForm("gallery-settings", "Settings", []component.Field{
+		{Label: "Default path", Kind: component.FieldText, Value: "~/code/project"},
+		{Label: "Log limit", Kind: component.FieldInt, Value: "100"},
+		{Label: "Editor", Kind: component.FieldText, Value: "vim"},
+		{Label: "Theme", Kind: component.FieldChoice, Value: "cipher", Options: theme.Names()},
+		{Label: "Directory diff", Kind: component.FieldBool, Value: "true"},
+	}, th, keys)
+	form.Focus()
+
 	return model{
 		keys: keys,
 		demos: []demo{
@@ -133,6 +142,7 @@ func newModel() model {
 			{"Menu", menu},
 			{"TextArea", editor},
 			{"Prompt (pick)", prompt},
+			{"Form (settings)", form},
 		},
 	}
 }
