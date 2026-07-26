@@ -1286,8 +1286,7 @@ func TestSettingsEditsPersistToConfig(t *testing.T) {
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = next.(*Model)
 	if cmd != nil {
-		next, _ = m.Update(cmd())
-		m = next.(*Model)
+		m.Update(cmd()) // deliver the SubmitMsg; persisting is a side effect
 	}
 	got, err := config.Load()
 	if err != nil {

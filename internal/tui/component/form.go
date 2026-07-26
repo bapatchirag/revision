@@ -378,7 +378,7 @@ func (f *Form) valueText(fld *Field, active bool, width int) string {
 // textValue renders a text/int field's value, drawing a reverse-video cursor at
 // the edit column while the field is active and the form is focused.
 func (f *Form) textValue(fld *Field, active bool, _ int) string {
-	if !(active && f.focused) {
+	if !active || !f.focused {
 		return fld.Value
 	}
 	runes := []rune(fld.Value)
