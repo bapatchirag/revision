@@ -60,7 +60,7 @@ func Default() Config {
 		DefaultPath: "",
 		LogLimit:    100,
 		Editor:      "",
-		Theme:       "default",
+		Theme:       "auto",
 	}
 }
 

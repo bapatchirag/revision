@@ -99,6 +99,14 @@ func (l *List[T]) Focused() bool { return l.focused }
 // SetTheme implements tui.Themeable.
 func (l *List[T]) SetTheme(th theme.Theme) { l.theme = th }
 
+// SetRender replaces the row-rendering function and re-measures content width.
+// The app uses this to rebuild theme-capturing render closures when the palette
+// changes at runtime, so row glyph colors follow a live theme switch.
+func (l *List[T]) SetRender(render func(T) string) {
+	l.render = render
+	l.contentWidth = l.measureContentWidth()
+}
+
 // Update handles navigation while focused and emits SelectedMsg/ActivatedMsg.
 func (l *List[T]) Update(m tea.Msg) tea.Cmd {
 	if !l.focused {

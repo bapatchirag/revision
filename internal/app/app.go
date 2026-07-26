@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/bapatchirag/revision/internal/config"
 	"github.com/bapatchirag/revision/internal/selfupdate"
 	"github.com/bapatchirag/revision/internal/svn"
 	"github.com/bapatchirag/revision/internal/tui/component"
@@ -60,6 +61,9 @@ const helpMenuID = "help"
 // updateMenuID identifies the startup update prompt on emitted messages.
 const updateMenuID = "update"
 
+// themeMenuID identifies the theme picker on emitted messages.
+const themeMenuID = "theme"
+
 // mainSource selects which side panel's selection drives the Main viewport.
 type mainSource int
 
@@ -77,6 +81,7 @@ type Model struct {
 
 	theme theme.Theme
 	keys  keymap.KeyMap
+	cfg   config.Config
 
 	status      *component.Viewport
 	files       *component.List[fileNode]
@@ -93,6 +98,7 @@ type Model struct {
 	modal      *component.Modal
 	menu       *component.Menu
 	updateMenu *component.Menu
+	themeMenu  *component.Menu
 	toast      *component.Toast
 	focus      *focus.Manager
 
@@ -111,8 +117,10 @@ type Model struct {
 	nameTargets  []changelistTarget
 	drilledCL    string
 	commitCL     string
+	themeBefore  string
 	confirming   bool
 	helping      bool
+	themePicking bool
 	pending      tea.Cmd
 	showingToast bool
 
@@ -133,8 +141,8 @@ var _ tea.Model = (*Model)(nil)
 // New creates the root model for the given client and working-copy info. build
 // carries the running binary's provenance so a release build can offer to
 // self-update on startup.
-func New(client *svn.Client, info *svn.Info, build selfupdate.Build) *Model {
-	th := theme.Default()
+func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.Config) *Model {
+	th, _ := theme.ByName(cfg.Theme)
 	keys := keymap.Default()
 
 	status := component.NewViewport(th, keys)
@@ -160,6 +168,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build) *Model {
 		info:            info,
 		theme:           th,
 		keys:            keys,
+		cfg:             cfg,
 		status:          status,
 		files:           files,
 		changelists:     changelists,
@@ -174,6 +183,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build) *Model {
 		modal:           component.NewModal(confirmModalID, "", "", th, keys),
 		menu:            component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
 		updateMenu:      component.NewMenu(updateMenuID, "Update available", updateMenuItems(), th, keys),
+		themeMenu:       component.NewMenu(themeMenuID, "Theme", themeMenuItems(), th, keys),
 		toast:           component.NewToast(th),
 		collapsedDirs:   map[string]bool{},
 		clCollapsedDirs: map[string]bool{},
@@ -345,6 +355,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.toggleClCollapse()
 		case updateMenuID:
 			return m, m.chooseUpdate(msg.Index)
+		case themeMenuID:
+			return m, m.chooseTheme(msg.Index)
 		}
 		return m, nil
 
@@ -397,6 +409,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pending = nil
 		case updateMenuID:
 			m.closeUpdate()
+		case themeMenuID:
+			m.cancelThemePreview()
 		}
 		return m, nil
 
@@ -423,6 +437,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, m.menu.Update(msg)
+		}
+		if m.themePicking {
+			// t and esc cancel, reverting the live preview; other keys drive the
+			// menu: enter commits via ActivatedMsg, and up/down live-preview the
+			// highlighted theme so the user sees each scheme while scrolling.
+			if key.Matches(msg, m.keys.Theme) || key.Matches(msg, m.keys.Back) {
+				m.cancelThemePreview()
+				return m, nil
+			}
+			before := m.themeMenu.Index()
+			cmd := m.themeMenu.Update(msg)
+			if after := m.themeMenu.Index(); after != before {
+				m.previewThemeAt(after)
+			}
+			return m, cmd
 		}
 		m.dismissToast()
 		if cmd, handled := m.handleKey(msg); handled {
@@ -454,6 +483,8 @@ func (m *Model) View() string {
 		view = m.overlayCenter(view, m.updateMenu.View())
 	case m.helping:
 		view = m.overlayCenter(view, m.menu.View())
+	case m.themePicking:
+		view = m.overlayCenter(view, m.themeMenu.View())
 	}
 	return view
 }
@@ -506,6 +537,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	case key.Matches(k, m.keys.FocusPrev):
 		m.focus.Prev()
 		return m.afterFocusChange(), true
+	case key.Matches(k, m.keys.Theme):
+		return m.openThemeMenu(), true
 	case key.Matches(k, m.keys.Help):
 		return m.openHelp(), true
 	}
@@ -997,11 +1030,34 @@ func (m *Model) closeHelp() {
 	m.menu.Blur()
 }
 
+// openThemeMenu shows the theme picker as a centered overlay, starting the
+// cursor on the active theme.
+func (m *Model) openThemeMenu() tea.Cmd {
+	m.themePicking = true
+	// Remember the active theme so canceling can revert the live preview.
+	m.themeBefore = m.cfg.Theme
+	for i, n := range theme.All() {
+		if n.Name == m.cfg.Theme {
+			m.themeMenu.SetIndex(i)
+			break
+		}
+	}
+	m.themeMenu.Focus()
+	m.sizeThemeMenu()
+	return nil
+}
+
+// closeThemeMenu hides the theme picker.
+func (m *Model) closeThemeMenu() {
+	m.themePicking = false
+	m.themeMenu.Blur()
+}
+
 // overlayActive reports whether any modal, editor, or menu is currently on
 // screen, so a background event (like the update check completing) knows not to
 // steal focus.
 func (m *Model) overlayActive() bool {
-	return m.editing || m.naming || m.confirming || m.helping || m.updating
+	return m.editing || m.naming || m.confirming || m.helping || m.updating || m.themePicking
 }
 
 // openUpdate shows the startup update prompt for the given release as a centered
@@ -1038,6 +1094,75 @@ func (m *Model) chooseUpdate(index int) tea.Cmd {
 		m.closeUpdate()
 		return nil
 	}
+}
+
+// chooseTheme applies the theme at index in the picker's display order, then
+// closes the picker. An out-of-range index is ignored.
+func (m *Model) chooseTheme(index int) tea.Cmd {
+	all := theme.All()
+	if index < 0 || index >= len(all) {
+		return nil
+	}
+	return m.applyTheme(all[index].Name)
+}
+
+// previewTheme applies the named palette to every component without persisting
+// or closing the picker, so the user sees each scheme live while scrolling. It
+// re-themes every component, rebuilds the Files list render closures that
+// captured the previous palette (so row glyph colors follow the switch), and
+// refreshes derived chrome (which re-colorizes the diff via the live theme). An
+// unrecognized name resolves to Auto (matching startup), so it is always safe.
+func (m *Model) previewTheme(name string) {
+	th, _ := theme.ByName(name)
+	m.theme = th
+	for _, p := range m.panels {
+		p.SetTheme(th)
+	}
+	m.bar.SetTheme(th)
+	m.editor.SetTheme(th)
+	m.nameEditor.SetTheme(th)
+	m.modal.SetTheme(th)
+	m.menu.SetTheme(th)
+	m.updateMenu.SetTheme(th)
+	m.themeMenu.SetTheme(th)
+	m.toast.SetTheme(th)
+	m.files.SetRender(renderFileNode(th))
+	m.clFiles.SetRender(renderFileNode(th))
+	m.changelists.SetRender(renderChangelistGroup(th))
+	m.refreshChrome()
+}
+
+// previewThemeAt live-applies the theme at index in the picker's display order,
+// without persisting, so scrolling shows each scheme immediately.
+func (m *Model) previewThemeAt(index int) {
+	all := theme.All()
+	if index < 0 || index >= len(all) {
+		return
+	}
+	m.previewTheme(all[index].Name)
+}
+
+// cancelThemePreview reverts any live preview to the theme active before the
+// picker opened, then closes the picker without persisting.
+func (m *Model) cancelThemePreview() {
+	m.previewTheme(m.themeBefore)
+	m.closeThemeMenu()
+}
+
+// applyTheme commits the named theme: it applies the palette to every component
+// (like previewTheme) and persists the choice, then closes the picker. A failed
+// save is non-fatal and surfaced as a toast.
+func (m *Model) applyTheme(name string) tea.Cmd {
+	if _, ok := theme.ByName(name); !ok {
+		return nil
+	}
+	m.previewTheme(name)
+	m.closeThemeMenu()
+	m.cfg.Theme = name
+	if err := config.Save(m.cfg); err != nil {
+		m.showToast("couldn't save theme: "+err.Error(), component.LevelWarning)
+	}
+	return nil
 }
 
 // PendingUpdate reports the update method the user chose before quitting, if
@@ -1077,6 +1202,7 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Delete file", Key: "d"},
 		{Label: "Update working copy", Key: "u"},
 		{Label: "Refresh", Key: "R"},
+		{Label: "Change theme", Key: "t"},
 		{Label: "Jump to panel", Key: "1 2 3 0"},
 		{Label: "Cycle panels", Key: "tab / shift+tab"},
 		{Label: "Move up / down", Key: "k / j"},
@@ -1097,6 +1223,17 @@ func updateMenuItems() []component.MenuItem {
 		{Label: "Update with Go"},
 		{Label: "Don't update this time"},
 	}
+}
+
+// themeMenuItems are the built-in themes shown in the picker, in display order;
+// chooseTheme maps a selected index back onto theme.All().
+func themeMenuItems() []component.MenuItem {
+	all := theme.All()
+	items := make([]component.MenuItem, len(all))
+	for i, n := range all {
+		items[i] = component.MenuItem{Label: n.Label}
+	}
+	return items
 }
 
 // submitCommit closes the editor and commits the target changelist with the
@@ -1162,6 +1299,12 @@ func (m *Model) sizeMenu() {
 // only; the height follows the three choices).
 func (m *Model) sizeUpdateMenu() {
 	m.updateMenu.SetSize(clamp(m.width/2, 40, max(m.width-6, 40)), 0)
+}
+
+// sizeThemeMenu sizes the theme picker like the help menu (width only; the
+// height follows the theme count).
+func (m *Model) sizeThemeMenu() {
+	m.themeMenu.SetSize(clamp(m.width/2, 40, max(m.width-6, 40)), 0)
 }
 
 // stageable reports whether a working-copy state can be added to the staged

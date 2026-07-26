@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/muesli/termenv"
 
+	"github.com/bapatchirag/revision/internal/config"
 	"github.com/bapatchirag/revision/internal/selfupdate"
 	"github.com/bapatchirag/revision/internal/svn"
 	uimsg "github.com/bapatchirag/revision/internal/tui/msg"
@@ -30,7 +31,7 @@ func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
 
 func sizedModel(t *testing.T) *Model {
 	t.Helper()
-	m := New(nil, &svn.Info{URL: "https://svn.example.com/repo/trunk", Revision: "42"}, selfupdate.Build{})
+	m := New(nil, &svn.Info{URL: "https://svn.example.com/repo/trunk", Revision: "42"}, selfupdate.Build{}, config.Default())
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return next.(*Model)
 }
@@ -974,6 +975,108 @@ func TestHelpMenuGolden(t *testing.T) {
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
 	m = next.(*Model)
 	golden.RequireEqual(t, []byte(m.View()))
+}
+
+func TestThemePickerOpensAndApplies(t *testing.T) {
+	// Persist to a throwaway XDG config dir so the real home is untouched.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	if m.theme != theme.Auto() {
+		t.Fatal("initial theme is not Auto()")
+	}
+
+	// t opens the picker.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = next.(*Model)
+	if !m.themePicking {
+		t.Fatal("pressing t did not open the theme picker")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "Theme") {
+		t.Errorf("picker view missing title\n%s", view)
+	}
+
+	// Applying a theme swaps the live palette, closes the picker, and persists.
+	m.applyTheme("everforest")
+	if m.theme != theme.Everforest() {
+		t.Error("theme after applyTheme(everforest) is not Everforest()")
+	}
+	if m.themePicking {
+		t.Error("applyTheme did not close the picker")
+	}
+	if m.cfg.Theme != "everforest" {
+		t.Errorf("cfg.Theme = %q, want everforest", m.cfg.Theme)
+	}
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Theme != "everforest" {
+		t.Errorf("persisted theme = %q, want everforest", got.Theme)
+	}
+}
+
+func TestThemePickerToggleClosesWithT(t *testing.T) {
+	m := sizedModel(t)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = next.(*Model)
+	if !m.themePicking {
+		t.Fatal("first t should open the picker")
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = next.(*Model)
+	if m.themePicking {
+		t.Error("second t should close the picker")
+	}
+}
+
+func TestChooseThemeByIndex(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := sizedModel(t)
+	idx := -1
+	for i, n := range theme.All() {
+		if n.Name == "dracula" {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatal("dracula not found in theme.All()")
+	}
+	m.chooseTheme(idx)
+	if m.theme != theme.Dracula() {
+		t.Error("chooseTheme did not resolve the index to Dracula()")
+	}
+}
+
+func TestThemePickerLivePreviewOnScroll(t *testing.T) {
+	m := sizedModel(t)
+	// Open the picker; the cursor starts on the active theme (auto, index 0).
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = next.(*Model)
+
+	// Scrolling down live-applies the highlighted theme without persisting.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(*Model)
+	all := theme.All()
+	if m.theme != all[1].Theme {
+		t.Errorf("scrolling did not live-apply the highlighted theme %q", all[1].Name)
+	}
+	if m.cfg.Theme != "auto" {
+		t.Errorf("preview must not persist; cfg.Theme = %q, want auto", m.cfg.Theme)
+	}
+
+	// Esc cancels, reverting the preview to the original theme.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*Model)
+	if m.theme != theme.Auto() {
+		t.Error("esc did not revert the preview to the original theme")
+	}
+	if m.themePicking {
+		t.Error("esc did not close the picker")
+	}
 }
 
 // availableRelease is the fixture release the update-prompt tests offer.

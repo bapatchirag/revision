@@ -54,6 +54,13 @@ func (mn *Menu) SetTitle(title string) { mn.title = title }
 // Index returns the cursor position.
 func (mn *Menu) Index() int { return mn.cursor }
 
+// SetIndex moves the cursor to i (clamped into range) so a caller can preselect
+// an item, e.g. the active theme when opening the theme picker.
+func (mn *Menu) SetIndex(i int) {
+	mn.cursor = i
+	mn.clampCursor()
+}
+
 // Update handles navigation, activation and dismissal while focused.
 func (mn *Menu) Update(m tea.Msg) tea.Cmd {
 	if !mn.focused {
