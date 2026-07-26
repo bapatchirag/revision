@@ -123,6 +123,9 @@ The footer shows the most common actions, and `?` opens the full keybindings men
 | `d` | Delete the selected file (with confirmation) |
 | `u` | Update the working copy to the latest revision |
 | `R` | Refresh status and history |
+| `D` | Toggle the directory-level diff for the highlighted directory (see [Configuration](#configuration)) |
+| `t` | Open the theme picker |
+| `S` | Edit application settings (see [Configuration](#configuration)) |
 | `?` | Toggle the keybindings help |
 | `q` / `Ctrl+C` | Quit |
 
@@ -133,6 +136,26 @@ In the commit editor, `Ctrl+S` submits and `Esc` cancels. In the changelist-name
 SVN has no local staging index. `revision` emulates one using an SVN **changelist** named `revision:staged`: staging a file — or every change under a directory — adds it to that changelist, unstaging removes it, and `c` commits the staged set as a unit. This maps a git-like stage/commit flow onto native SVN.
 
 You can also group work into **named changelists** with `n`: it moves the staged files (or just the selected file when nothing is staged) into a real SVN changelist, which appears in the Changelists view and can be committed on its own. A file belongs to at most one changelist at a time — unstage it (`space`) before moving it elsewhere.
+
+## Configuration
+
+`revision` reads optional settings from `~/.config/revision/config.json` (or `$XDG_CONFIG_HOME/revision/config.json` when that variable is set). The file is optional: every setting falls back to a built-in default when the file, or an individual key, is absent.
+
+You can edit these settings without leaving the app: press `S` to open the settings editor, adjust a value (`↑`/`↓` move between fields, `←`/`→` cycle the theme and toggle switches), then `Ctrl+S` to save or `Esc` to cancel. Saving writes the same `config.json`, and the theme and directory-diff changes apply immediately.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `directoryDiff` | bool | `true` | Show the combined diff of every change beneath a directory when its row is highlighted. Set to `false` to turn directory-level diffs off globally; press `D` to reveal one on demand. |
+
+Example `~/.config/revision/config.json`:
+
+```json
+{
+  "directoryDiff": false
+}
+```
+
+With `directoryDiff` set to `false`, highlighting a directory shows a short hint instead of its diff. Pressing `D` toggles the directory diff for the current session, so you can inspect one without changing the file.
 
 ## Authentication
 
@@ -160,7 +183,7 @@ make cross      # dist/revision-darwin-arm64 and dist/revision-linux-amd64
 `revision` already covers the everyday SVN workflow. On the horizon:
 
 - **VS Code extension** — a bundled launcher that opens the TUI in an editor terminal, published to the VS Code Marketplace and Open VSX. The scaffolding exists but isn't ready yet.
-- **Configuration file** — settings from a config file (e.g. `~/.config/revision/config.toml`): default working-copy path, log limit, an external `$EDITOR` for commit messages, and keybinding overrides.
+- **More configuration** — the config file (`~/.config/revision/config.json`) already stores the color theme and the directory-diff toggle; planned additions include a default working-copy path, log limit, an external `$EDITOR` for commit messages, and keybinding overrides.
 - **Theming** — selectable, user-customizable color themes loaded from that configuration.
 - **Diff export & patching** — save a file's or a changelist's diff as a patch and apply one (`svn diff` → patch → `svn patch`), plus line- and hunk-level staging.
 - **ssh-agent support** — seamless authentication for `svn+ssh://` working copies, alongside smoother handling of cached credentials.

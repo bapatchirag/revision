@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/muesli/termenv"
 
+	"github.com/bapatchirag/revision/internal/config"
 	"github.com/bapatchirag/revision/internal/selfupdate"
 	"github.com/bapatchirag/revision/internal/svn"
 	uimsg "github.com/bapatchirag/revision/internal/tui/msg"
@@ -30,7 +31,12 @@ func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
 
 func sizedModel(t *testing.T) *Model {
 	t.Helper()
-	m := New(nil, &svn.Info{URL: "https://svn.example.com/repo/trunk", Revision: "42"}, selfupdate.Build{})
+	return sizedModelCfg(t, config.Default())
+}
+
+func sizedModelCfg(t *testing.T, cfg config.Config) *Model {
+	t.Helper()
+	m := New(nil, &svn.Info{URL: "https://svn.example.com/repo/trunk", Revision: "42"}, selfupdate.Build{}, cfg)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return next.(*Model)
 }
@@ -194,6 +200,76 @@ func TestRootDirectoryDiffCoversWholeWorkingCopy(t *testing.T) {
 	main := stripANSI(m.main.View())
 	if !strings.Contains(main, "+top") || !strings.Contains(main, "+nested") {
 		t.Errorf("root diff should cover the whole working copy, got:\n%s", main)
+	}
+}
+
+func TestDirectoryDiffDisabledByConfig(t *testing.T) {
+	cfg := config.Default()
+	cfg.DirectoryDiff = false
+	m := loadItems(t, sizedModelCfg(t, cfg), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "src/b.go", State: svn.StateModified},
+	})
+	selectDirRow(t, m, "src")
+
+	// With directory diffs off globally, highlighting a directory loads nothing.
+	if cmd := m.diffLoadForSelection(); cmd != nil {
+		t.Fatal("expected no diff-load command while directory diffs are off")
+	}
+	// Main shows a hint naming the toggle key instead of a diff.
+	m.updateMain()
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "directory diff off") {
+		t.Errorf("expected the directory-diff-off hint, got:\n%s", main)
+	}
+}
+
+func TestToggleDirDiffRevealsDirectoryDiff(t *testing.T) {
+	cfg := config.Default()
+	cfg.DirectoryDiff = false
+	m := loadItems(t, sizedModelCfg(t, cfg), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "src/b.go", State: svn.StateModified},
+	})
+	selectDirRow(t, m, "src")
+
+	// Pressing the toggle key schedules the directory diff load.
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	m = next.(*Model)
+	if cmd == nil {
+		t.Fatal("expected a diff-load command after toggling directory diffs on")
+	}
+	// When the diff arrives, Main shows it.
+	next, _ = m.Update(diffLoadedMsg{
+		path: "src",
+		diff: "Index: src/a.go\n@@ -1 +1 @@\n+alpha",
+	})
+	m = next.(*Model)
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "+alpha") {
+		t.Errorf("expected the directory diff after toggling on, got:\n%s", main)
+	}
+}
+
+func TestToggleDirDiffHidesDirectoryDiff(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "src/b.go", State: svn.StateModified},
+	})
+	selectDirRow(t, m, "src")
+	// Directory diffs are on by default, so the loaded diff shows in Main.
+	next, _ := m.Update(diffLoadedMsg{path: "src", diff: "Index: src/a.go\n@@ -1 +1 @@\n+alpha"})
+	m = next.(*Model)
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "+alpha") {
+		t.Fatalf("expected the directory diff to show, got:\n%s", main)
+	}
+
+	// Toggling off hides it behind the hint and drops the diff gutter.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	m = next.(*Model)
+	if m.filesShowDiff() {
+		t.Error("filesShowDiff() = true after toggling directory diffs off")
+	}
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "directory diff off") {
+		t.Errorf("expected the directory-diff-off hint, got:\n%s", main)
 	}
 }
 
@@ -655,6 +731,65 @@ func TestCommitResultShowsToast(t *testing.T) {
 	}
 }
 
+func TestConfigValidatorResetsUnknownTheme(t *testing.T) {
+	validate := ConfigValidator()
+
+	// A theme that no longer exists is a conflict: it resets to the default and
+	// is reported so the user can be told.
+	cfg := config.Default()
+	cfg.Theme = "retired-theme"
+	conflicts := validate(&cfg)
+	if len(conflicts) != 1 {
+		t.Fatalf("conflicts = %v, want exactly one", conflicts)
+	}
+	if cfg.Theme != config.Default().Theme {
+		t.Errorf("Theme = %q, want reset to default %q", cfg.Theme, config.Default().Theme)
+	}
+
+	// A known theme and a blank theme are both left untouched with no conflict.
+	for _, name := range []string{"dracula", ""} {
+		cfg := config.Default()
+		cfg.Theme = name
+		if conflicts := validate(&cfg); len(conflicts) != 0 {
+			t.Errorf("theme %q reported conflicts %v, want none", name, conflicts)
+		}
+		if cfg.Theme != name {
+			t.Errorf("theme %q was modified to %q", name, cfg.Theme)
+		}
+	}
+}
+
+func TestStartupNoticeShowsToast(t *testing.T) {
+	m := sizedModel(t)
+	next, _ := m.Update(startupNoticeMsg{text: "config: logLimit 0 is invalid; reset to 100"})
+	m = next.(*Model)
+	if view := stripANSI(m.View()); !strings.Contains(view, "logLimit 0 is invalid") {
+		t.Errorf("expected the startup notice toast, got:\n%s", view)
+	}
+}
+
+func TestStartupNoticeCmdEmitsMessage(t *testing.T) {
+	msg := startupNoticeCmd("hello")()
+	sn, ok := msg.(startupNoticeMsg)
+	if !ok || sn.text != "hello" {
+		t.Fatalf("startupNoticeCmd() = %#v, want startupNoticeMsg{text:%q}", msg, "hello")
+	}
+}
+
+func TestSetStartupNoticeTrims(t *testing.T) {
+	m := sizedModel(t)
+	m.SetStartupNotice("  spaced  ")
+	if m.startupNotice != "spaced" {
+		t.Errorf("startupNotice = %q, want %q", m.startupNotice, "spaced")
+	}
+	// A blank notice (no conflicts to report) must clear to empty so Init
+	// schedules nothing and no toast appears.
+	m.SetStartupNotice("   ")
+	if m.startupNotice != "" {
+		t.Errorf("blank notice should clear to empty, got %q", m.startupNotice)
+	}
+}
+
 func TestCommitEditorGolden(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "modified.go", State: svn.StateModified, Changelist: "revision:staged"},
@@ -972,6 +1107,260 @@ func TestHelpMenuGolden(t *testing.T) {
 		{Path: "modified.go", State: svn.StateModified},
 	})
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = next.(*Model)
+	golden.RequireEqual(t, []byte(m.View()))
+}
+
+func TestThemePickerOpensAndApplies(t *testing.T) {
+	// Persist to a throwaway XDG config dir so the real home is untouched.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	if m.theme != theme.Auto() {
+		t.Fatal("initial theme is not Auto()")
+	}
+
+	// t opens the picker.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = next.(*Model)
+	if !m.themePicking {
+		t.Fatal("pressing t did not open the theme picker")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "Theme") {
+		t.Errorf("picker view missing title\n%s", view)
+	}
+
+	// Applying a theme swaps the live palette, closes the picker, and persists.
+	m.applyTheme("everforest")
+	if m.theme != theme.Everforest() {
+		t.Error("theme after applyTheme(everforest) is not Everforest()")
+	}
+	if m.themePicking {
+		t.Error("applyTheme did not close the picker")
+	}
+	if m.cfg.Theme != "everforest" {
+		t.Errorf("cfg.Theme = %q, want everforest", m.cfg.Theme)
+	}
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Theme != "everforest" {
+		t.Errorf("persisted theme = %q, want everforest", got.Theme)
+	}
+}
+
+func TestThemePickerToggleClosesWithT(t *testing.T) {
+	m := sizedModel(t)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = next.(*Model)
+	if !m.themePicking {
+		t.Fatal("first t should open the picker")
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = next.(*Model)
+	if m.themePicking {
+		t.Error("second t should close the picker")
+	}
+}
+
+func TestChooseThemeByIndex(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := sizedModel(t)
+	idx := -1
+	for i, n := range theme.All() {
+		if n.Name == "dracula" {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatal("dracula not found in theme.All()")
+	}
+	m.chooseTheme(idx)
+	if m.theme != theme.Dracula() {
+		t.Error("chooseTheme did not resolve the index to Dracula()")
+	}
+}
+
+func TestThemePickerLivePreviewOnScroll(t *testing.T) {
+	m := sizedModel(t)
+	// Open the picker; the cursor starts on the active theme (auto, index 0).
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = next.(*Model)
+
+	// Scrolling down live-applies the highlighted theme without persisting.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(*Model)
+	all := theme.All()
+	if m.theme != all[1].Theme {
+		t.Errorf("scrolling did not live-apply the highlighted theme %q", all[1].Name)
+	}
+	if m.cfg.Theme != "auto" {
+		t.Errorf("preview must not persist; cfg.Theme = %q, want auto", m.cfg.Theme)
+	}
+
+	// Esc cancels, reverting the preview to the original theme.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*Model)
+	if m.theme != theme.Auto() {
+		t.Error("esc did not revert the preview to the original theme")
+	}
+	if m.themePicking {
+		t.Error("esc did not close the picker")
+	}
+}
+
+func TestSettingsOpensAndCancels(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+
+	// S floats the settings editor over the layout.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	m = next.(*Model)
+	if !m.configuring {
+		t.Fatal("pressing S did not open the settings editor")
+	}
+	view := stripANSI(m.View())
+	for _, want := range []string{"Settings", "Default path", "Log limit", "Editor", "Theme", "Directory diff"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("settings view missing %q\n---\n%s", want, view)
+		}
+	}
+
+	// esc closes it without saving.
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd()) // deliver the DismissMsg
+		m = next.(*Model)
+	}
+	if m.configuring {
+		t.Error("esc should close the settings editor")
+	}
+	if view := stripANSI(m.View()); strings.Contains(view, "Directory diff") {
+		t.Error("the layout should return after closing settings")
+	}
+}
+
+func TestSettingsSavesThemeChange(t *testing.T) {
+	// Persist to a throwaway XDG config dir so the real home is untouched.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	if m.theme != theme.Auto() {
+		t.Fatal("initial theme is not Auto()")
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	m = next.(*Model)
+
+	// Move to the Theme field and cycle one option forward (auto -> everforest).
+	for i := 0; i < 3; i++ {
+		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = next.(*Model)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = next.(*Model)
+
+	// ctrl+s saves and closes.
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd()) // deliver the SubmitMsg
+		m = next.(*Model)
+	}
+	if m.configuring {
+		t.Fatal("ctrl+s should close the settings editor")
+	}
+	if m.theme != theme.Everforest() {
+		t.Error("saving did not apply the chosen theme")
+	}
+	if m.cfg.Theme != "everforest" {
+		t.Errorf("cfg.Theme = %q, want everforest", m.cfg.Theme)
+	}
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Theme != "everforest" {
+		t.Errorf("persisted theme = %q, want everforest", got.Theme)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "settings saved") {
+		t.Errorf("expected a saved toast, got:\n%s", view)
+	}
+}
+
+func TestSettingsSavesDirectoryDiffToggle(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	if !m.dirDiff {
+		t.Fatal("directory diff should start enabled by default")
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	m = next.(*Model)
+	for i := 0; i < 4; i++ {
+		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // to the Directory diff field
+		m = next.(*Model)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace}) // toggle off
+	m = next.(*Model)
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd())
+		m = next.(*Model)
+	}
+	if m.dirDiff {
+		t.Error("saving did not apply the directory-diff toggle")
+	}
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.DirectoryDiff {
+		t.Error("persisted DirectoryDiff = true, want false")
+	}
+}
+
+func TestSettingsEditsPersistToConfig(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := sizedModel(t)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	m = next.(*Model)
+	// The cursor starts on the Default path field; type a path.
+	for _, r := range "/srv/repo" {
+		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = next.(*Model)
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = next.(*Model)
+	if cmd != nil {
+		m.Update(cmd()) // deliver the SubmitMsg; persisting is a side effect
+	}
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.DefaultPath != "/srv/repo" {
+		t.Errorf("persisted DefaultPath = %q, want /srv/repo", got.DefaultPath)
+	}
+}
+
+func TestSettingsFormGolden(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
 	m = next.(*Model)
 	golden.RequireEqual(t, []byte(m.View()))
 }

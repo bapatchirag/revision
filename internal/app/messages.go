@@ -72,6 +72,16 @@ type updateAvailableMsg struct {
 	rel selfupdate.Release
 }
 
+// startupNoticeMsg carries a one-time message to display as a toast once the UI
+// is up. It is used to surface configuration conflicts resolved at startup.
+type startupNoticeMsg struct{ text string }
+
+// startupNoticeCmd emits a startupNoticeMsg so a launch-time notice is shown
+// through the normal toast path once the program is running.
+func startupNoticeCmd(text string) tea.Cmd {
+	return func() tea.Msg { return startupNoticeMsg{text: text} }
+}
+
 // checkUpdateCmd asks GitHub, off the UI goroutine, whether a newer release
 // exists. It emits updateAvailableMsg only when one does; a development build,
 // an up-to-date binary, or any network/parse failure yields no message so the

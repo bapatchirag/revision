@@ -1,15 +1,15 @@
-╭─ [1] Status ─────────────────╮╭─ Main ───────────────────────────────────────╮
-│https://svn.example.com/repo/t││Loading diff…                                 │
-│r42                ╭─ Keybindings ────────────────────────╮                   │
-│1 change(s)        │> Stage / unstage                space│                   │
-│━━━━━━━━━━━━━━━━━━━│  Assign changelist                  n│                   │
-╰───────────────────│  Commit staged / changelist         c│                   │
-╭─ [2] ─ Changes ───│  Switch file view               [ / ]│                   │
-│  ▾ /              │  Expand changelist              enter│                   │
-│>     M modified.go│  Revert file                        r│                   │
-│                   │  Delete file                        d│                   │
-│                   │  Update working copy                u│                   │
+╭─ [1] Status ──────╭─ Keybindings ────────────────────────╮───────────────────╮
+│https://svn.example│> Stage / unstage                space│                   │
+│r42                │  Assign changelist                  n│                   │
+│1 change(s)        │  Commit staged / changelist         c│                   │
+│━━━━━━━━━━━━━━━━━━━│  Switch file view               [ / ]│                   │
+╰───────────────────│  Expand changelist              enter│                   │
+╭─ [2] ─ Changes ───│  Revert file                        r│                   │
+│  ▾ /              │  Delete file                        d│                   │
+│>     M modified.go│  Update working copy                u│                   │
 │                   │  Refresh                            R│                   │
+│                   │  Change theme                       t│                   │
+│                   │  Edit settings                      S│                   │
 │                   │  Jump to panel                1 2 3 0│                   │
 ╰───────────────────│  Cycle panels         tab / shift+tab│                   │
 ╭─ [3] Log ─────────│  Move up / down                 k / j│                   │
@@ -17,8 +17,8 @@
 │                   │  Scroll main up / down          K / J│                   │
 │                   │  Scroll main left / right       h / l│                   │
 │                   │  Line start / end          home / end│                   │
+│                   │  Toggle directory diff              D│                   │
 │                   │  Toggle help                        ?│                   │
 │                   │  Quit                               q│                   │
-│                   ╰──────────────────────────────────────╯                   │
-╰──────────────────────────────╯╰──────────────────────────────────────────────╯
+╰───────────────────╰──────────────────────────────────────╯───────────────────╯
 space stage · n changelist · c commit · r revert · d delete · ? help            

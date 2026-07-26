@@ -6,12 +6,14 @@ package app
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/bapatchirag/revision/internal/config"
 	"github.com/bapatchirag/revision/internal/selfupdate"
 	"github.com/bapatchirag/revision/internal/svn"
 	"github.com/bapatchirag/revision/internal/tui/component"
@@ -60,6 +62,12 @@ const helpMenuID = "help"
 // updateMenuID identifies the startup update prompt on emitted messages.
 const updateMenuID = "update"
 
+// themeMenuID identifies the theme picker on emitted messages.
+const themeMenuID = "theme"
+
+// settingsFormID identifies the settings editor on emitted messages.
+const settingsFormID = "settings"
+
 // mainSource selects which side panel's selection drives the Main viewport.
 type mainSource int
 
@@ -77,6 +85,7 @@ type Model struct {
 
 	theme theme.Theme
 	keys  keymap.KeyMap
+	cfg   config.Config
 
 	status      *component.Viewport
 	files       *component.List[fileNode]
@@ -93,6 +102,8 @@ type Model struct {
 	modal      *component.Modal
 	menu       *component.Menu
 	updateMenu *component.Menu
+	themeMenu  *component.Menu
+	form       *component.Form
 	toast      *component.Toast
 	focus      *focus.Manager
 
@@ -102,19 +113,24 @@ type Model struct {
 	clItems          []svn.StatusItem
 	clCollapsedDirs  map[string]bool
 
-	source       mainSource
-	diffPath     string
-	diffText     string
-	logErr       error
-	editing      bool
-	naming       bool
-	nameTargets  []changelistTarget
-	drilledCL    string
-	commitCL     string
-	confirming   bool
-	helping      bool
-	pending      tea.Cmd
-	showingToast bool
+	source        mainSource
+	diffPath      string
+	diffText      string
+	dirDiff       bool
+	logErr        error
+	editing       bool
+	naming        bool
+	nameTargets   []changelistTarget
+	drilledCL     string
+	commitCL      string
+	themeBefore   string
+	confirming    bool
+	helping       bool
+	themePicking  bool
+	configuring   bool
+	pending       tea.Cmd
+	showingToast  bool
+	startupNotice string
 
 	build        selfupdate.Build
 	updating     bool
@@ -133,8 +149,8 @@ var _ tea.Model = (*Model)(nil)
 // New creates the root model for the given client and working-copy info. build
 // carries the running binary's provenance so a release build can offer to
 // self-update on startup.
-func New(client *svn.Client, info *svn.Info, build selfupdate.Build) *Model {
-	th := theme.Default()
+func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.Config) *Model {
+	th, _ := theme.ByName(cfg.Theme)
 	keys := keymap.Default()
 
 	status := component.NewViewport(th, keys)
@@ -160,6 +176,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build) *Model {
 		info:            info,
 		theme:           th,
 		keys:            keys,
+		cfg:             cfg,
 		status:          status,
 		files:           files,
 		changelists:     changelists,
@@ -174,10 +191,13 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build) *Model {
 		modal:           component.NewModal(confirmModalID, "", "", th, keys),
 		menu:            component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
 		updateMenu:      component.NewMenu(updateMenuID, "Update available", updateMenuItems(), th, keys),
+		themeMenu:       component.NewMenu(themeMenuID, "Theme", themeMenuItems(), th, keys),
+		form:            component.NewForm(settingsFormID, "Settings", settingsFields(cfg, cfg.DirectoryDiff), th, keys),
 		toast:           component.NewToast(th),
 		collapsedDirs:   map[string]bool{},
 		clCollapsedDirs: map[string]bool{},
 		source:          sourceFiles,
+		dirDiff:         cfg.DirectoryDiff,
 		commitCL:        stagedChangelist,
 		build:           build,
 		loading:         true,
@@ -195,6 +215,9 @@ func (m *Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{loadStatusCmd(m.client), loadLogCmd(m.client)}
 	if m.build.IsRelease() {
 		cmds = append(cmds, checkUpdateCmd(m.build))
+	}
+	if m.startupNotice != "" {
+		cmds = append(cmds, startupNoticeCmd(m.startupNotice))
 	}
 	return tea.Batch(cmds...)
 }
@@ -220,6 +243,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.updating {
 			m.sizeUpdateMenu()
+		}
+		if m.configuring {
+			m.sizeForm()
 		}
 		return m, nil
 
@@ -329,6 +355,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case startupNoticeMsg:
+		// A one-time notice surfaced at launch (e.g. config values reset during
+		// reconciliation). It behaves like any toast: it clears on the next key.
+		m.showToast(msg.text, component.LevelWarning)
+		return m, nil
+
 	case uimsg.SelectedMsg:
 		return m, m.handleSelection(msg)
 
@@ -345,6 +377,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.toggleClCollapse()
 		case updateMenuID:
 			return m, m.chooseUpdate(msg.Index)
+		case themeMenuID:
+			return m, m.chooseTheme(msg.Index)
 		}
 		return m, nil
 
@@ -372,6 +406,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.submitCommit(msg.Value)
 		case changelistEditorID:
 			return m, m.submitChangelist(msg.Value)
+		case settingsFormID:
+			return m, m.submitSettings()
 		}
 		return m, nil
 
@@ -397,6 +433,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pending = nil
 		case updateMenuID:
 			m.closeUpdate()
+		case themeMenuID:
+			m.cancelThemePreview()
+		case settingsFormID:
+			m.closeSettings()
 		}
 		return m, nil
 
@@ -406,6 +446,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.naming {
 			return m, m.nameEditor.Update(msg)
+		}
+		if m.configuring {
+			return m, m.form.Update(msg)
 		}
 		if m.confirming {
 			return m, m.modal.Update(msg)
@@ -423,6 +466,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, m.menu.Update(msg)
+		}
+		if m.themePicking {
+			// t and esc cancel, reverting the live preview; other keys drive the
+			// menu: enter commits via ActivatedMsg, and up/down live-preview the
+			// highlighted theme so the user sees each scheme while scrolling.
+			if key.Matches(msg, m.keys.Theme) || key.Matches(msg, m.keys.Back) {
+				m.cancelThemePreview()
+				return m, nil
+			}
+			before := m.themeMenu.Index()
+			cmd := m.themeMenu.Update(msg)
+			if after := m.themeMenu.Index(); after != before {
+				m.previewThemeAt(after)
+			}
+			return m, cmd
 		}
 		m.dismissToast()
 		if cmd, handled := m.handleKey(msg); handled {
@@ -454,6 +512,10 @@ func (m *Model) View() string {
 		view = m.overlayCenter(view, m.updateMenu.View())
 	case m.helping:
 		view = m.overlayCenter(view, m.menu.View())
+	case m.themePicking:
+		view = m.overlayCenter(view, m.themeMenu.View())
+	case m.configuring:
+		view = m.overlayCenter(view, m.form.View())
 	}
 	return view
 }
@@ -506,6 +568,10 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	case key.Matches(k, m.keys.FocusPrev):
 		m.focus.Prev()
 		return m.afterFocusChange(), true
+	case key.Matches(k, m.keys.Theme):
+		return m.openThemeMenu(), true
+	case key.Matches(k, m.keys.Settings):
+		return m.openSettings(), true
 	case key.Matches(k, m.keys.Help):
 		return m.openHelp(), true
 	}
@@ -547,6 +613,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, false
 	case "u":
 		return m.requestUpdate(), true
+	case "D":
+		return m.toggleDirDiff(), true
 	}
 	return nil, false
 }
@@ -997,11 +1065,34 @@ func (m *Model) closeHelp() {
 	m.menu.Blur()
 }
 
+// openThemeMenu shows the theme picker as a centered overlay, starting the
+// cursor on the active theme.
+func (m *Model) openThemeMenu() tea.Cmd {
+	m.themePicking = true
+	// Remember the active theme so canceling can revert the live preview.
+	m.themeBefore = m.cfg.Theme
+	for i, n := range theme.All() {
+		if n.Name == m.cfg.Theme {
+			m.themeMenu.SetIndex(i)
+			break
+		}
+	}
+	m.themeMenu.Focus()
+	m.sizeThemeMenu()
+	return nil
+}
+
+// closeThemeMenu hides the theme picker.
+func (m *Model) closeThemeMenu() {
+	m.themePicking = false
+	m.themeMenu.Blur()
+}
+
 // overlayActive reports whether any modal, editor, or menu is currently on
 // screen, so a background event (like the update check completing) knows not to
 // steal focus.
 func (m *Model) overlayActive() bool {
-	return m.editing || m.naming || m.confirming || m.helping || m.updating
+	return m.editing || m.naming || m.confirming || m.helping || m.updating || m.themePicking || m.configuring
 }
 
 // openUpdate shows the startup update prompt for the given release as a centered
@@ -1040,6 +1131,130 @@ func (m *Model) chooseUpdate(index int) tea.Cmd {
 	}
 }
 
+// chooseTheme applies the theme at index in the picker's display order, then
+// closes the picker. An out-of-range index is ignored.
+func (m *Model) chooseTheme(index int) tea.Cmd {
+	all := theme.All()
+	if index < 0 || index >= len(all) {
+		return nil
+	}
+	return m.applyTheme(all[index].Name)
+}
+
+// previewTheme applies the named palette to every component without persisting
+// or closing the picker, so the user sees each scheme live while scrolling. It
+// re-themes every component, rebuilds the Files list render closures that
+// captured the previous palette (so row glyph colors follow the switch), and
+// refreshes derived chrome (which re-colorizes the diff via the live theme). An
+// unrecognized name resolves to Auto (matching startup), so it is always safe.
+func (m *Model) previewTheme(name string) {
+	th, _ := theme.ByName(name)
+	m.theme = th
+	for _, p := range m.panels {
+		p.SetTheme(th)
+	}
+	m.bar.SetTheme(th)
+	m.editor.SetTheme(th)
+	m.nameEditor.SetTheme(th)
+	m.modal.SetTheme(th)
+	m.menu.SetTheme(th)
+	m.updateMenu.SetTheme(th)
+	m.themeMenu.SetTheme(th)
+	m.form.SetTheme(th)
+	m.toast.SetTheme(th)
+	m.files.SetRender(renderFileNode(th))
+	m.clFiles.SetRender(renderFileNode(th))
+	m.changelists.SetRender(renderChangelistGroup(th))
+	m.refreshChrome()
+}
+
+// previewThemeAt live-applies the theme at index in the picker's display order,
+// without persisting, so scrolling shows each scheme immediately.
+func (m *Model) previewThemeAt(index int) {
+	all := theme.All()
+	if index < 0 || index >= len(all) {
+		return
+	}
+	m.previewTheme(all[index].Name)
+}
+
+// cancelThemePreview reverts any live preview to the theme active before the
+// picker opened, then closes the picker without persisting.
+func (m *Model) cancelThemePreview() {
+	m.previewTheme(m.themeBefore)
+	m.closeThemeMenu()
+}
+
+// applyTheme commits the named theme: it applies the palette to every component
+// (like previewTheme) and persists the choice, then closes the picker. A failed
+// save is non-fatal and surfaced as a toast.
+func (m *Model) applyTheme(name string) tea.Cmd {
+	if _, ok := theme.ByName(name); !ok {
+		return nil
+	}
+	m.previewTheme(name)
+	m.closeThemeMenu()
+	m.cfg.Theme = name
+	if err := config.Save(m.cfg); err != nil {
+		m.showToast("couldn't save theme: "+err.Error(), component.LevelWarning)
+	}
+	return nil
+}
+
+// openSettings shows the settings editor as a centered overlay, populating it
+// from the current configuration. The directory-diff field is seeded from the
+// live runtime state so the form reflects what the user currently sees.
+func (m *Model) openSettings() tea.Cmd {
+	m.form.SetFields(settingsFields(m.cfg, m.dirDiff))
+	m.configuring = true
+	m.form.Focus()
+	m.sizeForm()
+	return nil
+}
+
+// closeSettings hides the settings editor without saving.
+func (m *Model) closeSettings() {
+	m.configuring = false
+	m.form.Blur()
+}
+
+// submitSettings reads the edited fields back into the configuration, applies the
+// changes that take effect immediately (the theme palette and the directory-diff
+// default), persists the result, and closes the editor. A blank or non-positive
+// log limit is ignored so the previous value survives; a failed save is
+// non-fatal and surfaced as a toast.
+func (m *Model) submitSettings() tea.Cmd {
+	vals := m.form.Values()
+	// Field order mirrors settingsFields.
+	cfg := m.cfg
+	cfg.DefaultPath = strings.TrimSpace(vals[0])
+	if n, err := strconv.Atoi(strings.TrimSpace(vals[1])); err == nil && n > 0 {
+		cfg.LogLimit = n
+	}
+	cfg.Editor = strings.TrimSpace(vals[2])
+	cfg.Theme = strings.TrimSpace(vals[3])
+	cfg.DirectoryDiff = vals[4] == "true"
+
+	m.closeSettings()
+
+	themeChanged := cfg.Theme != m.cfg.Theme
+	m.cfg = cfg
+	m.dirDiff = cfg.DirectoryDiff
+	if themeChanged {
+		m.previewTheme(cfg.Theme)
+	}
+	if err := config.Save(m.cfg); err != nil {
+		m.showToast("couldn't save settings: "+err.Error(), component.LevelWarning)
+		return nil
+	}
+	m.showToast("settings saved", component.LevelSuccess)
+	m.updateMain()
+	if m.source == sourceFiles {
+		return m.diffLoadForSelection()
+	}
+	return nil
+}
+
 // PendingUpdate reports the update method the user chose before quitting, if
 // any. The command layer runs it once the program has exited.
 func (m *Model) PendingUpdate() (selfupdate.Method, bool) {
@@ -1054,6 +1269,32 @@ func (m *Model) showToast(text string, level component.Level) {
 
 // dismissToast hides the current toast.
 func (m *Model) dismissToast() { m.showingToast = false }
+
+// SetStartupNotice schedules text to appear as a transient notice as soon as the
+// UI is up, used to report configuration conflicts resolved at startup. It must
+// be called before the program runs; an empty or blank string is a no-op.
+func (m *Model) SetStartupNotice(text string) {
+	m.startupNotice = strings.TrimSpace(text)
+}
+
+// ConfigValidator returns a config.Validator that reconciles domain-specific
+// settings against this build, keeping the config package free of TUI concerns.
+// It resets a theme that is no longer available to the default so the new
+// default takes precedence, reporting the change so it can be shown to the user.
+func ConfigValidator() config.Validator {
+	return func(cfg *config.Config) []string {
+		name := strings.TrimSpace(cfg.Theme)
+		if name == "" {
+			return nil
+		}
+		if _, ok := theme.ByName(name); ok {
+			return nil
+		}
+		def := config.Default().Theme
+		cfg.Theme = def
+		return []string{fmt.Sprintf("theme %q is no longer available; reset to %q", name, def)}
+	}
+}
 
 // failureText renders an action failure for a toast. An svn authentication
 // failure collapses to a short, actionable hint instead of a raw multi-line svn
@@ -1077,6 +1318,8 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Delete file", Key: "d"},
 		{Label: "Update working copy", Key: "u"},
 		{Label: "Refresh", Key: "R"},
+		{Label: "Change theme", Key: "t"},
+		{Label: "Edit settings", Key: "S"},
 		{Label: "Jump to panel", Key: "1 2 3 0"},
 		{Label: "Cycle panels", Key: "tab / shift+tab"},
 		{Label: "Move up / down", Key: "k / j"},
@@ -1084,6 +1327,7 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Scroll main up / down", Key: "K / J"},
 		{Label: "Scroll main left / right", Key: "h / l"},
 		{Label: "Line start / end", Key: "home / end"},
+		{Label: "Toggle directory diff", Key: "D"},
 		{Label: "Toggle help", Key: "?"},
 		{Label: "Quit", Key: "q"},
 	}
@@ -1096,6 +1340,32 @@ func updateMenuItems() []component.MenuItem {
 		{Label: "Update with cURL"},
 		{Label: "Update with Go"},
 		{Label: "Don't update this time"},
+	}
+}
+
+// themeMenuItems are the built-in themes shown in the picker, in display order;
+// chooseTheme maps a selected index back onto theme.All().
+func themeMenuItems() []component.MenuItem {
+	all := theme.All()
+	items := make([]component.MenuItem, len(all))
+	for i, n := range all {
+		items[i] = component.MenuItem{Label: n.Label}
+	}
+	return items
+}
+
+// settingsFields builds the settings editor's fields from the configuration, in
+// the field order submitSettings relies on. The directory-diff field is seeded
+// from the live runtime state (dirDiff) rather than cfg so the form shows what
+// the user currently sees; every other field comes straight from the persisted
+// configuration.
+func settingsFields(cfg config.Config, dirDiff bool) []component.Field {
+	return []component.Field{
+		{Label: "Default path", Kind: component.FieldText, Value: cfg.DefaultPath},
+		{Label: "Log limit", Kind: component.FieldInt, Value: strconv.Itoa(cfg.LogLimit)},
+		{Label: "Editor", Kind: component.FieldText, Value: cfg.Editor},
+		{Label: "Theme", Kind: component.FieldChoice, Value: cfg.Theme, Options: theme.Names()},
+		{Label: "Directory diff", Kind: component.FieldBool, Value: strconv.FormatBool(dirDiff)},
 	}
 }
 
@@ -1164,6 +1434,18 @@ func (m *Model) sizeUpdateMenu() {
 	m.updateMenu.SetSize(clamp(m.width/2, 40, max(m.width-6, 40)), 0)
 }
 
+// sizeThemeMenu sizes the theme picker like the help menu (width only; the
+// height follows the theme count).
+func (m *Model) sizeThemeMenu() {
+	m.themeMenu.SetSize(clamp(m.width/2, 40, max(m.width-6, 40)), 0)
+}
+
+// sizeForm sizes the settings editor to a centered portion of the screen (only
+// its width matters; the height follows the field count).
+func (m *Model) sizeForm() {
+	m.form.SetSize(clamp(m.width*3/5, 40, max(m.width-4, 40)), 0)
+}
+
 // stageable reports whether a working-copy state can be added to the staged
 // changelist as-is. Only versioned, pending changes qualify. Unversioned files
 // are handled separately by stageTarget (svn add + stage); ignored and missing
@@ -1223,7 +1505,7 @@ func (m *Model) afterFocusChange() tea.Cmd {
 // whole working copy); a file leaf loads its own diff when it is dirty.
 func (m *Model) diffLoadForSelection() tea.Cmd {
 	if n, _, ok := m.selectedTreeNode(); ok && n.Item == nil {
-		if m.diffPath == n.Path {
+		if !m.dirDiff || m.diffPath == n.Path {
 			return nil
 		}
 		return loadDiffCmd(m.client, n.Path)
@@ -1233,6 +1515,24 @@ func (m *Model) diffLoadForSelection() tea.Cmd {
 		return nil
 	}
 	return loadDiffCmd(m.client, it.Path)
+}
+
+// toggleDirDiff flips whether directory rows show their combined diff. It lets a
+// working copy that disables directory diffs globally (config) reveal one on
+// demand, and hide it again. It reports the new state with a toast and, when Main
+// follows the Files panel, refreshes it — loading the diff if it now needs one.
+func (m *Model) toggleDirDiff() tea.Cmd {
+	m.dirDiff = !m.dirDiff
+	if m.dirDiff {
+		m.showToast("directory diff on", component.LevelInfo)
+	} else {
+		m.showToast("directory diff off", component.LevelInfo)
+	}
+	if m.source != sourceFiles {
+		return nil
+	}
+	m.updateMain()
+	return m.diffLoadForSelection()
 }
 
 // layout sizes the panels and bar for the current terminal dimensions.
@@ -1342,7 +1642,7 @@ func (m *Model) filesShowDiff() bool {
 		return false
 	}
 	if n, _, ok := m.selectedTreeNode(); ok && n.Item == nil {
-		return m.diffPath == n.Path && strings.TrimSpace(m.diffText) != ""
+		return m.dirDiff && m.diffPath == n.Path && strings.TrimSpace(m.diffText) != ""
 	}
 	it, ok := m.selectedFile()
 	if !ok || !it.State.IsDirty() {
@@ -1377,8 +1677,12 @@ func (m *Model) changelistDetail() string {
 // directoryDetail renders the combined diff of every change beneath a selected
 // directory row (the "/" root covers the whole working copy). It mirrors
 // fileDetail: a placeholder shows while the diff loads or when the directory has
-// no textual changes.
+// no textual changes. When directory diffs are toggled off it shows only a hint
+// naming the key that reveals the diff.
 func (m *Model) directoryDetail(n fileNode) string {
+	if !m.dirDiff {
+		return "(directory diff off — press " + m.keys.ToggleDirDiff.Help().Key + " to show it)"
+	}
 	switch {
 	case m.diffPath != n.Path:
 		return "Loading diff…"

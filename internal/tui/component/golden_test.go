@@ -276,3 +276,16 @@ func TestGoldenPromptListFocused(t *testing.T) {
 	p.Update(keyDown())
 	golden.RequireEqual(t, []byte(p.View()))
 }
+
+func TestGoldenForm(t *testing.T) {
+	f := component.NewForm("settings", "Settings", []component.Field{
+		{Label: "Default path", Kind: component.FieldText, Value: "~/code/project"},
+		{Label: "Log limit", Kind: component.FieldInt, Value: "100"},
+		{Label: "Editor", Kind: component.FieldText, Value: "vim"},
+		{Label: "Theme", Kind: component.FieldChoice, Value: "cipher", Options: []string{"auto", "cipher", "nord"}},
+		{Label: "Directory diff", Kind: component.FieldBool, Value: "true"},
+	}, testTheme(), testKeys())
+	f.SetSize(48, 0)
+	f.Focus()
+	golden.RequireEqual(t, []byte(f.View()))
+}
