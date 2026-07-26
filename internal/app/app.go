@@ -113,23 +113,24 @@ type Model struct {
 	clItems          []svn.StatusItem
 	clCollapsedDirs  map[string]bool
 
-	source       mainSource
-	diffPath     string
-	diffText     string
-	dirDiff      bool
-	logErr       error
-	editing      bool
-	naming       bool
-	nameTargets  []changelistTarget
-	drilledCL    string
-	commitCL     string
-	themeBefore  string
-	confirming   bool
-	helping      bool
-	themePicking bool
-	configuring  bool
-	pending      tea.Cmd
-	showingToast bool
+	source        mainSource
+	diffPath      string
+	diffText      string
+	dirDiff       bool
+	logErr        error
+	editing       bool
+	naming        bool
+	nameTargets   []changelistTarget
+	drilledCL     string
+	commitCL      string
+	themeBefore   string
+	confirming    bool
+	helping       bool
+	themePicking  bool
+	configuring   bool
+	pending       tea.Cmd
+	showingToast  bool
+	startupNotice string
 
 	build        selfupdate.Build
 	updating     bool
@@ -214,6 +215,9 @@ func (m *Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{loadStatusCmd(m.client), loadLogCmd(m.client)}
 	if m.build.IsRelease() {
 		cmds = append(cmds, checkUpdateCmd(m.build))
+	}
+	if m.startupNotice != "" {
+		cmds = append(cmds, startupNoticeCmd(m.startupNotice))
 	}
 	return tea.Batch(cmds...)
 }
@@ -349,6 +353,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.overlayActive() {
 			m.openUpdate(msg.rel)
 		}
+		return m, nil
+
+	case startupNoticeMsg:
+		// A one-time notice surfaced at launch (e.g. config values reset during
+		// reconciliation). It behaves like any toast: it clears on the next key.
+		m.showToast(msg.text, component.LevelWarning)
 		return m, nil
 
 	case uimsg.SelectedMsg:
@@ -1259,6 +1269,32 @@ func (m *Model) showToast(text string, level component.Level) {
 
 // dismissToast hides the current toast.
 func (m *Model) dismissToast() { m.showingToast = false }
+
+// SetStartupNotice schedules text to appear as a transient notice as soon as the
+// UI is up, used to report configuration conflicts resolved at startup. It must
+// be called before the program runs; an empty or blank string is a no-op.
+func (m *Model) SetStartupNotice(text string) {
+	m.startupNotice = strings.TrimSpace(text)
+}
+
+// ConfigValidator returns a config.Validator that reconciles domain-specific
+// settings against this build, keeping the config package free of TUI concerns.
+// It resets a theme that is no longer available to the default so the new
+// default takes precedence, reporting the change so it can be shown to the user.
+func ConfigValidator() config.Validator {
+	return func(cfg *config.Config) []string {
+		name := strings.TrimSpace(cfg.Theme)
+		if name == "" {
+			return nil
+		}
+		if _, ok := theme.ByName(name); ok {
+			return nil
+		}
+		def := config.Default().Theme
+		cfg.Theme = def
+		return []string{fmt.Sprintf("theme %q is no longer available; reset to %q", name, def)}
+	}
+}
 
 // failureText renders an action failure for a toast. An svn authentication
 // failure collapses to a short, actionable hint instead of a raw multi-line svn

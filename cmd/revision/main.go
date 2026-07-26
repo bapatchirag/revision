@@ -90,12 +90,13 @@ func run(path string, build selfupdate.Build) error {
 		return fmt.Errorf("%q does not appear to be an SVN working copy: %w", abs, err)
 	}
 
-	cfg, err := config.Ensure()
+	cfg, rec, err := config.Reconcile(app.ConfigValidator())
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "revision: using default config:", err)
 	}
 
 	model := app.New(client, info, build, cfg)
+	model.SetStartupNotice(rec.Notice())
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	final, err := program.Run()
 	if err != nil {

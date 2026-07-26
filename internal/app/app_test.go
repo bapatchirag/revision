@@ -731,6 +731,65 @@ func TestCommitResultShowsToast(t *testing.T) {
 	}
 }
 
+func TestConfigValidatorResetsUnknownTheme(t *testing.T) {
+	validate := ConfigValidator()
+
+	// A theme that no longer exists is a conflict: it resets to the default and
+	// is reported so the user can be told.
+	cfg := config.Default()
+	cfg.Theme = "retired-theme"
+	conflicts := validate(&cfg)
+	if len(conflicts) != 1 {
+		t.Fatalf("conflicts = %v, want exactly one", conflicts)
+	}
+	if cfg.Theme != config.Default().Theme {
+		t.Errorf("Theme = %q, want reset to default %q", cfg.Theme, config.Default().Theme)
+	}
+
+	// A known theme and a blank theme are both left untouched with no conflict.
+	for _, name := range []string{"dracula", ""} {
+		cfg := config.Default()
+		cfg.Theme = name
+		if conflicts := validate(&cfg); len(conflicts) != 0 {
+			t.Errorf("theme %q reported conflicts %v, want none", name, conflicts)
+		}
+		if cfg.Theme != name {
+			t.Errorf("theme %q was modified to %q", name, cfg.Theme)
+		}
+	}
+}
+
+func TestStartupNoticeShowsToast(t *testing.T) {
+	m := sizedModel(t)
+	next, _ := m.Update(startupNoticeMsg{text: "config: logLimit 0 is invalid; reset to 100"})
+	m = next.(*Model)
+	if view := stripANSI(m.View()); !strings.Contains(view, "logLimit 0 is invalid") {
+		t.Errorf("expected the startup notice toast, got:\n%s", view)
+	}
+}
+
+func TestStartupNoticeCmdEmitsMessage(t *testing.T) {
+	msg := startupNoticeCmd("hello")()
+	sn, ok := msg.(startupNoticeMsg)
+	if !ok || sn.text != "hello" {
+		t.Fatalf("startupNoticeCmd() = %#v, want startupNoticeMsg{text:%q}", msg, "hello")
+	}
+}
+
+func TestSetStartupNoticeTrims(t *testing.T) {
+	m := sizedModel(t)
+	m.SetStartupNotice("  spaced  ")
+	if m.startupNotice != "spaced" {
+		t.Errorf("startupNotice = %q, want %q", m.startupNotice, "spaced")
+	}
+	// A blank notice (no conflicts to report) must clear to empty so Init
+	// schedules nothing and no toast appears.
+	m.SetStartupNotice("   ")
+	if m.startupNotice != "" {
+		t.Errorf("blank notice should clear to empty, got %q", m.startupNotice)
+	}
+}
+
 func TestCommitEditorGolden(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "modified.go", State: svn.StateModified, Changelist: "revision:staged"},
