@@ -1154,6 +1154,159 @@ func TestThemePickerLivePreviewOnScroll(t *testing.T) {
 	}
 }
 
+func TestSettingsOpensAndCancels(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+
+	// S floats the settings editor over the layout.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	m = next.(*Model)
+	if !m.configuring {
+		t.Fatal("pressing S did not open the settings editor")
+	}
+	view := stripANSI(m.View())
+	for _, want := range []string{"Settings", "Default path", "Log limit", "Editor", "Theme", "Directory diff"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("settings view missing %q\n---\n%s", want, view)
+		}
+	}
+
+	// esc closes it without saving.
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd()) // deliver the DismissMsg
+		m = next.(*Model)
+	}
+	if m.configuring {
+		t.Error("esc should close the settings editor")
+	}
+	if view := stripANSI(m.View()); strings.Contains(view, "Directory diff") {
+		t.Error("the layout should return after closing settings")
+	}
+}
+
+func TestSettingsSavesThemeChange(t *testing.T) {
+	// Persist to a throwaway XDG config dir so the real home is untouched.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	if m.theme != theme.Auto() {
+		t.Fatal("initial theme is not Auto()")
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	m = next.(*Model)
+
+	// Move to the Theme field and cycle one option forward (auto -> everforest).
+	for i := 0; i < 3; i++ {
+		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = next.(*Model)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = next.(*Model)
+
+	// ctrl+s saves and closes.
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd()) // deliver the SubmitMsg
+		m = next.(*Model)
+	}
+	if m.configuring {
+		t.Fatal("ctrl+s should close the settings editor")
+	}
+	if m.theme != theme.Everforest() {
+		t.Error("saving did not apply the chosen theme")
+	}
+	if m.cfg.Theme != "everforest" {
+		t.Errorf("cfg.Theme = %q, want everforest", m.cfg.Theme)
+	}
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Theme != "everforest" {
+		t.Errorf("persisted theme = %q, want everforest", got.Theme)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "settings saved") {
+		t.Errorf("expected a saved toast, got:\n%s", view)
+	}
+}
+
+func TestSettingsSavesDirectoryDiffToggle(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	if !m.dirDiff {
+		t.Fatal("directory diff should start enabled by default")
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	m = next.(*Model)
+	for i := 0; i < 4; i++ {
+		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // to the Directory diff field
+		m = next.(*Model)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace}) // toggle off
+	m = next.(*Model)
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd())
+		m = next.(*Model)
+	}
+	if m.dirDiff {
+		t.Error("saving did not apply the directory-diff toggle")
+	}
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.DirectoryDiff {
+		t.Error("persisted DirectoryDiff = true, want false")
+	}
+}
+
+func TestSettingsEditsPersistToConfig(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := sizedModel(t)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	m = next.(*Model)
+	// The cursor starts on the Default path field; type a path.
+	for _, r := range "/srv/repo" {
+		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = next.(*Model)
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd())
+		m = next.(*Model)
+	}
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.DefaultPath != "/srv/repo" {
+		t.Errorf("persisted DefaultPath = %q, want /srv/repo", got.DefaultPath)
+	}
+}
+
+func TestSettingsFormGolden(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	m = next.(*Model)
+	golden.RequireEqual(t, []byte(m.View()))
+}
+
 // availableRelease is the fixture release the update-prompt tests offer.
 var availableRelease = selfupdate.Release{Tag: "v1.5.0", Version: "1.5.0", URL: "https://example.test/r"}
 

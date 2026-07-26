@@ -124,6 +124,8 @@ The footer shows the most common actions, and `?` opens the full keybindings men
 | `u` | Update the working copy to the latest revision |
 | `R` | Refresh status and history |
 | `D` | Toggle the directory-level diff for the highlighted directory (see [Configuration](#configuration)) |
+| `t` | Open the theme picker |
+| `S` | Edit application settings (see [Configuration](#configuration)) |
 | `?` | Toggle the keybindings help |
 | `q` / `Ctrl+C` | Quit |
 
@@ -138,6 +140,8 @@ You can also group work into **named changelists** with `n`: it moves the staged
 ## Configuration
 
 `revision` reads optional settings from `~/.config/revision/config.json` (or `$XDG_CONFIG_HOME/revision/config.json` when that variable is set). The file is optional: every setting falls back to a built-in default when the file, or an individual key, is absent.
+
+You can edit these settings without leaving the app: press `S` to open the settings editor, adjust a value (`↑`/`↓` move between fields, `←`/`→` cycle the theme and toggle switches), then `Ctrl+S` to save or `Esc` to cancel. Saving writes the same `config.json`, and the theme and directory-diff changes apply immediately.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|

@@ -1,15 +1,15 @@
-╭─ [1] Status ─────────────────╮╭─ Main ───────────────────────────────────────╮
-│https://svn.example╭─ Keybindings ────────────────────────╮                   │
-│r42                │> Stage / unstage                space│                   │
-│1 change(s)        │  Assign changelist                  n│                   │
-│━━━━━━━━━━━━━━━━━━━│  Commit staged / changelist         c│                   │
-╰───────────────────│  Switch file view               [ / ]│                   │
-╭─ [2] ─ Changes ───│  Expand changelist              enter│                   │
-│  ▾ /              │  Revert file                        r│                   │
-│>     M modified.go│  Delete file                        d│                   │
-│                   │  Update working copy                u│                   │
+╭─ [1] Status ──────╭─ Keybindings ────────────────────────╮───────────────────╮
+│https://svn.example│> Stage / unstage                space│                   │
+│r42                │  Assign changelist                  n│                   │
+│1 change(s)        │  Commit staged / changelist         c│                   │
+│━━━━━━━━━━━━━━━━━━━│  Switch file view               [ / ]│                   │
+╰───────────────────│  Expand changelist              enter│                   │
+╭─ [2] ─ Changes ───│  Revert file                        r│                   │
+│  ▾ /              │  Delete file                        d│                   │
+│>     M modified.go│  Update working copy                u│                   │
 │                   │  Refresh                            R│                   │
 │                   │  Change theme                       t│                   │
+│                   │  Edit settings                      S│                   │
 │                   │  Jump to panel                1 2 3 0│                   │
 ╰───────────────────│  Cycle panels         tab / shift+tab│                   │
 ╭─ [3] Log ─────────│  Move up / down                 k / j│                   │
