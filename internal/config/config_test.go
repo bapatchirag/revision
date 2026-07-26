@@ -12,8 +12,8 @@ func TestDefault(t *testing.T) {
 	if def.LogLimit <= 0 {
 		t.Errorf("Default().LogLimit = %d, want positive", def.LogLimit)
 	}
-	if def.Theme == "" {
-		t.Error("Default().Theme is empty, want a named palette")
+	if def.Theme != "auto" {
+		t.Errorf("Default().Theme = %q, want %q", def.Theme, "auto")
 	}
 }
 
