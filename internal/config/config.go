@@ -128,6 +128,33 @@ func loadFrom(path string) (Config, error) {
 	return cfg, nil
 }
 
+// Ensure loads the configuration, creating the file with default values when it
+// does not yet exist. It is intended for startup: the first run persists a
+// config.json populated with defaults, giving users a documented file to edit,
+// while later runs behave exactly like Load. Only an absent file triggers a
+// write; every other case defers to Load, so normalization and error handling
+// are unchanged. A failed write returns Default alongside the error so the app
+// can still start.
+func Ensure() (Config, error) {
+	path, err := Path()
+	if err != nil {
+		return Default(), err
+	}
+
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			cfg := Default()
+			if err := saveTo(path, cfg); err != nil {
+				return cfg, err
+			}
+			return cfg, nil
+		}
+		return Default(), fmt.Errorf("stat config %s: %w", path, err)
+	}
+
+	return loadFrom(path)
+}
+
 // normalize repairs values that are invalid on disk so callers always receive a
 // usable Config. It runs only on externally sourced input (a loaded file).
 func (c *Config) normalize() {
