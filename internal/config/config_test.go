@@ -20,6 +20,9 @@ func TestDefault(t *testing.T) {
 	if !def.DirectoryDiff {
 		t.Error("Default().DirectoryDiff = false, want true")
 	}
+	if def.HideUntracked {
+		t.Error("Default().HideUntracked = true, want false")
+	}
 	if def.SSHKeyPath != "~/.ssh/id_rsa" {
 		t.Errorf("Default().SSHKeyPath = %q, want %q", def.SSHKeyPath, "~/.ssh/id_rsa")
 	}
@@ -139,6 +142,21 @@ func TestLoadDisablesDirectoryDiff(t *testing.T) {
 	}
 	if got.DirectoryDiff {
 		t.Error("DirectoryDiff = true, want false (disabled on disk)")
+	}
+}
+
+func TestLoadEnablesHideUntracked(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"hideUntracked":true}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got, err := loadFrom(path)
+	if err != nil {
+		t.Fatalf("loadFrom: unexpected error %v", err)
+	}
+	if !got.HideUntracked {
+		t.Error("HideUntracked = false, want true (enabled on disk)")
 	}
 }
 

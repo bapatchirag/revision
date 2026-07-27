@@ -30,7 +30,8 @@ type KeyMap struct {
 	PrevView key.Binding
 	NextView key.Binding
 
-	ToggleDirDiff key.Binding
+	ToggleDirDiff   key.Binding
+	ToggleUntracked key.Binding
 
 	Filter   key.Binding
 	Refresh  key.Binding
@@ -43,31 +44,32 @@ type KeyMap struct {
 // Default returns the standard, lazygit-flavored bindings.
 func Default() KeyMap {
 	return KeyMap{
-		Up:            key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
-		Down:          key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
-		Left:          key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "left")),
-		Right:         key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "right")),
-		PageUp:        key.NewBinding(key.WithKeys("pgup", "K"), key.WithHelp("PgUp", "page up")),
-		PageDown:      key.NewBinding(key.WithKeys("pgdown", "J"), key.WithHelp("PgDn", "page down")),
-		Top:           key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "top")),
-		Bottom:        key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "bottom")),
-		LineStart:     key.NewBinding(key.WithKeys("home", "^"), key.WithHelp("home", "line start")),
-		LineEnd:       key.NewBinding(key.WithKeys("end", "$"), key.WithHelp("end", "line end")),
-		Enter:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
-		Confirm:       key.NewBinding(key.WithKeys("enter", "y"), key.WithHelp("enter", "confirm")),
-		Cancel:        key.NewBinding(key.WithKeys("esc", "n"), key.WithHelp("esc", "cancel")),
-		Back:          key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
-		Submit:        key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "submit")),
-		FocusNext:     key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next panel")),
-		FocusPrev:     key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev panel")),
-		PrevView:      key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev view")),
-		NextView:      key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next view")),
-		ToggleDirDiff: key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "toggle dir diff")),
-		Filter:        key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
-		Refresh:       key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh")),
-		Theme:         key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "theme")),
-		Settings:      key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "settings")),
-		Help:          key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
-		Quit:          key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+		Up:              key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
+		Down:            key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
+		Left:            key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "left")),
+		Right:           key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "right")),
+		PageUp:          key.NewBinding(key.WithKeys("pgup", "K"), key.WithHelp("PgUp", "page up")),
+		PageDown:        key.NewBinding(key.WithKeys("pgdown", "J"), key.WithHelp("PgDn", "page down")),
+		Top:             key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "top")),
+		Bottom:          key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "bottom")),
+		LineStart:       key.NewBinding(key.WithKeys("home", "^"), key.WithHelp("home", "line start")),
+		LineEnd:         key.NewBinding(key.WithKeys("end", "$"), key.WithHelp("end", "line end")),
+		Enter:           key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
+		Confirm:         key.NewBinding(key.WithKeys("enter", "y"), key.WithHelp("enter", "confirm")),
+		Cancel:          key.NewBinding(key.WithKeys("esc", "n"), key.WithHelp("esc", "cancel")),
+		Back:            key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
+		Submit:          key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "submit")),
+		FocusNext:       key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next panel")),
+		FocusPrev:       key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev panel")),
+		PrevView:        key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev view")),
+		NextView:        key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next view")),
+		ToggleDirDiff:   key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "toggle dir diff")),
+		ToggleUntracked: key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "toggle untracked")),
+		Filter:          key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+		Refresh:         key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh")),
+		Theme:           key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "theme")),
+		Settings:        key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "settings")),
+		Help:            key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+		Quit:            key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	}
 }

@@ -18,7 +18,7 @@
 │                   │  Scroll main left / right       h / l│                   │
 │                   │  Line start / end          home / end│                   │
 │                   │  Toggle directory diff              D│                   │
+│                   │  Toggle untracked                   U│                   │
 │                   │  Filter panel                       /│                   │
-│                   │  Toggle help                        ?│                   │
-╰───────────────────│  Quit                               q│───────────────────╯
-space stage · n chan╰──────────────────────────────────────╯· ? help            
+╰───────────────────│  Toggle help                        ?│───────────────────╯
+space stage · n chan│  Quit                               q│· ? help            

@@ -56,6 +56,11 @@ type Config struct {
 	// combined diff of every change beneath it. When false, the directory diff
 	// is hidden by default and can be toggled on at runtime.
 	DirectoryDiff bool `json:"directoryDiff"`
+	// HideUntracked controls whether untracked (unversioned) files are omitted
+	// from the Changes and diff views. When false (the default) untracked files
+	// are shown; when true they are hidden globally and can be revealed on demand
+	// with a runtime toggle.
+	HideUntracked bool `json:"hideUntracked"`
 	// SSHKeyPath is the SSH private key used to authenticate against a remote
 	// repository over svn+ssh. A blank value is normalized to the default key
 	// location, ~/.ssh/id_rsa, so the setting always names a concrete key. A
@@ -72,6 +77,7 @@ func Default() Config {
 		Editor:        "",
 		Theme:         "auto",
 		DirectoryDiff: true,
+		HideUntracked: false,
 		SSHKeyPath:    "~/.ssh/id_rsa",
 	}
 }

@@ -132,6 +132,7 @@ type Model struct {
 	diffPath      string
 	diffText      string
 	dirDiff       bool
+	hideUntracked bool
 	logErr        error
 	editing       bool
 	naming        bool
@@ -224,6 +225,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		filters:         map[int]string{},
 		source:          sourceFiles,
 		dirDiff:         cfg.DirectoryDiff,
+		hideUntracked:   cfg.HideUntracked,
 		needsSSHKey:     info != nil && info.IsOverSSH(),
 		commitCL:        stagedChangelist,
 		build:           build,
@@ -756,6 +758,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return m.requestUpdate(), true
 	case "D":
 		return m.toggleDirDiff(), true
+	case "U":
+		return m.toggleUntracked(), true
 	}
 	return nil, false
 }
@@ -1342,7 +1346,9 @@ func (m *Model) applyTheme(name string) tea.Cmd {
 
 // openSettings shows the settings editor as a centered overlay, populating it
 // from the current configuration. The directory-diff field is seeded from the
-// live runtime state so the form reflects what the user currently sees.
+// live runtime state so the form reflects what the user currently sees; the
+// hide-untracked field is seeded from the persisted config instead, since its
+// keybind is a session-only toggle the editor must not capture.
 func (m *Model) openSettings() tea.Cmd {
 	m.form.SetFields(settingsFields(m.cfg, m.dirDiff))
 	m.configuring = true
@@ -1358,10 +1364,10 @@ func (m *Model) closeSettings() {
 }
 
 // submitSettings reads the edited fields back into the configuration, applies the
-// changes that take effect immediately (the theme palette and the directory-diff
-// default), persists the result, and closes the editor. A blank or non-positive
-// log limit is ignored so the previous value survives; a failed save is
-// non-fatal and surfaced as a toast.
+// changes that take effect immediately (the theme palette, the directory-diff
+// default and the hide-untracked toggle), persists the result, and closes the
+// editor. A blank or non-positive log limit is ignored so the previous value
+// survives; a failed save is non-fatal and surfaced as a toast.
 func (m *Model) submitSettings() tea.Cmd {
 	vals := m.form.Values()
 	// Field order mirrors settingsFields.
@@ -1373,7 +1379,8 @@ func (m *Model) submitSettings() tea.Cmd {
 	cfg.Editor = strings.TrimSpace(vals[2])
 	cfg.Theme = strings.TrimSpace(vals[3])
 	cfg.DirectoryDiff = vals[4] == "true"
-	cfg.SSHKeyPath = strings.TrimSpace(vals[5])
+	cfg.HideUntracked = vals[5] == "true"
+	cfg.SSHKeyPath = strings.TrimSpace(vals[6])
 	if cfg.SSHKeyPath == "" {
 		cfg.SSHKeyPath = config.Default().SSHKeyPath
 	}
@@ -1381,10 +1388,15 @@ func (m *Model) submitSettings() tea.Cmd {
 	m.closeSettings()
 
 	themeChanged := cfg.Theme != m.cfg.Theme
+	untrackedChanged := cfg.HideUntracked != m.hideUntracked
 	m.cfg = cfg
 	m.dirDiff = cfg.DirectoryDiff
+	m.hideUntracked = cfg.HideUntracked
 	if themeChanged {
 		m.previewTheme(cfg.Theme)
+	}
+	if untrackedChanged {
+		m.rebuildFilesViews()
 	}
 	if err := config.Save(m.cfg); err != nil {
 		m.showToast("couldn't save settings: "+err.Error(), component.LevelWarning)
@@ -1471,6 +1483,7 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Scroll main left / right", Key: "h / l"},
 		{Label: "Line start / end", Key: "home / end"},
 		{Label: "Toggle directory diff", Key: "D"},
+		{Label: "Toggle untracked", Key: "U"},
 		{Label: "Filter panel", Key: "/"},
 		{Label: "Toggle help", Key: "?"},
 		{Label: "Quit", Key: "q"},
@@ -1501,8 +1514,11 @@ func themeMenuItems() []component.MenuItem {
 // settingsFields builds the settings editor's fields from the configuration, in
 // the field order submitSettings relies on. The directory-diff field is seeded
 // from the live runtime state (dirDiff) rather than cfg so the form shows what
-// the user currently sees; every other field comes straight from the persisted
-// configuration.
+// the user currently sees. The hide-untracked field, by contrast, is seeded from
+// the persisted configuration: its keybind (U) is a session-only view toggle that
+// must never reach the saved config, so the editor shows and edits the global
+// default independently of any runtime override. Every other field comes straight
+// from the persisted configuration.
 func settingsFields(cfg config.Config, dirDiff bool) []component.Field {
 	return []component.Field{
 		{Label: "Default path", Kind: component.FieldText, Value: cfg.DefaultPath},
@@ -1510,6 +1526,7 @@ func settingsFields(cfg config.Config, dirDiff bool) []component.Field {
 		{Label: "Editor", Kind: component.FieldText, Value: cfg.Editor},
 		{Label: "Theme", Kind: component.FieldChoice, Value: cfg.Theme, Options: theme.Names()},
 		{Label: "Directory diff", Kind: component.FieldBool, Value: strconv.FormatBool(dirDiff)},
+		{Label: "Hide untracked", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.HideUntracked)},
 		{Label: "SSH key", Kind: component.FieldText, Value: cfg.SSHKeyPath},
 	}
 }
@@ -1734,6 +1751,39 @@ func (m *Model) toggleDirDiff() tea.Cmd {
 	return m.diffLoadForSelection()
 }
 
+// toggleUntracked flips whether untracked (unversioned) files are hidden from the
+// Changes and diff views. It lets a working copy that shows untracked files
+// globally hide the noise on demand, and reveal it again. It rebuilds the Files
+// views so the change takes effect immediately, reports the new state with a
+// toast and, when Main follows the Files panel, refreshes it — the cursor may
+// have moved onto a different file as rows appeared or disappeared.
+func (m *Model) toggleUntracked() tea.Cmd {
+	m.hideUntracked = !m.hideUntracked
+	if m.hideUntracked {
+		m.showToast("untracked files hidden", component.LevelInfo)
+	} else {
+		m.showToast("untracked files shown", component.LevelInfo)
+	}
+	m.rebuildFilesViews()
+	if m.source != sourceFiles {
+		return nil
+	}
+	m.updateMain()
+	return m.diffLoadForSelection()
+}
+
+// rebuildFilesViews re-flattens every Files-panel view — the Changes tree, the
+// Changelists overview and a drilled-in changelist — from the current status
+// items. It is the shared refresh used whenever what those views should show
+// changes without a status reload (a filter edit or the untracked toggle).
+func (m *Model) rebuildFilesViews() {
+	m.rebuildFileTree()
+	m.rebuildChangelists()
+	if m.inChangelistDrill() {
+		m.rebuildClTree()
+	}
+}
+
 // openFilter opens the filter input for the focused panel, pre-filled with that
 // panel's current filter and labeled with the panel name and its available
 // parameters. The input captures the keyboard until the user submits (enter,
@@ -1827,11 +1877,7 @@ func (m *Model) setFilter(p int, q string) {
 	}
 	switch p {
 	case panelFiles:
-		m.rebuildFileTree()
-		m.rebuildChangelists()
-		if m.inChangelistDrill() {
-			m.rebuildClTree()
-		}
+		m.rebuildFilesViews()
 	case panelLog:
 		m.applyLogFilter()
 	case panelStatus:
@@ -1892,15 +1938,20 @@ func (m *Model) filesQuery() filterQuery {
 	return parseFilter(m.filters[panelFiles], fileFilterKeys)
 }
 
-// filteredStatusItems returns the subset of items matching the Files-panel
-// filter, or items unchanged when no filter is set.
+// filteredStatusItems returns the subset of items shown in the Files views: the
+// ones matching the Files-panel filter, with untracked (unversioned) files
+// dropped while the hide-untracked toggle is on. Items are returned unchanged
+// when no filter is set and untracked files are shown.
 func (m *Model) filteredStatusItems(items []svn.StatusItem) []svn.StatusItem {
 	q := m.filesQuery()
-	if q.empty() {
+	if q.empty() && !m.hideUntracked {
 		return items
 	}
 	out := make([]svn.StatusItem, 0, len(items))
 	for _, it := range items {
+		if m.hideUntracked && it.State == svn.StateUnversioned {
+			continue
+		}
 		if matchStatusItem(it, q) {
 			out = append(out, it)
 		}
