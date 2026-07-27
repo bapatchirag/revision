@@ -18,7 +18,7 @@
 │                   │  Scroll main left / right       h / l│                   │
 │                   │  Line start / end          home / end│                   │
 │                   │  Toggle directory diff              D│                   │
+│                   │  Filter panel                       /│                   │
 │                   │  Toggle help                        ?│                   │
-│                   │  Quit                               q│                   │
-╰───────────────────╰──────────────────────────────────────╯───────────────────╯
-space stage · n changelist · c commit · r revert · d delete · ? help            
+╰───────────────────│  Quit                               q│───────────────────╯
+space stage · n chan╰──────────────────────────────────────╯· ? help            
