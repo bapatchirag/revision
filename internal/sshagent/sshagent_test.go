@@ -1,8 +1,10 @@
 package sshagent
 
 import (
+	"context"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -38,27 +40,33 @@ func TestExpandPath(t *testing.T) {
 	}
 }
 
-func TestKeyListed(t *testing.T) {
-	const path = "/home/me/.ssh/id_rsa"
+func TestFingerprintListed(t *testing.T) {
+	const fingerprint = "SHA256:abc123"
 	cases := map[string]struct {
 		listing string
 		want    bool
 	}{
 		"present": {
-			"4096 SHA256:abc123 /home/me/.ssh/id_rsa (RSA)",
+			"4096 SHA256:abc123 me@host (RSA)",
 			true,
 		},
 		"present among many": {
-			"256 SHA256:zzz /home/me/.ssh/id_ed25519 (ED25519)\n" +
-				"4096 SHA256:abc123 /home/me/.ssh/id_rsa (RSA)",
+			"256 SHA256:zzz other@host (ED25519)\n" +
+				"4096 SHA256:abc123 me@host (RSA)",
+			true,
+		},
+		"comment differs from path but fingerprint matches": {
+			// ssh-add labels the identity with the key's comment, not its file
+			// path — this is the case a path-based match got wrong.
+			"4096 SHA256:abc123 /home/me/.ssh/id_rsa (RSA)",
 			true,
 		},
 		"absent": {
-			"256 SHA256:zzz /home/me/.ssh/id_ed25519 (ED25519)",
+			"256 SHA256:zzz me@host (ED25519)",
 			false,
 		},
 		"substring is not a match": {
-			"4096 SHA256:abc123 /home/me/.ssh/id_rsa2 (RSA)",
+			"4096 SHA256:abc1234 me@host (RSA)",
 			false,
 		},
 		"no identities": {
@@ -69,10 +77,51 @@ func TestKeyListed(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := keyListed(tc.listing, path); got != tc.want {
-				t.Errorf("keyListed(%q, %q) = %v, want %v", tc.listing, path, got, tc.want)
+			if got := fingerprintListed(tc.listing, fingerprint); got != tc.want {
+				t.Errorf("fingerprintListed(%q, %q) = %v, want %v", tc.listing, fingerprint, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestKeyFingerprint checks that keyFingerprint returns the same SHA256
+// fingerprint ssh-add reports, for a key whose comment is not its file path —
+// the exact shape that made the old path-based check re-prompt for an
+// already-loaded key.
+func TestKeyFingerprint(t *testing.T) {
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		t.Skip("ssh-keygen not available")
+	}
+	dir := t.TempDir()
+	key := filepath.Join(dir, "id_ed25519")
+	// A deliberately non-path comment, as a normally generated key carries.
+	gen := exec.Command("ssh-keygen", "-t", "ed25519", "-f", key, "-N", "", "-C", "someone@example.com")
+	if out, err := gen.CombinedOutput(); err != nil {
+		t.Fatalf("ssh-keygen generate: %v\n%s", err, out)
+	}
+
+	ctx := context.Background()
+	got, err := keyFingerprint(ctx, key)
+	if err != nil {
+		t.Fatalf("keyFingerprint: %v", err)
+	}
+	if !strings.HasPrefix(got, "SHA256:") {
+		t.Fatalf("keyFingerprint = %q, want a SHA256:… fingerprint", got)
+	}
+
+	// The fingerprint must match whether computed from the private key or its
+	// .pub, and it must be what a synthesized ssh-add -l line (labelled with the
+	// comment, not the path) is recognized by.
+	fromPub, err := keyFingerprint(ctx, key+".pub")
+	if err != nil {
+		t.Fatalf("keyFingerprint(.pub): %v", err)
+	}
+	if fromPub != got {
+		t.Errorf("fingerprint from .pub = %q, from private key = %q; want equal", fromPub, got)
+	}
+	listing := "256 " + got + " someone@example.com (ED25519)"
+	if !fingerprintListed(listing, got) {
+		t.Errorf("fingerprintListed(%q, %q) = false, want true", listing, got)
 	}
 }
 
