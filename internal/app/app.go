@@ -5,6 +5,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/bapatchirag/revision/internal/config"
 	"github.com/bapatchirag/revision/internal/selfupdate"
+	"github.com/bapatchirag/revision/internal/sshagent"
 	"github.com/bapatchirag/revision/internal/svn"
 	"github.com/bapatchirag/revision/internal/tui/component"
 	"github.com/bapatchirag/revision/internal/tui/focus"
@@ -41,6 +43,13 @@ const commitEditorID = "commit"
 
 // changelistEditorID identifies the changelist-name prompt on emitted messages.
 const changelistEditorID = "changelist"
+
+// passphraseEditorID identifies the SSH passphrase prompt on emitted messages.
+const passphraseEditorID = "ssh-passphrase"
+
+// maxPassphraseAttempts is how many wrong passphrases the SSH unlock overlay
+// tolerates before giving up and exiting, since the key is required to proceed.
+const maxPassphraseAttempts = 3
 
 // filesViewsID identifies the Files panel's multi-view container on emitted
 // messages (the Changes / Changelists tabs and their drill-downs).
@@ -99,6 +108,7 @@ type Model struct {
 	bar        *component.StatusBar
 	editor     *component.TextArea
 	nameEditor *component.Prompt
+	passEditor *component.Prompt
 	modal      *component.Modal
 	menu       *component.Menu
 	updateMenu *component.Menu
@@ -128,6 +138,11 @@ type Model struct {
 	helping       bool
 	themePicking  bool
 	configuring   bool
+	needsSSHKey   bool
+	unlocking     bool
+	adding        bool
+	aborting      bool
+	passAttempts  int
 	pending       tea.Cmd
 	showingToast  bool
 	startupNotice string
@@ -188,6 +203,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		bar:             component.NewStatusBar(th),
 		editor:          component.NewTextArea(commitEditorID, "Commit message", "Enter a commit message…", th, keys),
 		nameEditor:      component.NewPrompt(changelistEditorID, "Changelist name", "e.g. feature-x", th, keys),
+		passEditor:      component.NewPrompt(passphraseEditorID, "SSH key passphrase", "passphrase for "+cfg.SSHKeyPath, th, keys),
 		modal:           component.NewModal(confirmModalID, "", "", th, keys),
 		menu:            component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
 		updateMenu:      component.NewMenu(updateMenuID, "Update available", updateMenuItems(), th, keys),
@@ -198,10 +214,12 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		clCollapsedDirs: map[string]bool{},
 		source:          sourceFiles,
 		dirDiff:         cfg.DirectoryDiff,
+		needsSSHKey:     info != nil && info.IsOverSSH(),
 		commitCL:        stagedChangelist,
 		build:           build,
 		loading:         true,
 	}
+	m.passEditor.SetSecret(true)
 	m.focus = focus.New(panels[panelStatus], panels[panelFiles], panels[panelLog], panels[panelMain])
 	m.focus.Focus(panelFiles)
 
@@ -210,9 +228,17 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 }
 
 // Init loads the initial working-copy status and revision history, and — on a
-// release build — checks GitHub for a newer version in the background.
+// release build — checks GitHub for a newer version in the background. When the
+// working copy is served over svn+ssh, it first ensures the configured SSH key
+// is loaded in the agent, deferring the initial load behind the passphrase
+// overlay when the key still needs unlocking.
 func (m *Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{loadStatusCmd(m.client), loadLogCmd(m.client)}
+	var cmds []tea.Cmd
+	if m.needsSSHKey {
+		cmds = append(cmds, sshCheckCmd(m.cfg.SSHKeyPath))
+	} else {
+		cmds = append(cmds, loadStatusCmd(m.client), loadLogCmd(m.client))
+	}
 	if m.build.IsRelease() {
 		cmds = append(cmds, checkUpdateCmd(m.build))
 	}
@@ -246,6 +272,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.configuring {
 			m.sizeForm()
+		}
+		if m.unlocking {
+			m.sizeUnlock()
 		}
 		return m, nil
 
@@ -361,6 +390,41 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.showToast(msg.text, component.LevelWarning)
 		return m, nil
 
+	case sshCheckedMsg:
+		switch {
+		case msg.err != nil:
+			// The agent is unreachable or ssh-add is missing: there is nothing to
+			// unlock and the key is required, so surface the error and quit.
+			return m, m.abort("ssh-agent unavailable: " + msg.err.Error())
+		case msg.loaded:
+			return m, m.beginInitialLoad()
+		default:
+			m.openUnlock()
+			return m, nil
+		}
+
+	case sshAddedMsg:
+		if !m.unlocking {
+			return m, nil
+		}
+		m.adding = false
+		if msg.err != nil {
+			if errors.Is(msg.err, sshagent.ErrAgentUnreachable) {
+				return m, m.abort("ssh-agent unavailable: " + msg.err.Error())
+			}
+			m.passAttempts++
+			if m.passAttempts >= maxPassphraseAttempts {
+				return m, m.abort(fmt.Sprintf("SSH key not added after %d attempts; it is required for this working copy", m.passAttempts))
+			}
+			m.showToast(fmt.Sprintf("wrong passphrase (%d/%d) — try again", m.passAttempts, maxPassphraseAttempts), component.LevelError)
+			m.passEditor.Reset()
+			m.passEditor.Focus()
+			return m, nil
+		}
+		m.showToast("SSH key added", component.LevelSuccess)
+		m.closeUnlock()
+		return m, m.beginInitialLoad()
+
 	case uimsg.SelectedMsg:
 		return m, m.handleSelection(msg)
 
@@ -408,6 +472,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.submitChangelist(msg.Value)
 		case settingsFormID:
 			return m, m.submitSettings()
+		case passphraseEditorID:
+			return m, m.submitUnlock(msg.Value)
 		}
 		return m, nil
 
@@ -428,6 +494,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case changelistEditorID:
 			m.naming = false
 			m.nameEditor.Blur()
+		case passphraseEditorID:
+			// The key is required and the user declined to unlock it, so exiting is
+			// the only sensible outcome; proceeding would leave a UI that cannot
+			// reach the repository.
+			return m, m.abort("SSH key required: passphrase entry cancelled")
 		case confirmModalID:
 			m.closeConfirm()
 			m.pending = nil
@@ -441,6 +512,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.aborting {
+			// A fatal SSH error is on screen; any key quits so the user can retry.
+			return m, tea.Quit
+		}
+		if m.unlocking {
+			// While the entered passphrase is being added, the input is locked so
+			// stray keys can't queue another attempt or reach the panels beneath.
+			if m.adding {
+				return m, nil
+			}
+			return m, m.passEditor.Update(msg)
+		}
 		if m.editing {
 			return m, m.editor.Update(msg)
 		}
@@ -498,10 +581,16 @@ func (m *Model) View() string {
 		return "loading…"
 	}
 	view := m.baseView()
+	if m.aborting {
+		// A fatal SSH error: show it centered and wait for the quit keypress.
+		return m.overlayCenter(view, m.toast.View())
+	}
 	if m.showingToast {
 		view = m.overlayToast(view)
 	}
 	switch {
+	case m.unlocking:
+		view = m.overlayCenter(view, m.passEditor.View())
 	case m.editing:
 		view = m.overlayCenter(view, m.editor.View())
 	case m.naming:
@@ -1092,7 +1181,7 @@ func (m *Model) closeThemeMenu() {
 // screen, so a background event (like the update check completing) knows not to
 // steal focus.
 func (m *Model) overlayActive() bool {
-	return m.editing || m.naming || m.confirming || m.helping || m.updating || m.themePicking || m.configuring
+	return m.aborting || m.unlocking || m.editing || m.naming || m.confirming || m.helping || m.updating || m.themePicking || m.configuring
 }
 
 // openUpdate shows the startup update prompt for the given release as a centered
@@ -1400,6 +1489,60 @@ func (m *Model) sizeEditor() {
 func (m *Model) sizeNameEditor() {
 	w := clamp(m.width/2, 30, max(m.width-6, 30))
 	m.nameEditor.SetSize(w, 0)
+}
+
+// beginInitialLoad kicks off the working-copy status and revision-history loads
+// the rest of the UI depends on. It is deferred until any required svn+ssh key
+// is unlocked, so those remote operations don't fail on a locked key.
+func (m *Model) beginInitialLoad() tea.Cmd {
+	return tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client))
+}
+
+// submitUnlock adds the configured SSH key to the agent with the entered
+// passphrase. It locks the input and shows a processing notice so the wait for
+// ssh-add is visible and can't be interrupted; the result arrives on
+// sshAddedMsg, which starts the deferred initial load on success.
+func (m *Model) submitUnlock(passphrase string) tea.Cmd {
+	m.adding = true
+	m.passEditor.Blur()
+	m.showToast("Adding SSH key…", component.LevelInfo)
+	return sshAddCmd(m.cfg.SSHKeyPath, passphrase)
+}
+
+// openUnlock shows the SSH passphrase overlay so the configured key can be
+// unlocked and added to the agent before the initial load runs.
+func (m *Model) openUnlock() {
+	m.unlocking = true
+	m.adding = false
+	m.passEditor.Reset()
+	m.passEditor.Focus()
+	m.sizeUnlock()
+}
+
+// closeUnlock hides the passphrase overlay.
+func (m *Model) closeUnlock() {
+	m.unlocking = false
+	m.adding = false
+	m.passEditor.Blur()
+}
+
+// abort tears down the passphrase overlay and shows reason plus a quit hint in a
+// centered error toast; the next keypress quits. It is used for every
+// unrecoverable SSH outcome — an unreachable agent, a cancelled prompt, or too
+// many wrong passphrases — since the key is required to proceed.
+func (m *Model) abort(reason string) tea.Cmd {
+	m.aborting = true
+	m.closeUnlock()
+	wrapW := clamp(m.width-8, 24, 60)
+	wrapped := lipgloss.NewStyle().Width(wrapW).Render(reason)
+	m.toast.Show(wrapped+"\n\nPress any key to quit and try again", component.LevelError)
+	return nil
+}
+
+// sizeUnlock sizes the passphrase prompt (only its width matters).
+func (m *Model) sizeUnlock() {
+	w := clamp(m.width/2, 30, max(m.width-6, 30))
+	m.passEditor.SetSize(w, 0)
 }
 
 // namedChangelists returns the existing user-named changelists (excluding the

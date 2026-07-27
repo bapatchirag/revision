@@ -15,6 +15,7 @@ import (
 	"github.com/bapatchirag/revision/internal/app"
 	"github.com/bapatchirag/revision/internal/config"
 	"github.com/bapatchirag/revision/internal/selfupdate"
+	"github.com/bapatchirag/revision/internal/sshagent"
 	"github.com/bapatchirag/revision/internal/svn"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -28,6 +29,14 @@ var (
 )
 
 func main() {
+	// When ssh-add invokes this binary as its SSH_ASKPASS helper (see
+	// internal/sshagent.AddKey), print the passphrase and exit before any flag
+	// parsing or UI runs, so the helper stays a tiny, single-purpose subprocess.
+	if sshagent.IsAskpass() {
+		sshagent.RunAskpass()
+		return
+	}
+
 	var (
 		path        string
 		showVersion bool

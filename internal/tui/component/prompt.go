@@ -41,6 +41,7 @@ type Prompt struct {
 	options     []string
 	sel         int  // highlighted option, -1 before the list is entered
 	listFocused bool // true while the option list holds focus (tab toggles)
+	secret      bool // render the value as bullets (passphrase entry)
 	width       int
 	focused     bool
 	theme       theme.Theme
@@ -87,6 +88,10 @@ func (p *Prompt) Reset() {
 	p.sel = -1
 	p.listFocused = false
 }
+
+// SetSecret controls whether the input is masked. In secret mode the typed value
+// renders as bullets, for entering a passphrase or other sensitive value.
+func (p *Prompt) SetSecret(on bool) { p.secret = on }
 
 // Init implements tui.Component.
 func (p *Prompt) Init() tea.Cmd { return nil }
@@ -279,21 +284,36 @@ func (p *Prompt) inputRow(innerW int) string {
 		}
 		return fitLine(lipgloss.NewStyle().Reverse(true).Render(" ")+ph, innerW)
 	}
+	disp := p.display()
 	if !inputActive {
-		return fitLine(string(p.value), innerW)
+		return fitLine(string(disp), innerW)
 	}
 	col := p.col
-	if col > len(p.value) {
-		col = len(p.value)
+	if col > len(disp) {
+		col = len(disp)
 	}
-	left := string(p.value[:col])
+	left := string(disp[:col])
 	cur, right := " ", ""
-	if col < len(p.value) {
-		cur = string(p.value[col])
-		right = string(p.value[col+1:])
+	if col < len(disp) {
+		cur = string(disp[col])
+		right = string(disp[col+1:])
 	}
 	cursor := lipgloss.NewStyle().Reverse(true).Render(cur)
 	return fitLine(left+cursor+right, innerW)
+}
+
+// display returns the runes to render for the current value: the value itself,
+// or, in secret mode, a same-length run of bullets so a typed passphrase is
+// never shown on screen.
+func (p *Prompt) display() []rune {
+	if !p.secret {
+		return p.value
+	}
+	masked := make([]rune, len(p.value))
+	for i := range masked {
+		masked[i] = '\u2022'
+	}
+	return masked
 }
 
 // intrinsicWidth sizes the box to its content when no width has been set.

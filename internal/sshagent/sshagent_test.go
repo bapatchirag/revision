@@ -1,7 +1,10 @@
 package sshagent
 
 import (
+	"io"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -71,4 +74,57 @@ func TestKeyListed(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsAskpass(t *testing.T) {
+	t.Setenv(askpassSentinelEnv, "")
+	if IsAskpass() {
+		t.Error("IsAskpass() = true with an empty sentinel, want false")
+	}
+	t.Setenv(askpassSentinelEnv, "1")
+	if !IsAskpass() {
+		t.Error("IsAskpass() = false with the sentinel set, want true")
+	}
+}
+
+func TestRunAskpassAnswersOnce(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "once")
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	t.Setenv(askpassValueEnv, "s3cret")
+	t.Setenv(askpassOnceEnv, marker)
+
+	// The first call answers with the passphrase and consumes the marker.
+	if got := strings.TrimSpace(captureStdout(t, RunAskpass)); got != "s3cret" {
+		t.Errorf("first RunAskpass = %q, want the passphrase", got)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Error("first RunAskpass should consume the once-marker")
+	}
+	// A retry (what ssh-add does after a wrong passphrase) must answer empty so
+	// ssh-add stops instead of looping.
+	if got := strings.TrimSpace(captureStdout(t, RunAskpass)); got != "" {
+		t.Errorf("second RunAskpass = %q, want empty (single-use)", got)
+	}
+}
+
+// captureStdout redirects os.Stdout for the duration of fn and returns what it
+// wrote.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	fn()
+	_ = w.Close()
+	os.Stdout = orig
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read helper output: %v", err)
+	}
+	return string(out)
 }

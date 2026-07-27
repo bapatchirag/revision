@@ -60,18 +60,30 @@ func (t *Toast) Message() string { return t.message }
 // SetTheme implements tui.Themeable.
 func (t *Toast) SetTheme(th theme.Theme) { t.theme = th }
 
-// View renders the toast as a small colored box.
+// View renders the toast as a small colored box. A message may span several
+// lines (split on "\n"); the box is sized to the widest line and every line is
+// padded to that width so the border stays rectangular.
 func (t *Toast) View() string {
 	if t.message == "" {
 		return ""
 	}
-	label := " " + t.message + " "
-	w := ansi.StringWidth(label)
+	lines := strings.Split(t.message, "\n")
+	contentW := 0
+	for _, ln := range lines {
+		if n := ansi.StringWidth(ln); n > contentW {
+			contentW = n
+		}
+	}
 	bs := lipgloss.NewStyle().Foreground(t.color())
-	top := bs.Render(borderTopLeft + strings.Repeat(borderHorizontal, w) + borderTopRight)
-	mid := bs.Render(borderVertical) + bs.Render(label) + bs.Render(borderVertical)
-	bot := bs.Render(borderBottomLeft + strings.Repeat(borderHorizontal, w) + borderBottomRight)
-	return strings.Join([]string{top, mid, bot}, "\n")
+	w := contentW + 2 // a space of padding on each side
+	rows := make([]string, 0, len(lines)+2)
+	rows = append(rows, bs.Render(borderTopLeft+strings.Repeat(borderHorizontal, w)+borderTopRight))
+	for _, ln := range lines {
+		label := " " + ln + strings.Repeat(" ", contentW-ansi.StringWidth(ln)) + " "
+		rows = append(rows, bs.Render(borderVertical)+bs.Render(label)+bs.Render(borderVertical))
+	}
+	rows = append(rows, bs.Render(borderBottomLeft+strings.Repeat(borderHorizontal, w)+borderBottomRight))
+	return strings.Join(rows, "\n")
 }
 
 func (t *Toast) color() lipgloss.Color {

@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/bapatchirag/revision/internal/selfupdate"
+	"github.com/bapatchirag/revision/internal/sshagent"
 	"github.com/bapatchirag/revision/internal/svn"
 )
 
@@ -76,10 +77,42 @@ type updateAvailableMsg struct {
 // is up. It is used to surface configuration conflicts resolved at startup.
 type startupNoticeMsg struct{ text string }
 
+// sshCheckedMsg carries whether the configured SSH key is already loaded in the
+// agent. A non-nil err means the agent could not be reached (or ssh-add is
+// missing), so there is nothing to unlock.
+type sshCheckedMsg struct {
+	loaded bool
+	err    error
+}
+
+// sshAddedMsg carries the result of adding the SSH key to the agent.
+type sshAddedMsg struct{ err error }
+
 // startupNoticeCmd emits a startupNoticeMsg so a launch-time notice is shown
 // through the normal toast path once the program is running.
 func startupNoticeCmd(text string) tea.Cmd {
 	return func() tea.Msg { return startupNoticeMsg{text: text} }
+}
+
+// sshCheckCmd checks, off the UI goroutine, whether the configured SSH key is
+// already loaded in the running ssh-agent.
+func sshCheckCmd(keyPath string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		loaded, err := sshagent.KeyLoaded(ctx, keyPath)
+		return sshCheckedMsg{loaded: loaded, err: err}
+	}
+}
+
+// sshAddCmd adds the configured SSH key to the agent, off the UI goroutine,
+// using the entered passphrase to decrypt it.
+func sshAddCmd(keyPath, passphrase string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return sshAddedMsg{err: sshagent.AddKey(ctx, keyPath, passphrase)}
+	}
 }
 
 // checkUpdateCmd asks GitHub, off the UI goroutine, whether a newer release

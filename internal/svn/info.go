@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // infoXML mirrors the subset of `svn info --xml` we consume.
@@ -49,4 +50,11 @@ func parseInfo(data []byte) (*Info, error) {
 		RepositoryRoot:  e.Repository.Root,
 		Revision:        e.Revision,
 	}, nil
+}
+
+// IsOverSSH reports whether the working copy is served over an SSH tunnel — an
+// svn+ssh:// URL — so callers can ensure the SSH key is available before running
+// remote operations against it.
+func (i *Info) IsOverSSH() bool {
+	return strings.HasPrefix(strings.ToLower(i.URL), "svn+ssh://")
 }
