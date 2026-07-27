@@ -274,6 +274,176 @@ func TestToggleDirDiffHidesDirectoryDiff(t *testing.T) {
 	}
 }
 
+// fileTreeHasPath reports whether the Changes tree currently holds a file leaf at
+// the given path, so tests can assert an item is shown or hidden.
+func fileTreeHasPath(m *Model, path string) bool {
+	for _, n := range m.files.Items() {
+		if n.Item != nil && n.Item.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func TestHideUntrackedHiddenByConfig(t *testing.T) {
+	cfg := config.Default()
+	cfg.HideUntracked = true
+	m := loadItems(t, sizedModelCfg(t, cfg), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+		{Path: "scratch.txt", State: svn.StateUnversioned},
+	})
+	if fileTreeHasPath(m, "scratch.txt") {
+		t.Error("untracked file should be hidden from the Changes tree when hideUntracked is on")
+	}
+	if !fileTreeHasPath(m, "modified.go") {
+		t.Error("tracked file should still show when hideUntracked is on")
+	}
+}
+
+func TestToggleUntrackedHidesAndShows(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+		{Path: "scratch.txt", State: svn.StateUnversioned},
+	})
+	// Untracked files show by default.
+	if !fileTreeHasPath(m, "scratch.txt") {
+		t.Fatal("untracked file should show by default")
+	}
+
+	// Pressing the toggle hides untracked files but keeps tracked ones.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'U'}})
+	m = next.(*Model)
+	if !m.hideUntracked {
+		t.Fatal("pressing U did not enable hide-untracked")
+	}
+	if fileTreeHasPath(m, "scratch.txt") {
+		t.Error("untracked file should be hidden after toggling")
+	}
+	if !fileTreeHasPath(m, "modified.go") {
+		t.Error("tracked file should remain after toggling untracked off")
+	}
+
+	// Pressing it again reveals them.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'U'}})
+	m = next.(*Model)
+	if m.hideUntracked {
+		t.Fatal("pressing U again did not disable hide-untracked")
+	}
+	if !fileTreeHasPath(m, "scratch.txt") {
+		t.Error("untracked file should reappear after toggling back on")
+	}
+}
+
+func TestSettingsSavesHideUntrackedToggle(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+		{Path: "scratch.txt", State: svn.StateUnversioned},
+	})
+	if m.hideUntracked {
+		t.Fatal("hide-untracked should start disabled by default")
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	m = next.(*Model)
+	for i := 0; i < 5; i++ {
+		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // to the Hide untracked field
+		m = next.(*Model)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace}) // toggle on
+	m = next.(*Model)
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd())
+		m = next.(*Model)
+	}
+	if !m.hideUntracked {
+		t.Error("saving did not apply the hide-untracked toggle")
+	}
+	if fileTreeHasPath(m, "scratch.txt") {
+		t.Error("untracked file should be hidden immediately after saving hide-untracked")
+	}
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if !got.HideUntracked {
+		t.Error("persisted HideUntracked = false, want true")
+	}
+}
+
+func TestToggleUntrackedDoesNotPersistConfig(t *testing.T) {
+	// Point config at a throwaway dir so any write would be observable there.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+		{Path: "scratch.txt", State: svn.StateUnversioned},
+	})
+
+	// The keybind changes only the session view, never the saved configuration.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'U'}})
+	m = next.(*Model)
+	if !m.hideUntracked {
+		t.Fatal("pressing U did not enable the session hide-untracked toggle")
+	}
+	if m.cfg.HideUntracked {
+		t.Error("the keybind must not change the in-memory config")
+	}
+	path, err := config.Path()
+	if err != nil {
+		t.Fatalf("config.Path: %v", err)
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Error("the keybind wrote config.json; it must not persist the toggle")
+	}
+}
+
+func TestToggleUntrackedNotCapturedBySettingsSave(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+		{Path: "scratch.txt", State: svn.StateUnversioned},
+	})
+
+	// Hide untracked for the session via the keybind.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'U'}})
+	m = next.(*Model)
+	if !m.hideUntracked {
+		t.Fatal("pressing U did not hide untracked files for the session")
+	}
+
+	// Open settings and save without touching the hide-untracked field. The form
+	// mirrors the persisted config (untracked still shown), so the save must not
+	// capture the session toggle.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	m = next.(*Model)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd())
+		m = next.(*Model)
+	}
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.HideUntracked {
+		t.Error("saving settings captured the session toggle; persisted HideUntracked should stay false")
+	}
+	if m.cfg.HideUntracked {
+		t.Error("in-memory config HideUntracked should stay false after saving unrelated settings")
+	}
+	// Saving resets the session view to the persisted default, so untracked show again.
+	if m.hideUntracked {
+		t.Error("saving settings should reset the session toggle to the persisted default")
+	}
+	if !fileTreeHasPath(m, "scratch.txt") {
+		t.Error("untracked file should reappear after the save reset the session toggle")
+	}
+}
+
 func TestDiffWithTabsDoesNotOverflowWidth(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "added.txt", State: svn.StateAdded},
@@ -1226,7 +1396,7 @@ func TestSettingsOpensAndCancels(t *testing.T) {
 		t.Fatal("pressing S did not open the settings editor")
 	}
 	view := stripANSI(m.View())
-	for _, want := range []string{"Settings", "Default path", "Log limit", "Editor", "Theme", "Directory diff", "SSH key"} {
+	for _, want := range []string{"Settings", "Default path", "Log limit", "Editor", "Theme", "Directory diff", "Hide untracked", "SSH key"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("settings view missing %q\n---\n%s", want, view)
 		}

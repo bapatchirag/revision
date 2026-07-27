@@ -108,6 +108,8 @@ Flags:
 
 The footer shows the most common actions, and `?` opens the full keybindings menu at any time.
 
+> **Slated for v1.2.0:** `/` (filter/search), `D` (directory diff), `U` (hide untracked), and `S` (settings).
+
 | Key | Action |
 |-----|--------|
 | `1` / `2` / `3` / `0` | Focus the Status / Files / Log / Main panel |
@@ -128,6 +130,7 @@ The footer shows the most common actions, and `?` opens the full keybindings men
 | `R` | Refresh status and history |
 | `/` | Filter (Files/Log) or search (Main/Status) the focused panel; `n`/`N` jump between search matches (see [Filtering & searching](#filtering--searching)) |
 | `D` | Toggle the directory-level diff for the highlighted directory (see [Configuration](#configuration)) |
+| `U` | Toggle hiding untracked (unversioned) files in the Changes and diff panels (see [Configuration](#configuration)) |
 | `t` | Open the theme picker |
 | `S` | Edit application settings (see [Configuration](#configuration)) |
 | `?` | Toggle the keybindings help |
@@ -165,21 +168,25 @@ You can also group work into **named changelists** with `n`: it moves the staged
 
 `revision` reads optional settings from `~/.config/revision/config.json` (or `$XDG_CONFIG_HOME/revision/config.json` when that variable is set). The file is optional: every setting falls back to a built-in default when the file, or an individual key, is absent.
 
-You can edit these settings without leaving the app: press `S` to open the settings editor, adjust a value (`↑`/`↓` move between fields, `←`/`→` cycle the theme and toggle switches), then `Ctrl+S` to save or `Esc` to cancel. Saving writes the same `config.json`, and the theme and directory-diff changes apply immediately.
+You can edit these settings without leaving the app: press `S` to open the settings editor, adjust a value (`↑`/`↓` move between fields, `←`/`→` cycle the theme and toggle switches), then `Ctrl+S` to save or `Esc` to cancel. Saving writes the same `config.json`, and the theme, directory-diff, and hide-untracked changes apply immediately.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `directoryDiff` | bool | `true` | Show the combined diff of every change beneath a directory when its row is highlighted. Set to `false` to turn directory-level diffs off globally; press `D` to reveal one on demand. |
+| `hideUntracked` | bool | `false` | Hide untracked (unversioned) files from the Changes and diff panels. Set to `true` to omit them globally; press `U` to toggle them back on for the current session. |
 
 Example `~/.config/revision/config.json`:
 
 ```json
 {
-  "directoryDiff": false
+  "directoryDiff": false,
+  "hideUntracked": true
 }
 ```
 
 With `directoryDiff` set to `false`, highlighting a directory shows a short hint instead of its diff. Pressing `D` toggles the directory diff for the current session, so you can inspect one without changing the file.
+
+With `hideUntracked` set to `true`, untracked files are left out of the Changes tree, the Changelists view, and the diff panel. Pressing `U` toggles them back into view for the current session, so you can inspect or add one without changing the file.
 
 ## Authentication
 
