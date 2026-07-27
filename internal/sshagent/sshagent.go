@@ -2,7 +2,7 @@
 // the SSH key used for svn+ssh access is already loaded before it starts talking
 // to a remote repository. It is deliberately domain-agnostic: it knows nothing
 // about the TUI, the SVN layer, or the app composition, and simply shells out to
-// the system ssh-add.
+// the system ssh-add and ssh-keygen.
 package sshagent
 
 import (
@@ -16,10 +16,16 @@ import (
 	"strings"
 )
 
-// KeyLoaded reports whether the SSH private key at keyPath is currently held by
-// the running ssh-agent. It runs `ssh-add -l` and matches keyPath — with a
-// leading ~ expanded to the user's home directory — against the identities the
-// agent lists.
+// KeyLoaded reports whether the SSH key at keyPath is currently held by the
+// running ssh-agent. It fingerprints the key with `ssh-keygen -lf` — expanding a
+// leading ~ to the user's home directory — and looks for that fingerprint among
+// the identities `ssh-add -l` lists.
+//
+// Matching on the fingerprint, rather than the key path, is what makes the check
+// reliable: `ssh-add -l` labels each identity with the key's comment (typically
+// user@host, taken from the .pub file), not its file path, so a path match would
+// miss any normally generated key and make revision prompt to add a key that is
+// in fact already loaded.
 //
 // A reachable agent that holds no identities is not an error: it simply means
 // the key is not loaded, so KeyLoaded returns (false, nil). An unreachable agent
@@ -35,6 +41,11 @@ func KeyLoaded(ctx context.Context, keyPath string) (bool, error) {
 	}
 	if _, err := exec.LookPath("ssh-add"); err != nil {
 		return false, fmt.Errorf("ssh-add not found on PATH: %w", err)
+	}
+
+	fingerprint, err := keyFingerprint(ctx, path)
+	if err != nil {
+		return false, err
 	}
 
 	cmd := exec.CommandContext(ctx, "ssh-add", "-l")
@@ -55,23 +66,66 @@ func KeyLoaded(ctx context.Context, keyPath string) (bool, error) {
 		return false, fmt.Errorf("ssh-add -l: %s", msg)
 	}
 
-	return keyListed(stdout.String(), path), nil
+	return fingerprintListed(stdout.String(), fingerprint), nil
 }
 
-// keyListed reports whether listing (the output of `ssh-add -l`) names the
-// identity at path. Each line is "<bits> <fingerprint> <comment> (<type>)", and
-// a key added from a file carries that file's path as its comment, so an exact
-// match on any whitespace-delimited field identifies the key without the
-// substring false positives (id_rsa vs id_rsa2) a plain contains check invites.
-func keyListed(listing, path string) bool {
+// keyFingerprint returns the SHA256 fingerprint (the "SHA256:…" field) of the key
+// at path, as reported by `ssh-keygen -lf`. It prefers the public key file
+// (path + ".pub") when one exists next to path, since ssh-keygen reads it without
+// needing the passphrase; otherwise it reads path directly, whose public half
+// OpenSSH stores in the clear even for an encrypted private key. Stdin is closed
+// so a key ssh-keygen cannot read fails fast instead of blocking on a prompt.
+func keyFingerprint(ctx context.Context, path string) (string, error) {
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		return "", fmt.Errorf("ssh-keygen not found on PATH: %w", err)
+	}
+	target := path
+	if pub := path + ".pub"; fileExists(pub) {
+		target = pub
+	}
+
+	cmd := exec.CommandContext(ctx, "ssh-keygen", "-lf", target)
+	cmd.Stdin = nil // never block waiting for a passphrase prompt
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("ssh-keygen -lf %s: %s", target, msg)
+	}
+
+	// Output is "<bits> <fingerprint> <comment> (<type>)"; the fingerprint is the
+	// second whitespace-delimited field.
+	fields := strings.Fields(stdout.String())
+	if len(fields) < 2 {
+		return "", fmt.Errorf("ssh-keygen -lf %s: unexpected output %q", target, strings.TrimSpace(stdout.String()))
+	}
+	return fields[1], nil
+}
+
+// fingerprintListed reports whether listing (the output of `ssh-add -l`) names an
+// identity with the given fingerprint. Each line is
+// "<bits> <fingerprint> <comment> (<type>)", so an exact match on any
+// whitespace-delimited field finds the fingerprint without the substring false
+// positives (SHA256:abc123 vs SHA256:abc1234) a plain contains check invites.
+func fingerprintListed(listing, fingerprint string) bool {
 	for _, line := range strings.Split(listing, "\n") {
 		for _, field := range strings.Fields(line) {
-			if field == path {
+			if field == fingerprint {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// fileExists reports whether p names an existing regular file (not a directory).
+func fileExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && !info.IsDir()
 }
 
 // expandPath resolves a leading ~ or ~/ in p to the current user's home
