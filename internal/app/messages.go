@@ -268,12 +268,38 @@ func assignedLabel(targets []changelistTarget) string {
 	return fmt.Sprintf("%d files", len(targets))
 }
 
+// batchLabel summarizes a fan-out for a success toast: the sole path when one
+// file was touched, otherwise an "N files" count.
+func batchLabel(n int, first string) string {
+	if n == 1 {
+		return first
+	}
+	return fmt.Sprintf("%d files", n)
+}
+
 // revertCmd discards local modifications to path off the UI goroutine.
 func revertCmd(client *svn.Client, path string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		return revertedMsg{path: path, err: client.Revert(ctx, path)}
+	}
+}
+
+// revertManyCmd discards local modifications to several paths in one pass off the
+// UI goroutine, stopping on the first error. Success rides on a single
+// revertedMsg carrying an "N files" summary, mirroring how acting on one file
+// reports a single path.
+func revertManyCmd(client *svn.Client, paths []string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		for _, p := range paths {
+			if err := client.Revert(ctx, p); err != nil {
+				return revertedMsg{path: p, err: err}
+			}
+		}
+		return revertedMsg{path: batchLabel(len(paths), paths[0])}
 	}
 }
 
@@ -290,6 +316,29 @@ func deleteCmd(client *svn.Client, act deleteAction) tea.Cmd {
 			err = client.Delete(ctx, act.path)
 		}
 		return deletedMsg{path: act.path, err: err}
+	}
+}
+
+// deleteManyCmd deletes several paths in one pass off the UI goroutine: each
+// versioned path is scheduled for removal (svn delete) and each unversioned one
+// is removed from disk. It stops on the first error; success rides on a single
+// deletedMsg carrying an "N files" summary.
+func deleteManyCmd(client *svn.Client, acts []deleteAction) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		for _, act := range acts {
+			var err error
+			if act.unversioned {
+				err = client.RemoveUnversioned(act.path)
+			} else {
+				err = client.Delete(ctx, act.path)
+			}
+			if err != nil {
+				return deletedMsg{path: act.path, err: err}
+			}
+		}
+		return deletedMsg{path: batchLabel(len(acts), acts[0].path)}
 	}
 }
 

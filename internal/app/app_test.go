@@ -1024,6 +1024,86 @@ func TestRevertGuardOnUnversioned(t *testing.T) {
 	}
 }
 
+func TestRevertDirectoryRequiresConfirmation(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "src/b.go", State: svn.StateModified},
+	})
+	// Single-file revert returns nil on a directory row, so an opened modal here
+	// proves the directory fan-out ran.
+	selectDirRow(t, m, "src")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m = next.(*Model)
+	if !m.confirming {
+		t.Fatal("r on a directory row should open the confirmation modal")
+	}
+	if cmd != nil {
+		t.Error("opening the modal should not run a command yet")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "Revert changes?") {
+		t.Errorf("expected the revert prompt, got:\n%s", view)
+	}
+
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	conf, ok := cmd().(uimsg.ConfirmMsg)
+	if !ok {
+		t.Fatalf("expected ConfirmMsg, got %T", cmd())
+	}
+	if _, cmd = m.Update(conf); cmd == nil {
+		t.Error("expected a revert command after confirming a directory revert")
+	}
+}
+
+func TestDirectoryRevertPathsSelectsDirtyFiles(t *testing.T) {
+	items := []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "src/gone.go", State: svn.StateDeleted},
+		{Path: "src/new.txt", State: svn.StateUnversioned},
+		{Path: "src/build.log", State: svn.StateIgnored},
+		{Path: "docs/readme.md", State: svn.StateModified},
+	}
+	paths := directoryRevertPaths(fileNode{Name: "src", Path: "src"}, items)
+
+	got := map[string]bool{}
+	for _, p := range paths {
+		got[p] = true
+	}
+	if len(paths) != 2 {
+		t.Fatalf("expected 2 revertable paths under src/, got %d: %v", len(paths), paths)
+	}
+	if !got["src/a.go"] || !got["src/gone.go"] {
+		t.Errorf("expected the modified and deleted files, got %v", paths)
+	}
+	if got["src/new.txt"] {
+		t.Error("an unversioned file has nothing to revert and should be skipped")
+	}
+	if got["src/build.log"] {
+		t.Error("an ignored file should be skipped")
+	}
+	if got["docs/readme.md"] {
+		t.Error("a file outside src/ should be excluded")
+	}
+}
+
+func TestRevertDirectoryNothingToRevert(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "src/new.txt", State: svn.StateUnversioned},
+		{Path: "src/build.log", State: svn.StateIgnored},
+	})
+	selectDirRow(t, m, "src")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m = next.(*Model)
+	if m.confirming {
+		t.Error("a directory with nothing revertable should not open the modal")
+	}
+	if cmd != nil {
+		t.Error("the guard should not run a command")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "nothing to revert under src/") {
+		t.Errorf("expected a nothing-to-revert toast, got:\n%s", view)
+	}
+}
+
 func TestDeleteConfirmationCancels(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "modified.go", State: svn.StateModified},
@@ -1062,6 +1142,104 @@ func TestDeleteUnversionedWarnsDiskRemoval(t *testing.T) {
 	view := stripANSI(m.View())
 	if !strings.Contains(view, "untracked") || !strings.Contains(view, "disk") {
 		t.Errorf("expected an unversioned-delete warning, got:\n%s", view)
+	}
+}
+
+func TestDeleteDirectoryRequiresConfirmation(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "src/b.go", State: svn.StateDeleted},
+	})
+	selectDirRow(t, m, "src")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = next.(*Model)
+	if !m.confirming {
+		t.Fatal("d on a directory row should open the delete confirmation")
+	}
+	if cmd != nil {
+		t.Error("opening the modal should not run a command yet")
+	}
+	// The plural title distinguishes the directory prompt from the single-file one.
+	if view := stripANSI(m.View()); !strings.Contains(view, "Delete files?") {
+		t.Errorf("expected the directory delete prompt, got:\n%s", view)
+	}
+
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	conf, ok := cmd().(uimsg.ConfirmMsg)
+	if !ok {
+		t.Fatalf("expected ConfirmMsg, got %T", cmd())
+	}
+	if _, cmd = m.Update(conf); cmd == nil {
+		t.Error("expected a delete command after confirming a directory delete")
+	}
+}
+
+func TestDirectoryDeleteActionsSkipsIgnored(t *testing.T) {
+	items := []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "src/new.txt", State: svn.StateUnversioned},
+		{Path: "src/build.log", State: svn.StateIgnored},
+		{Path: "docs/readme.md", State: svn.StateModified},
+	}
+	acts := directoryDeleteActions(fileNode{Name: "src", Path: "src"}, items)
+
+	byPath := map[string]deleteAction{}
+	for _, a := range acts {
+		byPath[a.path] = a
+	}
+	if len(acts) != 2 {
+		t.Fatalf("expected 2 delete actions under src/, got %d: %+v", len(acts), acts)
+	}
+	if a, ok := byPath["src/a.go"]; !ok || a.unversioned {
+		t.Errorf("src/a.go: got %+v (ok=%v), want a versioned delete", a, ok)
+	}
+	if a, ok := byPath["src/new.txt"]; !ok || !a.unversioned {
+		t.Errorf("src/new.txt: got %+v (ok=%v), want an unversioned (disk) delete", a, ok)
+	}
+	if _, ok := byPath["src/build.log"]; ok {
+		t.Error("an ignored file should be skipped")
+	}
+	if _, ok := byPath["docs/readme.md"]; ok {
+		t.Error("a file outside src/ should be excluded")
+	}
+}
+
+func TestDeleteDirectoryMessageSeparatesDiskRemoval(t *testing.T) {
+	n := fileNode{Name: "src", Path: "src"}
+	mixed := deleteDirectoryMessage(n, []deleteAction{
+		{path: "src/a.go"},
+		{path: "src/new.txt", unversioned: true},
+	})
+	if !strings.Contains(mixed, "scheduled for deletion") || !strings.Contains(mixed, "permanently removed from disk") {
+		t.Errorf("mixed message should mention both outcomes, got: %q", mixed)
+	}
+
+	versioned := deleteDirectoryMessage(n, []deleteAction{{path: "src/a.go"}})
+	if !strings.Contains(versioned, "scheduled for deletion") || strings.Contains(versioned, "disk") {
+		t.Errorf("versioned-only message should not warn about disk, got: %q", versioned)
+	}
+
+	unversioned := deleteDirectoryMessage(n, []deleteAction{{path: "src/new.txt", unversioned: true}})
+	if !strings.Contains(unversioned, "permanently removed from disk") || strings.Contains(unversioned, "scheduled") {
+		t.Errorf("unversioned-only message should only warn about disk, got: %q", unversioned)
+	}
+}
+
+func TestDeleteDirectoryNothingToDelete(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "src/build.log", State: svn.StateIgnored},
+	})
+	selectDirRow(t, m, "src")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = next.(*Model)
+	if m.confirming {
+		t.Error("a directory with only ignored files should not open the modal")
+	}
+	if cmd != nil {
+		t.Error("the guard should not run a command")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "nothing to delete under src/") {
+		t.Errorf("expected a nothing-to-delete toast, got:\n%s", view)
 	}
 }
 
