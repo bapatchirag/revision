@@ -7,18 +7,18 @@
 ╭─ [2] ─ Changes ───│  Revert file                        r│                   │
 │  ▾ /              │  Delete file                        d│                   │
 │>     M modified.go│  Update working copy                u│                   │
+│                   │  Update to revision (Log panel)     u│                   │
 │                   │  Refresh                            R│                   │
 │                   │  Edit settings                      S│                   │
 │                   │  Jump to panel                1 2 3 0│                   │
-│                   │  Cycle panels         tab / shift+tab│                   │
-╰───────────────────│  Move up / down                 k / j│                   │
-╭─ [3] Log ─────────│  Jump top / bottom              g / G│                   │
-│  Rev Author Messag│  Scroll main up / down          K / J│                   │
+╰───────────────────│  Cycle panels         tab / shift+tab│                   │
+╭─ [3] Log ─────────│  Move up / down                 k / j│                   │
+│  Rev Author Messag│  Jump top / bottom              g / G│                   │
+│                   │  Scroll main up / down          K / J│                   │
 │                   │  Scroll main left / right       h / l│                   │
 │                   │  Line start / end          home / end│                   │
 │                   │  Toggle directory diff              D│                   │
 │                   │  Toggle untracked                   U│                   │
 │                   │  Filter panel                       /│                   │
-│                   │  Toggle help                        ?│                   │
-╰───────────────────│  Quit                               q│───────────────────╯
-space stage · n chan╰──────────────────────────────────────╯· ? help            
+╰───────────────────│  Toggle help                        ?│───────────────────╯
+space stage · n chan│  Quit                               q│· ? help            

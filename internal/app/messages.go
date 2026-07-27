@@ -351,3 +351,14 @@ func updateCmd(client *svn.Client) tea.Cmd {
 		return updatedMsg{revision: rev, err: err}
 	}
 }
+
+// updateToRevisionCmd moves the working copy to a specific revision off the UI
+// goroutine.
+func updateToRevisionCmd(client *svn.Client, rev string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		r, err := client.UpdateToRevision(ctx, rev)
+		return updatedMsg{revision: r, err: err}
+	}
+}

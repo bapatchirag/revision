@@ -148,8 +148,10 @@ type Model struct {
 	aborting      bool
 	passAttempts  int
 	pending       tea.Cmd
-	showingToast  bool
-	startupNotice string
+	// updateConflictPrompt stages a second "conflicts will be skipped" confirm shown after the default update confirm.
+	updateConflictPrompt string
+	showingToast         bool
+	startupNotice        string
 
 	build        selfupdate.Build
 	updating     bool
@@ -488,6 +490,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uimsg.ConfirmMsg:
 		if msg.ID == confirmModalID {
 			m.closeConfirm()
+			if prompt := m.updateConflictPrompt; prompt != "" {
+				// The default update confirm was accepted, but the working copy
+				// holds conflicts svn would silently skip: confirm once more,
+				// spelling that out, before actually updating.
+				m.updateConflictPrompt = ""
+				m.openConfirm("Conflicts present — continue?", prompt)
+				return m, nil
+			}
 			cmd := m.pending
 			m.pending = nil
 			return m, cmd
@@ -510,6 +520,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case confirmModalID:
 			m.closeConfirm()
 			m.pending = nil
+			m.updateConflictPrompt = ""
 		case updateMenuID:
 			m.closeUpdate()
 		case settingsFormID:
@@ -734,6 +745,9 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		}
 		return nil, false
 	case "u":
+		if m.focus.Index() == panelLog {
+			return m.requestUpdateToRevision(), true
+		}
 		return m.requestUpdate(), true
 	case "D":
 		return m.toggleDirDiff(), true
@@ -1238,11 +1252,59 @@ func deleteDirectoryMessage(n fileNode, acts []deleteAction) string {
 	return strings.Join(parts, "; ") + "."
 }
 
-// requestUpdate brings the working copy up to date with the repository.
+// requestUpdate brings the working copy up to date with the repository's latest
+// revision. It confirms first — like the update-to-revision flow — and adds a
+// second confirmation when the working copy already holds conflicts svn skips.
 func (m *Model) requestUpdate() tea.Cmd {
-	m.loading = true
-	m.refreshChrome()
-	return updateCmd(m.client)
+	m.pending = updateCmd(m.client)
+	m.updateConflictPrompt = conflictUpdatePrompt(m.conflictedPaths(), "the latest revision")
+	m.openConfirm("Update working copy?", "Update the working copy to the latest revision? Uncommitted changes are kept and merged.")
+	return nil
+}
+
+// requestUpdateToRevision updates the working copy to the revision selected in
+// the Log panel. Because this can move the working copy backwards in history, it
+// asks for confirmation first; with no revision selected it warns instead.
+func (m *Model) requestUpdateToRevision() tea.Cmd {
+	entry, ok := m.log.Selected()
+	if !ok {
+		m.showToast("no revision selected", component.LevelWarning)
+		return nil
+	}
+	m.pending = updateToRevisionCmd(m.client, entry.Revision)
+	m.updateConflictPrompt = conflictUpdatePrompt(m.conflictedPaths(), "r"+entry.Revision)
+	m.openConfirm("Update to revision?", "Update the working copy to r"+entry.Revision+"? Uncommitted changes are kept and merged.")
+	return nil
+}
+
+// conflictedPaths returns the working-copy paths currently in a conflicted
+// state, from the last-loaded status. svn update skips these — they stay in
+// conflict while everything else moves — so they drive the extra confirmation.
+func (m *Model) conflictedPaths() []string {
+	var paths []string
+	for _, it := range m.fileItems {
+		if it.State == svn.StateConflicted {
+			paths = append(paths, it.Path)
+		}
+	}
+	return paths
+}
+
+// conflictUpdatePrompt builds the additional confirmation shown before updating
+// when the working copy already holds conflicts, spelling out that svn leaves
+// those files untouched and updates the rest to target (e.g. "r42" or "the
+// latest revision"). It returns "" when nothing is in conflict, which suppresses
+// the extra step.
+func conflictUpdatePrompt(conflicts []string, target string) string {
+	n := len(conflicts)
+	if n == 0 {
+		return ""
+	}
+	subject := "1 file is"
+	if n > 1 {
+		subject = fmt.Sprintf("%d files are", n)
+	}
+	return fmt.Sprintf("%s already in conflict and will be left untouched; the rest of the working copy will still update to %s. Continue?", subject, target)
 }
 
 // openConfirm arms the shared modal with a prompt and shows it; the pending
@@ -1476,6 +1538,7 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Revert file", Key: "r"},
 		{Label: "Delete file", Key: "d"},
 		{Label: "Update working copy", Key: "u"},
+		{Label: "Update to revision (Log panel)", Key: "u"},
 		{Label: "Refresh", Key: "R"},
 		{Label: "Edit settings", Key: "S"},
 		{Label: "Jump to panel", Key: "1 2 3 0"},
@@ -2272,6 +2335,9 @@ func (m *Model) baseHint() string {
 			return "space unstage · c commit · esc back · [ ] view · ? help"
 		}
 		return "enter expand · c commit · [ ] view · n name · ? help"
+	}
+	if m.focus.Index() == panelLog {
+		return "u update to rev · c commit · ? help"
 	}
 	return "space stage · n changelist · c commit · r revert · d delete · ? help"
 }
