@@ -1282,10 +1282,7 @@ func TestHelpMenuGolden(t *testing.T) {
 	golden.RequireEqual(t, []byte(m.View()))
 }
 
-func TestThemePickerOpensAndApplies(t *testing.T) {
-	// Persist to a throwaway XDG config dir so the real home is untouched.
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-
+func TestSettingsLivePreviewOnScroll(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "modified.go", State: svn.StateModified},
 	})
@@ -1293,94 +1290,45 @@ func TestThemePickerOpensAndApplies(t *testing.T) {
 		t.Fatal("initial theme is not Auto()")
 	}
 
-	// t opens the picker.
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	// S opens the settings editor; the Theme field starts on the active theme.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
 	m = next.(*Model)
-	if !m.themePicking {
-		t.Fatal("pressing t did not open the theme picker")
-	}
-	if view := stripANSI(m.View()); !strings.Contains(view, "Theme") {
-		t.Errorf("picker view missing title\n%s", view)
+	if !m.configuring {
+		t.Fatal("pressing S did not open the settings editor")
 	}
 
-	// Applying a theme swaps the live palette, closes the picker, and persists.
-	m.applyTheme("everforest")
+	// Navigate down to the Theme field; moving between fields must not preview.
+	for i := 0; i < themeFieldIndex; i++ {
+		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = next.(*Model)
+	}
+	if m.theme != theme.Auto() {
+		t.Error("navigating to the Theme field should not change the palette")
+	}
+
+	// Cycling the Theme field forward live-applies the highlighted theme
+	// (auto -> everforest) without persisting the choice.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = next.(*Model)
 	if m.theme != theme.Everforest() {
-		t.Error("theme after applyTheme(everforest) is not Everforest()")
-	}
-	if m.themePicking {
-		t.Error("applyTheme did not close the picker")
-	}
-	if m.cfg.Theme != "everforest" {
-		t.Errorf("cfg.Theme = %q, want everforest", m.cfg.Theme)
-	}
-	got, err := config.Load()
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if got.Theme != "everforest" {
-		t.Errorf("persisted theme = %q, want everforest", got.Theme)
-	}
-}
-
-func TestThemePickerToggleClosesWithT(t *testing.T) {
-	m := sizedModel(t)
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
-	m = next.(*Model)
-	if !m.themePicking {
-		t.Fatal("first t should open the picker")
-	}
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
-	m = next.(*Model)
-	if m.themePicking {
-		t.Error("second t should close the picker")
-	}
-}
-
-func TestChooseThemeByIndex(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	m := sizedModel(t)
-	idx := -1
-	for i, n := range theme.All() {
-		if n.Name == "dracula" {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		t.Fatal("dracula not found in theme.All()")
-	}
-	m.chooseTheme(idx)
-	if m.theme != theme.Dracula() {
-		t.Error("chooseTheme did not resolve the index to Dracula()")
-	}
-}
-
-func TestThemePickerLivePreviewOnScroll(t *testing.T) {
-	m := sizedModel(t)
-	// Open the picker; the cursor starts on the active theme (auto, index 0).
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
-	m = next.(*Model)
-
-	// Scrolling down live-applies the highlighted theme without persisting.
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m = next.(*Model)
-	all := theme.All()
-	if m.theme != all[1].Theme {
-		t.Errorf("scrolling did not live-apply the highlighted theme %q", all[1].Name)
+		t.Error("cycling the Theme field did not live-apply Everforest()")
 	}
 	if m.cfg.Theme != "auto" {
 		t.Errorf("preview must not persist; cfg.Theme = %q, want auto", m.cfg.Theme)
 	}
 
-	// Esc cancels, reverting the preview to the original theme.
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	// Esc cancels, reverting the live preview to the original theme.
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = next.(*Model)
-	if m.theme != theme.Auto() {
-		t.Error("esc did not revert the preview to the original theme")
+	if cmd != nil {
+		next, _ = m.Update(cmd()) // deliver the DismissMsg
+		m = next.(*Model)
 	}
-	if m.themePicking {
-		t.Error("esc did not close the picker")
+	if m.theme != theme.Auto() {
+		t.Error("esc did not revert the live preview to the original theme")
+	}
+	if m.configuring {
+		t.Error("esc did not close the settings editor")
 	}
 }
 

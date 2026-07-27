@@ -55,7 +55,7 @@ func (mn *Menu) SetTitle(title string) { mn.title = title }
 func (mn *Menu) Index() int { return mn.cursor }
 
 // SetIndex moves the cursor to i (clamped into range) so a caller can preselect
-// an item, e.g. the active theme when opening the theme picker.
+// an item, e.g. the currently active choice when opening a menu.
 func (mn *Menu) SetIndex(i int) {
 	mn.cursor = i
 	mn.clampCursor()

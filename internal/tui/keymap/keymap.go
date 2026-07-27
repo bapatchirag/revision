@@ -35,7 +35,6 @@ type KeyMap struct {
 
 	Filter   key.Binding
 	Refresh  key.Binding
-	Theme    key.Binding
 	Settings key.Binding
 	Help     key.Binding
 	Quit     key.Binding
@@ -67,7 +66,6 @@ func Default() KeyMap {
 		ToggleUntracked: key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "toggle untracked")),
 		Filter:          key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Refresh:         key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh")),
-		Theme:           key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "theme")),
 		Settings:        key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "settings")),
 		Help:            key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:            key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
