@@ -32,6 +32,7 @@ type KeyMap struct {
 
 	ToggleDirDiff key.Binding
 
+	Filter   key.Binding
 	Refresh  key.Binding
 	Theme    key.Binding
 	Settings key.Binding
@@ -62,6 +63,7 @@ func Default() KeyMap {
 		PrevView:      key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev view")),
 		NextView:      key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next view")),
 		ToggleDirDiff: key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "toggle dir diff")),
+		Filter:        key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Refresh:       key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh")),
 		Theme:         key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "theme")),
 		Settings:      key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "settings")),

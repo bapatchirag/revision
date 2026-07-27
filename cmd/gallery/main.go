@@ -128,6 +128,11 @@ func newModel() model {
 	}, th, keys)
 	form.Focus()
 
+	search := component.NewSearchBar("gallery-search", th, keys)
+	search.SetPrefix("log (rev: user: path: date:)")
+	search.SetValue("rev:128 diff viewport")
+	search.Focus()
+
 	return model{
 		keys: keys,
 		demos: []demo{
@@ -143,6 +148,7 @@ func newModel() model {
 			{"TextArea", editor},
 			{"Prompt (pick)", prompt},
 			{"Form (settings)", form},
+			{"SearchBar (filter)", search},
 		},
 	}
 }

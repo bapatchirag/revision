@@ -38,6 +38,7 @@ SVN's command line is powerful but verbose for day-to-day work. `revision` wraps
 - **Update** the working copy to HEAD
 - **Add / revert / delete** files, with confirmation prompts before anything destructive
 - Read-only **log / history** viewer with full revision numbers and authors, plus per-revision detail (date, message, changed paths)
+- **Filter or search any panel** with `/` — the Files and Log lists filter to matching rows (with `rev:` / `user:` / `state:` / `cl:` parameters plus free text over whole commit messages and paths), while the Main and Status views highlight matches in place and jump between them with `n` / `N`
 - **Discoverable keybindings** — a contextual footer plus a full `?` help menu
 - **Toast notifications** for every action, success or failure
 - **Non-blocking authentication** — clear, actionable hints instead of a hung credential prompt
@@ -70,6 +71,8 @@ go install github.com/bapatchirag/revision/cmd/revision@latest
 Download the binary for your platform from the [Releases](https://github.com/bapatchirag/revision/releases) page and put it on your `PATH`.
 
 ### Updating
+
+> **Slated for v1.2.0.**
 
 Release builds check for a newer version on startup. When one is available, `revision` shows a prompt offering to **update with cURL** (re-runs the install script), **update with Go** (`go install …@latest`), or skip it for now — pick one with the arrow keys and `Enter`, or press `Esc` to dismiss.
 
@@ -123,6 +126,7 @@ The footer shows the most common actions, and `?` opens the full keybindings men
 | `d` | Delete the selected file (with confirmation) |
 | `u` | Update the working copy to the latest revision |
 | `R` | Refresh status and history |
+| `/` | Filter (Files/Log) or search (Main/Status) the focused panel; `n`/`N` jump between search matches (see [Filtering & searching](#filtering--searching)) |
 | `D` | Toggle the directory-level diff for the highlighted directory (see [Configuration](#configuration)) |
 | `t` | Open the theme picker |
 | `S` | Edit application settings (see [Configuration](#configuration)) |
@@ -131,6 +135,24 @@ The footer shows the most common actions, and `?` opens the full keybindings men
 
 In the commit editor, `Ctrl+S` submits and `Esc` cancels. In the changelist-name prompt, `Tab` toggles between typing a new name and picking an existing changelist. In a confirmation dialog, `Enter`/`y` confirms and `Esc`/`n` cancels.
 
+### Filtering & searching
+
+> **Slated for v1.2.0.**
+
+Press `/` to narrow the focused panel. The query updates live as you type; `Enter` keeps it (the footer then shows it, with `Esc` to clear) and `Esc` clears it. The query is remembered per panel, so each panel can be narrowed independently.
+
+The list panels (Files and Log) **filter** — non-matching rows are hidden. The detail panels (Main and Status) **search** — matching lines are highlighted in place, never removed: the current match is a reverse-video bar and the rest get a subtle highlight. Press `n` / `N` to jump to the next / previous match (the footer shows the position, e.g. `2/5`); if nothing matches, a toast says so.
+
+Every query accepts free-text search over the whole panel, and the list panels add `key:value` parameters that can be combined in any order with the free text:
+
+| Panel | Behavior | Parameters | Free text matches |
+|-------|----------|------------|-------------------|
+| Log | filter | `rev:` (exact revision), `user:`/`author:`, `path:` (a changed path), `date:` (`YYYY-MM-DD`) | the **full** commit message, not just its first line |
+| Files (Changes / Changelists) | filter | `state:` (status code or name, e.g. `state:M`), `cl:`/`changelist:` | the file path |
+| Main / Status | highlight + jump | — | the visible lines (e.g. searching within a diff) |
+
+For example, focus the Log panel and type `rev:128 user:alice parser` to find revision 128 by alice whose message mentions “parser”; focus the Files panel and type `state:M app.go` to show only modified files whose path contains `app.go`; or focus the Main panel and type a word to jump between its occurrences in the diff with `n` / `N`.
+
 ## How staging works
 
 SVN has no local staging index. `revision` emulates one using an SVN **changelist** named `revision:staged`: staging a file — or every change under a directory — adds it to that changelist, unstaging removes it, and `c` commits the staged set as a unit. This maps a git-like stage/commit flow onto native SVN.
@@ -138,6 +160,8 @@ SVN has no local staging index. `revision` emulates one using an SVN **changelis
 You can also group work into **named changelists** with `n`: it moves the staged files (or just the selected file when nothing is staged) into a real SVN changelist, which appears in the Changelists view and can be committed on its own. A file belongs to at most one changelist at a time — unstage it (`space`) before moving it elsewhere.
 
 ## Configuration
+
+> **Slated for v1.2.0.**
 
 `revision` reads optional settings from `~/.config/revision/config.json` (or `$XDG_CONFIG_HOME/revision/config.json` when that variable is set). The file is optional: every setting falls back to a built-in default when the file, or an individual key, is absent.
 

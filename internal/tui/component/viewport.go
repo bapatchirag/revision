@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/bapatchirag/revision/internal/tui"
@@ -13,13 +14,19 @@ import (
 )
 
 // Viewport is a scrollable, read-only text area. It renders a vertical window
-// over its content and scrolls with the arrow and page keys while focused.
+// over its content and scrolls with the arrow and page keys while focused. It can
+// also highlight the lines matching a search query and jump between them without
+// removing any content.
 type Viewport struct {
 	lines        []string
 	offset       int
 	xOffset      int
 	gutter       int
 	contentWidth int
+	search       string
+	matches      []int
+	matchSet     map[int]bool
+	current      int
 	width        int
 	height       int
 	focused      bool
@@ -36,13 +43,15 @@ var (
 
 // NewViewport builds an empty viewport.
 func NewViewport(th theme.Theme, keys keymap.KeyMap) *Viewport {
-	return &Viewport{theme: th, keys: keys}
+	return &Viewport{theme: th, keys: keys, current: -1}
 }
 
 // Init implements tui.Component.
 func (v *Viewport) Init() tea.Cmd { return nil }
 
-// SetContent replaces the viewport text and resets scrolling to the top.
+// SetContent replaces the viewport text and resets scrolling to the top. An
+// active search is re-evaluated against the new content so its highlights stay
+// valid, though no match is left selected until the next SetSearch or jump.
 func (v *Viewport) SetContent(content string) {
 	if content == "" {
 		v.lines = nil
@@ -52,6 +61,7 @@ func (v *Viewport) SetContent(content string) {
 	v.offset = 0
 	v.xOffset = 0
 	v.contentWidth = v.measureWidth()
+	v.recomputeMatches()
 	v.clampOffset()
 	v.clampXOffset()
 }
@@ -72,6 +82,102 @@ func (v *Viewport) SetGutter(n int) {
 		n = 0
 	}
 	v.gutter = n
+}
+
+// SetSearch sets the case-insensitive search query, highlighting every line whose
+// visible text contains it and moving the current match to the first hit, which
+// it scrolls into view. It returns the number of matching lines; an empty query
+// clears the search.
+func (v *Viewport) SetSearch(query string) int {
+	v.search = query
+	v.recomputeMatches()
+	if len(v.matches) > 0 {
+		v.current = 0
+		v.scrollToCurrent()
+	}
+	return len(v.matches)
+}
+
+// ClearSearch removes any active search highlight.
+func (v *Viewport) ClearSearch() {
+	v.search = ""
+	v.matches = nil
+	v.matchSet = nil
+	v.current = -1
+}
+
+// MatchCount returns the number of lines matching the active search.
+func (v *Viewport) MatchCount() int { return len(v.matches) }
+
+// CurrentMatch returns the 1-based position of the current match, or 0 when none
+// is selected (no matches, or the content changed since the last jump).
+func (v *Viewport) CurrentMatch() int {
+	if v.current < 0 || v.current >= len(v.matches) {
+		return 0
+	}
+	return v.current + 1
+}
+
+// NextMatch moves the current match forward (wrapping) and scrolls it into view.
+// It reports whether a match was available to move to.
+func (v *Viewport) NextMatch() bool { return v.step(1) }
+
+// PrevMatch moves the current match backward (wrapping) and scrolls it into view.
+// It reports whether a match was available to move to.
+func (v *Viewport) PrevMatch() bool { return v.step(-1) }
+
+// step advances the current match by delta (±1), wrapping around the ends. From
+// no selection it starts at the first match going forward, or the last going
+// backward.
+func (v *Viewport) step(delta int) bool {
+	n := len(v.matches)
+	if n == 0 {
+		return false
+	}
+	switch {
+	case v.current < 0 && delta > 0:
+		v.current = 0
+	case v.current < 0:
+		v.current = n - 1
+	default:
+		v.current = (v.current + delta + n) % n
+	}
+	v.scrollToCurrent()
+	return true
+}
+
+// recomputeMatches rebuilds the match set for the current search over the current
+// lines, keeping the search valid after the content changes. It leaves no match
+// selected (current = -1) until the next SetSearch or jump.
+func (v *Viewport) recomputeMatches() {
+	v.matches = nil
+	v.matchSet = nil
+	v.current = -1
+	q := strings.ToLower(strings.TrimSpace(v.search))
+	if q == "" {
+		return
+	}
+	set := make(map[int]bool)
+	for i, ln := range v.lines {
+		if strings.Contains(strings.ToLower(ansi.Strip(ln)), q) {
+			v.matches = append(v.matches, i)
+			set[i] = true
+		}
+	}
+	v.matchSet = set
+}
+
+// scrollToCurrent centers the current match line in the visible window.
+func (v *Viewport) scrollToCurrent() {
+	if v.current < 0 || v.current >= len(v.matches) {
+		return
+	}
+	_, innerH, _, _ := v.layout()
+	if innerH < 1 {
+		innerH = 1
+	}
+	v.offset = v.matches[v.current] - innerH/2
+	v.clampOffset()
 }
 
 // Focus implements tui.Focusable.
@@ -134,8 +240,9 @@ func (v *Viewport) View() string {
 	}
 	if v.height <= 0 {
 		out := make([]string, 0, len(v.lines))
-		for _, ln := range v.lines {
-			out = append(out, v.window(ln, v.width))
+		for i, ln := range v.lines {
+			row := v.window(ln, v.width)
+			out = append(out, v.highlightMatch(i, row, v.width))
 		}
 		return strings.Join(out, "\n")
 	}
@@ -155,6 +262,9 @@ func (v *Viewport) View() string {
 			line = v.lines[idx]
 		}
 		row := v.window(line, innerW)
+		if idx < len(v.lines) {
+			row = v.highlightMatch(idx, row, innerW)
+		}
 		if vBar {
 			if i >= vStart && i < vStart+vSize {
 				row += vScrollThumb
@@ -168,6 +278,20 @@ func (v *Viewport) View() string {
 		rows = append(rows, v.horizontalBar(innerW, vBar))
 	}
 	return strings.Join(rows, "\n")
+}
+
+// highlightMatch paints a search-match line: the current match as a reverse-video
+// bar (over its plain text, so it is unmistakable and always legible), and every
+// other match with a subtle background bar that preserves the line's own colors.
+// Non-match lines are returned unchanged.
+func (v *Viewport) highlightMatch(idx int, row string, width int) string {
+	if len(v.matches) == 0 || !v.matchSet[idx] {
+		return row
+	}
+	if v.current >= 0 && v.current < len(v.matches) && v.matches[v.current] == idx {
+		return lipgloss.NewStyle().Reverse(true).Render(fitLine(ansi.Strip(row), width))
+	}
+	return highlightLine(row, width, lipgloss.NewStyle().Background(v.theme.SelectionBg))
 }
 
 // horizontalBar renders the bottom scrollbar row spanning innerW cells, adding a

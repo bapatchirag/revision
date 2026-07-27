@@ -77,6 +77,9 @@ const themeMenuID = "theme"
 // settingsFormID identifies the settings editor on emitted messages.
 const settingsFormID = "settings"
 
+// searchBarID identifies the panel filter input on emitted messages.
+const searchBarID = "search"
+
 // mainSource selects which side panel's selection drives the Main viewport.
 type mainSource int
 
@@ -115,6 +118,7 @@ type Model struct {
 	themeMenu  *component.Menu
 	form       *component.Form
 	toast      *component.Toast
+	searchBar  *component.SearchBar
 	focus      *focus.Manager
 
 	fileItems        []svn.StatusItem
@@ -122,6 +126,7 @@ type Model struct {
 	filesInitialized bool
 	clItems          []svn.StatusItem
 	clCollapsedDirs  map[string]bool
+	logEntries       []svn.LogEntry
 
 	source        mainSource
 	diffPath      string
@@ -130,6 +135,9 @@ type Model struct {
 	logErr        error
 	editing       bool
 	naming        bool
+	filtering     bool
+	filterPanel   int
+	filters       map[int]string
 	nameTargets   []changelistTarget
 	drilledCL     string
 	commitCL      string
@@ -210,8 +218,10 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		themeMenu:       component.NewMenu(themeMenuID, "Theme", themeMenuItems(), th, keys),
 		form:            component.NewForm(settingsFormID, "Settings", settingsFields(cfg, cfg.DirectoryDiff), th, keys),
 		toast:           component.NewToast(th),
+		searchBar:       component.NewSearchBar(searchBarID, th, keys),
 		collapsedDirs:   map[string]bool{},
 		clCollapsedDirs: map[string]bool{},
+		filters:         map[int]string{},
 		source:          sourceFiles,
 		dirDiff:         cfg.DirectoryDiff,
 		needsSSHKey:     info != nil && info.IsOverSSH(),
@@ -285,14 +295,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fileItems = msg.items
 		m.rebuildFileTree()
 		m.focusFirstFile()
-		m.changelists.SetItems(groupChangelists(msg.items))
+		m.rebuildChangelists()
 		m.syncDrill()
 		m.refreshChrome()
 		return m, m.diffLoadForSelection()
 
 	case logLoadedMsg:
 		m.logErr = msg.err
-		m.log.SetItems(msg.entries)
+		m.logEntries = msg.entries
+		m.applyLogFilter()
 		if m.source == sourceLog {
 			m.updateMain()
 		}
@@ -474,6 +485,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.submitSettings()
 		case passphraseEditorID:
 			return m, m.submitUnlock(msg.Value)
+		case searchBarID:
+			m.commitFilter()
+			return m, nil
 		}
 		return m, nil
 
@@ -508,6 +522,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancelThemePreview()
 		case settingsFormID:
 			m.closeSettings()
+		case searchBarID:
+			return m, m.clearFilter()
 		}
 		return m, nil
 
@@ -529,6 +545,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.naming {
 			return m, m.nameEditor.Update(msg)
+		}
+		if m.filtering {
+			// The filter input owns the keyboard while open. Every edit re-runs the
+			// filter live so the panel updates as the user types; enter and esc are
+			// returned by the search bar as Submit/Dismiss and handled above.
+			before := m.searchBar.Value()
+			cmd := m.searchBar.Update(msg)
+			if m.searchBar.Value() != before {
+				cmd = tea.Batch(cmd, m.applyFilterLive())
+			}
+			return m, cmd
 		}
 		if m.configuring {
 			return m, m.form.Update(msg)
@@ -637,7 +664,13 @@ func (m *Model) baseView() string {
 		m.panels[panelLog].View(),
 	)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, m.panels[panelMain].View())
-	return lipgloss.JoinVertical(lipgloss.Left, body, m.bar.View())
+	// While a filter is being typed the search bar takes the status bar's row so
+	// the panel content stays fully visible above it.
+	bottom := m.bar.View()
+	if m.filtering {
+		bottom = m.searchBar.View()
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, body, bottom)
 }
 
 // handleKey processes global keys, returning whether the key was consumed.
@@ -661,6 +694,15 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return m.openThemeMenu(), true
 	case key.Matches(k, m.keys.Settings):
 		return m.openSettings(), true
+	case key.Matches(k, m.keys.Filter):
+		return m.openFilter(), true
+	case key.Matches(k, m.keys.Back):
+		// esc clears the focused panel's filter when it has one; otherwise it is
+		// left for the panel (e.g. to pop a changelist drill).
+		if cmd, cleared := m.clearFocusedFilter(); cleared {
+			return cmd, true
+		}
+		return nil, false
 	case key.Matches(k, m.keys.Help):
 		return m.openHelp(), true
 	}
@@ -684,8 +726,18 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		}
 		return nil, false
 	case "n":
+		if m.isSearchPanel(m.focus.Index()) && m.filters[m.focus.Index()] != "" {
+			m.jumpMatch(m.focus.Index(), 1)
+			return nil, true
+		}
 		if m.focus.Index() == panelFiles {
 			return m.assignChangelist(), true
+		}
+		return nil, false
+	case "N":
+		if m.isSearchPanel(m.focus.Index()) && m.filters[m.focus.Index()] != "" {
+			m.jumpMatch(m.focus.Index(), -1)
+			return nil, true
 		}
 		return nil, false
 	case "c":
@@ -831,7 +883,7 @@ func (m *Model) drillChangelist() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	m.clItems = g.Items
+	m.clItems = m.changelistItems(g.Name)
 	m.rebuildClTree()
 	if idx := firstFileIndex(m.clFiles.Items()); idx >= 0 {
 		m.clFiles.SetIndex(idx)
@@ -884,7 +936,7 @@ func (m *Model) selectedFile() (svn.StatusItem, bool) {
 // honoring the remembered per-directory collapse state. The List clamps the
 // cursor, so it stays in range as rows appear or disappear.
 func (m *Model) rebuildFileTree() {
-	m.files.SetItems(buildFileTree(m.fileItems, m.collapsedDirs))
+	m.files.SetItems(buildFileTree(m.filteredStatusItems(m.fileItems), m.collapsedDirs))
 }
 
 // focusFirstFile parks the Changes-tree cursor on the first file leaf the first
@@ -925,7 +977,7 @@ func (m *Model) toggleCollapse() tea.Cmd {
 // rebuildClTree re-flattens the drilled-in changelist's items into its tree,
 // honoring the drill's own per-directory collapse state.
 func (m *Model) rebuildClTree() {
-	m.clFiles.SetItems(buildFileTree(m.clItems, m.clCollapsedDirs))
+	m.clFiles.SetItems(buildFileTree(m.filteredStatusItems(m.clItems), m.clCollapsedDirs))
 }
 
 // toggleClCollapse expands or collapses the directory under the drilled-in
@@ -1011,12 +1063,10 @@ func (m *Model) syncDrill() {
 	if !m.filesViewIsChangelists() || m.filesViews.Depth() == 0 {
 		return
 	}
-	for _, g := range m.changelists.Items() {
-		if g.Name == m.drilledCL {
-			m.clItems = g.Items
-			m.rebuildClTree()
-			return
-		}
+	if items := m.changelistItems(m.drilledCL); len(items) > 0 {
+		m.clItems = items
+		m.rebuildClTree()
+		return
 	}
 	m.filesViews.Pop()
 	m.drilledCL = ""
@@ -1421,6 +1471,7 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Scroll main left / right", Key: "h / l"},
 		{Label: "Line start / end", Key: "home / end"},
 		{Label: "Toggle directory diff", Key: "D"},
+		{Label: "Filter panel", Key: "/"},
 		{Label: "Toggle help", Key: "?"},
 		{Label: "Quit", Key: "q"},
 	}
@@ -1683,6 +1734,221 @@ func (m *Model) toggleDirDiff() tea.Cmd {
 	return m.diffLoadForSelection()
 }
 
+// openFilter opens the filter input for the focused panel, pre-filled with that
+// panel's current filter and labeled with the panel name and its available
+// parameters. The input captures the keyboard until the user submits (enter,
+// keep) or dismisses (esc, clear).
+func (m *Model) openFilter() tea.Cmd {
+	p := m.focus.Index()
+	m.filtering = true
+	m.filterPanel = p
+	m.searchBar.SetPrefix(filterPrefix(p))
+	m.searchBar.SetValue(m.filters[p])
+	m.searchBar.SetSize(m.width, 1)
+	m.searchBar.Focus()
+	return nil
+}
+
+// applyFilterLive re-applies the in-progress query to the panel being filtered,
+// so it updates as the user types. It returns a command to refresh the Main
+// panel when it follows the filtered panel, whose narrowed selection may now
+// point at a different row.
+func (m *Model) applyFilterLive() tea.Cmd {
+	m.setFilter(m.filterPanel, m.searchBar.Value())
+	return m.afterFilterChange(m.filterPanel)
+}
+
+// afterFilterChange refreshes Main when it is driven by the panel whose filter
+// just changed, since narrowing the list clamps the cursor onto a different
+// selection. It returns a command to load the newly-selected file's diff when
+// one is needed.
+func (m *Model) afterFilterChange(p int) tea.Cmd {
+	switch p {
+	case panelFiles:
+		if m.source == sourceFiles {
+			m.updateMain()
+			return m.diffLoadForSelection()
+		}
+	case panelLog:
+		if m.source == sourceLog {
+			m.updateMain()
+		}
+	}
+	return nil
+}
+
+// commitFilter closes the filter input, keeping the filter that was applied live
+// while typing. For a search panel with no matches it surfaces a toast so the
+// user is not left wondering why nothing is highlighted.
+func (m *Model) commitFilter() {
+	m.filtering = false
+	m.searchBar.Blur()
+	if q := m.filters[m.filterPanel]; q != "" && m.isSearchPanel(m.filterPanel) && m.searchViewport(m.filterPanel).MatchCount() == 0 {
+		m.showToast("no matches for "+q, component.LevelInfo)
+	}
+	m.updateBar()
+}
+
+// clearFilter closes the filter input and removes the filter from the panel it
+// was editing (esc while the input is open), returning a command to refresh Main
+// when it follows that panel.
+func (m *Model) clearFilter() tea.Cmd {
+	m.filtering = false
+	m.searchBar.Blur()
+	p := m.filterPanel
+	m.setFilter(p, "")
+	m.updateBar()
+	return m.afterFilterChange(p)
+}
+
+// clearFocusedFilter removes the focused panel's filter when it has one (esc
+// while no input is open), returning a command to refresh Main and whether a
+// filter was cleared — so the caller can leave esc for the panel (e.g. to pop a
+// changelist drill) when there was none.
+func (m *Model) clearFocusedFilter() (tea.Cmd, bool) {
+	p := m.focus.Index()
+	if m.filters[p] == "" {
+		return nil, false
+	}
+	m.setFilter(p, "")
+	m.updateBar()
+	return m.afterFilterChange(p), true
+}
+
+// setFilter records (or clears, when q is blank) the filter for panel p and
+// re-renders that panel from its unfiltered source. The Files and Log panels
+// filter (rows are removed); the Main and Status viewports search (matching lines
+// are highlighted and jumped between, never removed).
+func (m *Model) setFilter(p int, q string) {
+	if strings.TrimSpace(q) == "" {
+		delete(m.filters, p)
+	} else {
+		m.filters[p] = q
+	}
+	switch p {
+	case panelFiles:
+		m.rebuildFileTree()
+		m.rebuildChangelists()
+		if m.inChangelistDrill() {
+			m.rebuildClTree()
+		}
+	case panelLog:
+		m.applyLogFilter()
+	case panelStatus:
+		m.status.SetSearch(m.filters[panelStatus])
+	case panelMain:
+		m.main.SetSearch(m.filters[panelMain])
+	}
+}
+
+// isSearchPanel reports whether panel p is a Viewport that searches (highlights +
+// jumps) rather than filters (removes rows).
+func (m *Model) isSearchPanel(p int) bool {
+	return p == panelMain || p == panelStatus
+}
+
+// searchViewport returns the Viewport backing a search panel.
+func (m *Model) searchViewport(p int) *component.Viewport {
+	if p == panelStatus {
+		return m.status
+	}
+	return m.main
+}
+
+// jumpMatch moves a search panel's viewport to its next (dir > 0) or previous
+// match and refreshes the footer position; with no matches it explains why with
+// a toast.
+func (m *Model) jumpMatch(p, dir int) {
+	vp := m.searchViewport(p)
+	if vp.MatchCount() == 0 {
+		m.showToast("no matches for "+m.filters[p], component.LevelInfo)
+		return
+	}
+	if dir < 0 {
+		vp.PrevMatch()
+	} else {
+		vp.NextMatch()
+	}
+	m.updateBar()
+}
+
+// filterPrefix is the muted label shown in the filter input for panel p, naming
+// the panel, its behavior (filter vs. search) and its available parameters.
+func filterPrefix(p int) string {
+	switch p {
+	case panelFiles:
+		return "filter files (state: cl:)"
+	case panelLog:
+		return "filter log (rev: user: path: date:)"
+	case panelStatus:
+		return "search status"
+	default:
+		return "search main"
+	}
+}
+
+// filesQuery is the parsed Files-panel filter.
+func (m *Model) filesQuery() filterQuery {
+	return parseFilter(m.filters[panelFiles], fileFilterKeys)
+}
+
+// filteredStatusItems returns the subset of items matching the Files-panel
+// filter, or items unchanged when no filter is set.
+func (m *Model) filteredStatusItems(items []svn.StatusItem) []svn.StatusItem {
+	q := m.filesQuery()
+	if q.empty() {
+		return items
+	}
+	out := make([]svn.StatusItem, 0, len(items))
+	for _, it := range items {
+		if matchStatusItem(it, q) {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// changelistItems returns every working-copy file in the named changelist from
+// the full (unfiltered) status set, so a drill snapshot stays independent of any
+// Files filter currently narrowing the view.
+func (m *Model) changelistItems(name string) []svn.StatusItem {
+	var items []svn.StatusItem
+	for _, it := range m.fileItems {
+		if it.Changelist == name {
+			items = append(items, it)
+		}
+	}
+	return items
+}
+
+// rebuildChangelists repopulates the Changelists overview from the filtered
+// status items.
+func (m *Model) rebuildChangelists() {
+	m.changelists.SetItems(groupChangelists(m.filteredStatusItems(m.fileItems)))
+}
+
+// applyLogFilter repopulates the Log table from the raw revision history under
+// the Log-panel filter.
+func (m *Model) applyLogFilter() {
+	m.log.SetItems(m.filteredLogEntries())
+}
+
+// filteredLogEntries returns the revisions matching the Log-panel filter, or all
+// of them when no filter is set.
+func (m *Model) filteredLogEntries() []svn.LogEntry {
+	q := parseFilter(m.filters[panelLog], logFilterKeys)
+	if q.empty() {
+		return m.logEntries
+	}
+	out := make([]svn.LogEntry, 0, len(m.logEntries))
+	for _, e := range m.logEntries {
+		if matchLogEntry(e, q) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // layout sizes the panels and bar for the current terminal dimensions.
 func (m *Model) layout() {
 	if m.width <= 0 || m.height <= 0 {
@@ -1704,6 +1970,7 @@ func (m *Model) layout() {
 	m.panels[panelLog].SetSize(leftWidth, logHeight)
 	m.panels[panelMain].SetSize(rightWidth, bodyHeight)
 	m.bar.SetSize(m.width, barHeight)
+	m.searchBar.SetSize(m.width, barHeight)
 	m.updateMain()
 }
 
@@ -1726,27 +1993,33 @@ func (m *Model) updateStatus() {
 }
 
 // updateMain fills the Main panel from whichever side panel currently drives it.
+// The Main and Status panels are searched (not filtered): any active search
+// re-highlights against the new content inside the Viewport, so nothing is set
+// here beyond the content itself.
 func (m *Model) updateMain() {
 	// Only a unified diff carries the one-column +/-/space marker that must stay
-	// pinned while the body scrolls horizontally; error/loading placeholders and
-	// log/changelist detail have no gutter.
+	// pinned while the body scrolls horizontally; mainContent sets the gutter for
+	// that case, and this baseline clears it for every other view.
 	m.main.SetGutter(0)
+	m.main.SetContent(m.mainContent())
+}
+
+// mainContent computes the raw Main text for the current state, setting the diff
+// gutter as a side effect when it renders a unified diff.
+func (m *Model) mainContent() string {
 	switch {
 	case m.err != nil:
-		m.main.SetContent("Error: " + m.err.Error() + "\n\nPress R to retry.")
-		return
+		return "Error: " + m.err.Error() + "\n\nPress R to retry."
 	case m.loading && len(m.fileItems) == 0:
-		m.main.SetContent("Loading working-copy status…")
-		return
+		return "Loading working-copy status…"
 	}
 	if m.source == sourceLog {
-		m.main.SetContent(m.logDetail())
-		return
+		return m.logDetail()
 	}
 	if m.filesShowDiff() {
 		m.main.SetGutter(1)
 	}
-	m.main.SetContent(m.filesMain())
+	return m.filesMain()
 }
 
 // filesMain renders the Main content for the Files panel, which depends on its
@@ -1911,8 +2184,36 @@ func (m *Model) updateBar() {
 
 // barHint returns the contextual keybinding hint for the current Files-panel
 // view: the Changelists overview and its drill-down each get their own hints,
-// the Changes view (and every other panel) get the file-oriented hint.
+// the Changes view (and every other panel) get the file-oriented hint. When the
+// focused panel has an active filter or search (and the input is closed) it is
+// prefixed so the user can see it, jump between search matches, and clear it.
 func (m *Model) barHint() string {
+	p := m.focus.Index()
+	if q := m.filters[p]; q != "" && !m.filtering {
+		if m.isSearchPanel(p) {
+			return m.searchHint(p, q) + " · " + m.baseHint()
+		}
+		return "filter: " + q + " · esc clear · " + m.baseHint()
+	}
+	return m.baseHint()
+}
+
+// searchHint describes the active search on a Viewport panel: the query, the
+// current match position (or that there are none), and the jump/clear keys.
+func (m *Model) searchHint(p int, q string) string {
+	vp := m.searchViewport(p)
+	if vp.MatchCount() == 0 {
+		return "search: " + q + " · no matches · esc clear"
+	}
+	pos := vp.CurrentMatch()
+	if pos == 0 {
+		return fmt.Sprintf("search: %s · %d matches · n next · N prev · esc clear", q, vp.MatchCount())
+	}
+	return fmt.Sprintf("search: %s · %d/%d · n next · N prev · esc clear", q, pos, vp.MatchCount())
+}
+
+// baseHint is the panel-specific key hint without any filter annotation.
+func (m *Model) baseHint() string {
 	if m.focus.Index() == panelFiles && m.filesViewIsChangelists() {
 		if m.inChangelistDrill() {
 			return "space unstage · c commit · esc back · [ ] view · ? help"
