@@ -750,7 +750,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 // the command that performs the change (or nil when the selection is not
 // stageable).
 func (m *Model) stageSelected() tea.Cmd {
-	if n, items, ok := m.selectedTreeNode(); ok && n.Item == nil {
+	if n, items, ok := m.selectedDirectory(); ok {
 		return m.stageDirectory(n, items)
 	}
 	act, ok := m.stageTarget()
@@ -1113,9 +1113,13 @@ func (m *Model) countInChangelist(name string) int {
 	return n
 }
 
-// requestRevert asks to discard local changes to the selected file, opening a
-// confirmation modal. A clean/unversioned selection has nothing to revert.
+// requestRevert asks to discard local changes to the current selection, opening a
+// confirmation modal. On a directory row it reverts every dirty file beneath it;
+// on a file leaf a clean/unversioned selection has nothing to revert.
 func (m *Model) requestRevert() tea.Cmd {
+	if n, items, ok := m.selectedDirectory(); ok {
+		return m.requestRevertDirectory(n, items)
+	}
 	it, ok := m.selectedFile()
 	if !ok {
 		return nil
@@ -1129,10 +1133,41 @@ func (m *Model) requestRevert() tea.Cmd {
 	return nil
 }
 
-// requestDelete asks to remove the selected file, opening a confirmation modal.
-// A versioned file is scheduled for deletion; an unversioned one is removed from
-// disk. Ignored files are left alone.
+// requestRevertDirectory asks to discard local changes to every dirty file
+// beneath the selected directory row. A directory with nothing revertable warns
+// instead of opening the modal.
+func (m *Model) requestRevertDirectory(n fileNode, items []svn.StatusItem) tea.Cmd {
+	paths := directoryRevertPaths(n, items)
+	if len(paths) == 0 {
+		m.showToast("nothing to revert under "+dirLabel(n), component.LevelWarning)
+		return nil
+	}
+	m.pending = revertManyCmd(m.client, paths)
+	m.openConfirm("Revert changes?", fmt.Sprintf(
+		"Discard local changes to %d files under %s? This cannot be undone.", len(paths), dirLabel(n)))
+	return nil
+}
+
+// directoryRevertPaths collects the revertable file paths beneath a directory
+// row: every versioned pending change, matching the single-file revert guard.
+func directoryRevertPaths(n fileNode, items []svn.StatusItem) []string {
+	var paths []string
+	for _, it := range filesUnder(n, items) {
+		if it.State.IsDirty() {
+			paths = append(paths, it.Path)
+		}
+	}
+	return paths
+}
+
+// requestDelete asks to remove the current selection, opening a confirmation
+// modal. On a directory row it removes every deletable file beneath it; on a file
+// leaf a versioned file is scheduled for deletion, an unversioned one is removed
+// from disk, and ignored files are left alone.
 func (m *Model) requestDelete() tea.Cmd {
+	if n, items, ok := m.selectedDirectory(); ok {
+		return m.requestDeleteDirectory(n, items)
+	}
 	it, ok := m.selectedFile()
 	if !ok {
 		return nil
@@ -1149,6 +1184,58 @@ func (m *Model) requestDelete() tea.Cmd {
 	m.pending = deleteCmd(m.client, act)
 	m.openConfirm("Delete file?", message)
 	return nil
+}
+
+// requestDeleteDirectory asks to remove every deletable file beneath the selected
+// directory row: versioned files are scheduled for deletion and unversioned ones
+// are removed from disk. Ignored files are skipped, so a directory holding only
+// ignored files warns instead of opening the modal.
+func (m *Model) requestDeleteDirectory(n fileNode, items []svn.StatusItem) tea.Cmd {
+	acts := directoryDeleteActions(n, items)
+	if len(acts) == 0 {
+		m.showToast("nothing to delete under "+dirLabel(n), component.LevelWarning)
+		return nil
+	}
+	m.pending = deleteManyCmd(m.client, acts)
+	m.openConfirm("Delete files?", deleteDirectoryMessage(n, acts))
+	return nil
+}
+
+// directoryDeleteActions builds the delete actions for the files beneath a
+// directory row: each versioned file is scheduled for deletion (svn delete) and
+// each unversioned one is removed from disk, skipping ignored files the same way
+// the single-file delete does.
+func directoryDeleteActions(n fileNode, items []svn.StatusItem) []deleteAction {
+	var acts []deleteAction
+	for _, it := range filesUnder(n, items) {
+		if it.State == svn.StateIgnored {
+			continue
+		}
+		acts = append(acts, deleteAction{path: it.Path, unversioned: it.State == svn.StateUnversioned})
+	}
+	return acts
+}
+
+// deleteDirectoryMessage composes the confirmation body for a directory delete,
+// separating files merely scheduled for deletion from untracked files that would
+// be permanently removed from disk.
+func deleteDirectoryMessage(n fileNode, acts []deleteAction) string {
+	var scheduled, disk int
+	for _, act := range acts {
+		if act.unversioned {
+			disk++
+		} else {
+			scheduled++
+		}
+	}
+	var parts []string
+	if scheduled > 0 {
+		parts = append(parts, fmt.Sprintf("%d files under %s will be scheduled for deletion (removed on the next commit)", scheduled, dirLabel(n)))
+	}
+	if disk > 0 {
+		parts = append(parts, fmt.Sprintf("%d untracked files will be permanently removed from disk — this cannot be undone", disk))
+	}
+	return strings.Join(parts, "; ") + "."
 }
 
 // requestUpdate brings the working copy up to date with the repository.
@@ -2006,6 +2093,17 @@ func (m *Model) selectedTreeNode() (fileNode, []svn.StatusItem, bool) {
 	}
 	n, ok := m.files.Selected()
 	return n, m.fileItems, ok
+}
+
+// selectedDirectory returns the highlighted Files-panel row when it is a
+// directory row (Item == nil), along with the status items backing its view, so
+// directory-level actions can fan out over filesUnder. ok is false on a file leaf
+// or the Changelists overview.
+func (m *Model) selectedDirectory() (fileNode, []svn.StatusItem, bool) {
+	if n, items, ok := m.selectedTreeNode(); ok && n.Item == nil {
+		return n, items, true
+	}
+	return fileNode{}, nil, false
 }
 
 // filesShowDiff reports whether filesMain currently renders a unified diff — the
