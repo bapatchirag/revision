@@ -33,3 +33,26 @@ func TestParseInfoInvalid(t *testing.T) {
 		t.Fatal("expected error for malformed xml")
 	}
 }
+
+func TestInfoIsOverSSH(t *testing.T) {
+	cases := map[string]struct {
+		url  string
+		want bool
+	}{
+		"svn+ssh":       {"svn+ssh://host/repo/trunk", true},
+		"svn+ssh upper": {"SVN+SSH://host/repo/trunk", true},
+		"https":         {"https://svn.example.com/repo/trunk", false},
+		"http":          {"http://svn.example.com/repo", false},
+		"file":          {"file:///srv/repo", false},
+		"svn":           {"svn://host/repo", false},
+		"empty":         {"", false},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			info := &Info{URL: c.url}
+			if got := info.IsOverSSH(); got != c.want {
+				t.Errorf("IsOverSSH(%q) = %v, want %v", c.url, got, c.want)
+			}
+		})
+	}
+}

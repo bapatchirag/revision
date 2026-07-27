@@ -20,6 +20,9 @@ func TestDefault(t *testing.T) {
 	if !def.DirectoryDiff {
 		t.Error("Default().DirectoryDiff = false, want true")
 	}
+	if def.SSHKeyPath != "~/.ssh/id_rsa" {
+		t.Errorf("Default().SSHKeyPath = %q, want %q", def.SSHKeyPath, "~/.ssh/id_rsa")
+	}
 }
 
 func TestDirUsesXDGConfigHome(t *testing.T) {
@@ -87,6 +90,7 @@ func TestSaveThenLoadRoundTrip(t *testing.T) {
 		LogLimit:    50,
 		Editor:      "vim",
 		Theme:       "solarized",
+		SSHKeyPath:  "/home/me/.ssh/id_ed25519",
 	}
 
 	if err := saveTo(path, want); err != nil {
@@ -153,6 +157,35 @@ func TestLoadNormalizesInvalidValues(t *testing.T) {
 	}
 	if got.Theme != Default().Theme {
 		t.Errorf("Theme = %q, want normalized to default %q", got.Theme, Default().Theme)
+	}
+}
+
+func TestLoadDefaultsSSHKeyWhenBlank(t *testing.T) {
+	// An empty or whitespace-only sshKeyPath on disk must resolve to the default
+	// key location, while an explicit key is preserved verbatim.
+	cases := map[string]struct {
+		json string
+		want string
+	}{
+		"empty":      {`{"sshKeyPath":""}`, Default().SSHKeyPath},
+		"whitespace": {`{"sshKeyPath":"   "}`, Default().SSHKeyPath},
+		"absent":     {`{}`, Default().SSHKeyPath},
+		"explicit":   {`{"sshKeyPath":"/home/me/.ssh/work_ed25519"}`, "/home/me/.ssh/work_ed25519"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(tc.json), 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			got, err := loadFrom(path)
+			if err != nil {
+				t.Fatalf("loadFrom: unexpected error %v", err)
+			}
+			if got.SSHKeyPath != tc.want {
+				t.Errorf("SSHKeyPath = %q, want %q", got.SSHKeyPath, tc.want)
+			}
+		})
 	}
 }
 

@@ -56,6 +56,11 @@ type Config struct {
 	// combined diff of every change beneath it. When false, the directory diff
 	// is hidden by default and can be toggled on at runtime.
 	DirectoryDiff bool `json:"directoryDiff"`
+	// SSHKeyPath is the SSH private key used to authenticate against a remote
+	// repository over svn+ssh. A blank value is normalized to the default key
+	// location, ~/.ssh/id_rsa, so the setting always names a concrete key. A
+	// leading ~ is expanded to the user's home directory when the key is used.
+	SSHKeyPath string `json:"sshKeyPath"`
 }
 
 // Default returns the configuration used when no file exists yet or when a
@@ -67,6 +72,7 @@ func Default() Config {
 		Editor:        "",
 		Theme:         "auto",
 		DirectoryDiff: true,
+		SSHKeyPath:    "~/.ssh/id_rsa",
 	}
 }
 
@@ -235,6 +241,9 @@ func (c *Config) normalize() {
 	}
 	if strings.TrimSpace(c.Theme) == "" {
 		c.Theme = def.Theme
+	}
+	if strings.TrimSpace(c.SSHKeyPath) == "" {
+		c.SSHKeyPath = def.SSHKeyPath
 	}
 }
 

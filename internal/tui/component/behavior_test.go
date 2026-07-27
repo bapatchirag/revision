@@ -662,3 +662,22 @@ func TestPromptIgnoresInputWhenBlurred(t *testing.T) {
 		t.Errorf("blurred prompt captured input: %q", p.Value())
 	}
 }
+
+func TestPromptSecretMasksValue(t *testing.T) {
+	p := component.NewPrompt("ssh", "SSH key passphrase", "passphrase", testTheme(), testKeys())
+	p.SetSecret(true)
+	p.Focus()
+	p.Update(runes("hunter2"))
+
+	view := p.View()
+	if strings.Contains(view, "hunter2") {
+		t.Errorf("secret prompt leaked the typed value:\n%s", view)
+	}
+	if !strings.Contains(view, "\u2022") {
+		t.Errorf("secret prompt should render bullets, got:\n%s", view)
+	}
+	// The real value is still readable for submission.
+	if p.Value() != "hunter2" {
+		t.Errorf("Value() = %q, want hunter2", p.Value())
+	}
+}
