@@ -141,12 +141,12 @@ func Cipher() Theme {
 // Named pairs a stable identifier and a human-facing label with a palette.
 type Named struct {
 	Name  string // stable key stored in config and matched by ByName
-	Label string // label shown in the theme picker
+	Label string // human-facing label shown in the settings editor
 	Theme Theme
 }
 
 // registry is the built-in theme set in display order. auto leads as the default
-// and the head of the picker.
+// and the head of the Theme setting.
 var registry = []Named{
 	{Name: "auto", Label: "Auto", Theme: Auto()},
 	{Name: "everforest", Label: "Everforest", Theme: Everforest()},
