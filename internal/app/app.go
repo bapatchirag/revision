@@ -1234,6 +1234,10 @@ func (m *Model) submitSettings() tea.Cmd {
 	cfg.Editor = strings.TrimSpace(vals[2])
 	cfg.Theme = strings.TrimSpace(vals[3])
 	cfg.DirectoryDiff = vals[4] == "true"
+	cfg.SSHKeyPath = strings.TrimSpace(vals[5])
+	if cfg.SSHKeyPath == "" {
+		cfg.SSHKeyPath = config.Default().SSHKeyPath
+	}
 
 	m.closeSettings()
 
@@ -1366,6 +1370,7 @@ func settingsFields(cfg config.Config, dirDiff bool) []component.Field {
 		{Label: "Editor", Kind: component.FieldText, Value: cfg.Editor},
 		{Label: "Theme", Kind: component.FieldChoice, Value: cfg.Theme, Options: theme.Names()},
 		{Label: "Directory diff", Kind: component.FieldBool, Value: strconv.FormatBool(dirDiff)},
+		{Label: "SSH key", Kind: component.FieldText, Value: cfg.SSHKeyPath},
 	}
 }
 
