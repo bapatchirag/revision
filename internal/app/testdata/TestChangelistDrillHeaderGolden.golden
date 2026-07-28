@@ -1,4 +1,4 @@
-╭─ [1] Status ─────────────────╮╭─ Main ───────────────────────────────────────╮
+╭─ [1] Status ─────────────────╮╭─ [0] Diff ───────────────────────────────────╮
 │https://svn.example.com/repo/t││changelist: feature-x                         │
 │r42                           ││                                              │
 │2 change(s)                   ││Loading diff…                                 │

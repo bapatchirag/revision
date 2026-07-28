@@ -199,7 +199,7 @@ func tabTopBorder(number int, tabs []string, active, depth int, crumb string, in
 	}
 
 	text(" ", bs)
-	if number > 0 {
+	if number >= 0 {
 		text("["+strconv.Itoa(number)+"]", numStyle)
 	}
 	for i, tab := range tabs {
@@ -259,7 +259,7 @@ func numberedTitleBorder(number int, title string, innerW int, th theme.Theme, b
 	}
 
 	text(" ", bs)
-	if number > 0 {
+	if number >= 0 {
 		text("["+strconv.Itoa(number)+"]", numStyle)
 	}
 	text(" ", bs)
