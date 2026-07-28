@@ -269,7 +269,7 @@ func (p *Prompt) View() string {
 		}
 	}
 	rows = append(rows, fitLine(lipgloss.NewStyle().Foreground(p.theme.Muted).Render(hint), innerW))
-	return box(strings.Join(rows, "\n"), p.title, innerW, len(rows), p.theme, p.focused)
+	return box(strings.Join(rows, "\n"), p.title, "", innerW, len(rows), p.theme, p.focused)
 }
 
 // inputRow renders the editable line: the value with a reverse-video cursor while

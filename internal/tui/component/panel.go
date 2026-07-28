@@ -17,6 +17,7 @@ type Panel struct {
 	number  int // negative means no number badge
 	child   tui.Component
 	theme   theme.Theme
+	footer  string
 	width   int
 	height  int
 	focused bool
@@ -75,10 +76,10 @@ func (p *Panel) View() string {
 	// its tabs in the border instead of a plain title, sparing a content row.
 	if tb, ok := p.child.(tabbed); ok {
 		if tabs := tb.Tabs(); len(tabs) > 1 || tb.Depth() > 0 {
-			return boxTabbed(content, p.number, tabs, tb.ActiveIndex(), tb.Depth(), tb.CrumbTitle(), innerW, innerH, p.theme, p.focused)
+			return boxTabbed(content, p.number, tabs, tb.ActiveIndex(), tb.Depth(), tb.CrumbTitle(), p.footer, innerW, innerH, p.theme, p.focused)
 		}
 	}
-	return box(content, p.titleText(), innerW, innerH, p.theme, p.focused)
+	return box(content, p.titleText(), p.footer, innerW, innerH, p.theme, p.focused)
 }
 
 func (p *Panel) titleText() string {
@@ -91,6 +92,11 @@ func (p *Panel) titleText() string {
 // SetTitle replaces the panel's heading so a single panel can be reused with a
 // changing title, such as the Main panel naming whichever side panel drives it.
 func (p *Panel) SetTitle(title string) { p.title = title }
+
+// SetFooter sets an optional indicator inlaid into the panel's bottom border,
+// such as a "1 of 16 (29)" position/count. An empty string clears it, leaving a
+// plain bottom edge.
+func (p *Panel) SetFooter(footer string) { p.footer = footer }
 
 // SetSize sets the panel's outer size and propagates the inner size to the
 // child when it is sizeable.

@@ -27,6 +27,11 @@ const (
 // tabSpaces is the fixed-width expansion for a tab (see fitLine).
 const tabSpaces = "    "
 
+// bottomLabelMargin is the number of dashes between an inlaid bottom-border
+// label (a position/count indicator) and the right corner, holding it just off
+// the edge rather than flush against it.
+const bottomLabelMargin = 4
+
 // fitLine pads or truncates s to exactly width display cells. Tabs are expanded
 // to spaces first: terminals advance a tab to a variable-width tab stop, which
 // would otherwise push fixed-width content past its cell and wrap the line,
@@ -82,8 +87,9 @@ func highlightLine(s string, width int, style lipgloss.Style) string {
 }
 
 // box renders content inside a rounded border with an optional title inlaid on
-// the top edge. content is fit to exactly innerW×innerH cells.
-func box(content, title string, innerW, innerH int, th theme.Theme, focused bool) string {
+// the top edge and an optional footer inlaid on the bottom edge. content is fit
+// to exactly innerW×innerH cells.
+func box(content, title, footer string, innerW, innerH int, th theme.Theme, focused bool) string {
 	if innerW < 0 {
 		innerW = 0
 	}
@@ -91,14 +97,14 @@ func box(content, title string, innerW, innerH int, th theme.Theme, focused bool
 		innerH = 0
 	}
 	bs := borderStyle(th, focused)
-	return boxBody(content, topBorder(title, innerW, th, bs, focused), innerW, innerH, bs)
+	return boxBody(content, topBorder(title, innerW, th, bs, focused), footer, innerW, innerH, th, bs)
 }
 
 // boxTabbed is box for a panel that hosts tabbed views: it inlays the panel
 // number, the view names (the active one highlighted) and any drill breadcrumb
 // into the top border, so no content row is spent on them. While drilled into a
 // titled sub-view (crumb != ""), the tabs are replaced by just that title.
-func boxTabbed(content string, number int, tabs []string, active, depth int, crumb string, innerW, innerH int, th theme.Theme, focused bool) string {
+func boxTabbed(content string, number int, tabs []string, active, depth int, crumb, footer string, innerW, innerH int, th theme.Theme, focused bool) string {
 	if innerW < 0 {
 		innerW = 0
 	}
@@ -106,12 +112,13 @@ func boxTabbed(content string, number int, tabs []string, active, depth int, cru
 		innerH = 0
 	}
 	bs := borderStyle(th, focused)
-	return boxBody(content, tabTopBorder(number, tabs, active, depth, crumb, innerW, th, bs, focused), innerW, innerH, bs)
+	return boxBody(content, tabTopBorder(number, tabs, active, depth, crumb, innerW, th, bs, focused), footer, innerW, innerH, th, bs)
 }
 
 // boxBody renders content beneath the given top border line, padding the body to
-// exactly innerW×innerH cells and closing it with the bottom border.
-func boxBody(content, top string, innerW, innerH int, bs lipgloss.Style) string {
+// exactly innerW×innerH cells and closing it with the bottom border, into which
+// footer (a position/count indicator) is inlaid when non-empty.
+func boxBody(content, top, footer string, innerW, innerH int, th theme.Theme, bs lipgloss.Style) string {
 	raw := strings.Split(content, "\n")
 	side := bs.Render(borderVertical)
 
@@ -126,8 +133,32 @@ func boxBody(content, top string, innerW, innerH int, bs lipgloss.Style) string 
 		}
 		lines = append(lines, side+body+side)
 	}
-	lines = append(lines, bs.Render(borderBottomLeft+strings.Repeat(borderHorizontal, innerW)+borderBottomRight))
+	lines = append(lines, bottomBorder(footer, innerW, th, bs))
 	return strings.Join(lines, "\n")
+}
+
+// bottomBorder renders the bottom edge of a box, inlaying label — a position or
+// count indicator such as "1 of 16 (29)" — toward the right, mirroring how
+// topBorder inlays the title on the left. bottomLabelMargin dashes sit between
+// the label and the corner. An empty label (or a box too narrow to hold one)
+// yields a plain edge.
+func bottomBorder(label string, innerW int, th theme.Theme, bs lipgloss.Style) string {
+	if label == "" || innerW < 4 {
+		return bs.Render(borderBottomLeft + strings.Repeat(borderHorizontal, innerW) + borderBottomRight)
+	}
+	text := " " + label + " "
+	if ansi.StringWidth(text) > innerW {
+		text = ansi.Truncate(text, innerW, "")
+	}
+	margin := bottomLabelMargin
+	if innerW-ansi.StringWidth(text)-margin < 0 {
+		margin = 0
+	}
+	lead := innerW - ansi.StringWidth(text) - margin
+	ls := lipgloss.NewStyle().Foreground(th.Muted)
+	return bs.Render(borderBottomLeft+strings.Repeat(borderHorizontal, lead)) +
+		ls.Render(text) +
+		bs.Render(strings.Repeat(borderHorizontal, margin)+borderBottomRight)
 }
 
 // borderStyle is the lipgloss style for a box's border runes, brightened when

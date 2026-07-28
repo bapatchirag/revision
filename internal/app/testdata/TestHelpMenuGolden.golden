@@ -12,7 +12,7 @@
 │                   │  Edit settings                      S│                   │
 │                   │  Jump to panel                1 2 3 0│                   │
 │                   │  Cycle panels         tab / shift+tab│                   │
-╰───────────────────│  Move up / down                 k / j│                   │
+╰────────────────── │  Move up / down                 k / j│                   │
 ╭─ [3] Log ─────────│  Jump top / bottom              g / G│                   │
 │  Rev Author Messag│  Scroll main up / down          K / J│                   │
 │                   │  Scroll main left / right       h / l│                   │

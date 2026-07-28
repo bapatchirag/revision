@@ -346,7 +346,7 @@ func (f *Form) View() string {
 		rows = append(rows, row)
 	}
 	rows = append(rows, fitLine("", innerW), fitLine(muted.Render(f.hint()), innerW))
-	return box(strings.Join(rows, "\n"), f.title, innerW, len(rows), f.theme, f.focused)
+	return box(strings.Join(rows, "\n"), f.title, "", innerW, len(rows), f.theme, f.focused)
 }
 
 // fieldBody lays a field's label in the value column's left gutter and its value

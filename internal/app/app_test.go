@@ -594,6 +594,74 @@ func TestModelGoldenLayout(t *testing.T) {
 	golden.RequireEqual(t, []byte(m.View()))
 }
 
+func TestCountLabel(t *testing.T) {
+	tests := []struct {
+		name               string
+		index, shown, full int
+		want               string
+	}{
+		{"empty view", 0, 0, 0, ""},
+		{"all hidden", 0, 0, 29, "0 of 0 (29)"},
+		{"nothing hidden", 1, 3, 3, "1 of 3"},
+		{"mid selection", 2, 4, 4, "2 of 4"},
+		{"cursor on root", 0, 3, 3, "0 of 3"},
+		{"some hidden", 1, 16, 29, "1 of 16 (29)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := countLabel(tt.index, tt.shown, tt.full); got != tt.want {
+				t.Errorf("countLabel(%d, %d, %d) = %q, want %q", tt.index, tt.shown, tt.full, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFileLeafStats(t *testing.T) {
+	// A tree with the synthetic root, one directory and two files under it.
+	rows := buildFileTree([]svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "src/b.go", State: svn.StateModified},
+	}, nil)
+
+	if _, count := fileLeafStats(rows, 0); count != 2 {
+		t.Fatalf("leaf count = %d, want 2 (root and dir rows must not count)", count)
+	}
+	// Cursor on the root and the directory rows sits above/at zero passed leaves.
+	if index, _ := fileLeafStats(rows, 0); index != 0 {
+		t.Errorf("root cursor index = %d, want 0", index)
+	}
+	// Cursor on the first and second file leaf gives their 1-based positions.
+	last := len(rows) - 1
+	if index, _ := fileLeafStats(rows, last); index != 2 {
+		t.Errorf("last-leaf cursor index = %d, want 2", index)
+	}
+}
+
+func TestFilesFooterReportsHiddenCount(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "tracked.go", State: svn.StateModified},
+		{Path: "untracked1.txt", State: svn.StateUnversioned},
+		{Path: "untracked2.txt", State: svn.StateUnversioned},
+	})
+
+	// With everything visible the footer counts rows without a bracketed total.
+	if got := m.filesFooter(); strings.Contains(got, "(") {
+		t.Errorf("footer shows a hidden count with nothing hidden: %q", got)
+	}
+
+	// Hiding untracked files drops two leaves; the footer then reports the full
+	// count in brackets, and the rendered Files panel border carries it.
+	m.hideUntracked = true
+	m.rebuildFileTree()
+	got := m.filesFooter()
+	if !strings.Contains(got, "(") {
+		t.Errorf("footer should report a bracketed full count when untracked files are hidden, got %q", got)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, got) {
+		t.Errorf("Files panel border missing footer %q\n%s", got, view)
+	}
+}
+
 func TestStatusPanelShowsAbout(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "modified.go", State: svn.StateModified},

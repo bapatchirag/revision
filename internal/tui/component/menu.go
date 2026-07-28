@@ -125,7 +125,7 @@ func (mn *Menu) View() string {
 		}
 		rows[i] = row
 	}
-	return box(strings.Join(rows, "\n"), mn.title, innerW, len(mn.items), mn.theme, mn.focused)
+	return box(strings.Join(rows, "\n"), mn.title, "", innerW, len(mn.items), mn.theme, mn.focused)
 }
 
 // itemBody lays label on the left and key on the right within width cells.
