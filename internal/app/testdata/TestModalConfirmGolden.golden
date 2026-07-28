@@ -1,20 +1,20 @@
 ╭─ [1] Status ─────────────────╮╭─ [0] Diff ───────────────────────────────────╮
-│https://svn.example.com/repo/t││Loading diff…                                 │
-│r42                           ││                                              │
-│1 change(s)                   ││                                              │
-│━━━━━━━━━━━━━━━━━━━━━━━━━━────││                                              │
+│Root      /home/alice/work/wc ││Loading diff…                                 │
+│Source    /home/alice/work/wc ││                                              │
+│CWD       /home/alice/work/wc ││                                              │
+│Revision  r42                 ││                                              │
+│                              ││                                              │
 ╰──────────────────────────────╯│                                              │
 ╭─ [2] ─ Changes ─── Changelist╮│                                              │
-│  ▾ /                         ││                                              │
-│    ▾ internal/    ╭─ Delete file? ───────────────────────╮                   │
-│      ▾ app/       │internal/app/app.go will be scheduled │                   │
-│>         M app.go │for deletion (removed on the next     │                   │
-│                   │commit).                              │                   │
+│  ▾ /              ╭─ Delete file? ───────────────────────╮                   │
+│    ▾ internal/    │internal/app/app.go will be scheduled │                   │
+│      ▾ app/       │for deletion (removed on the next     │                   │
+│>         M app.go │commit).                              │                   │
 │                   │                                      │                   │
-╰───────────────────│enter confirm · esc cancel            │                   │
-╭─ [3] Log ─────────╰──────────────────────────────────────╯                   │
+│                   │enter confirm · esc cancel            │                   │
+╰───────────────────╰──────────────────────────────────────╯                   │
+╭─ [3] Log ────────────────────╮│                                              │
 │  Rev Author Message          ││                                              │
-│                              ││                                              │
 │                              ││                                              │
 │                              ││                                              │
 │                              ││                                              │

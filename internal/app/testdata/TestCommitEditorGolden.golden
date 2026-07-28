@@ -1,11 +1,12 @@
 ╭─ [1] Status ─────────────────╮╭─ [0] Diff ───────────────────────────────────╮
-│https://svn.example.com/repo/t││changelist: (staged)                          │
-│r42                           ││                                              │
-│1 change(s)                   ││Loading diff…                                 │
-│━━━━━━━━━━━━━━━━━━━━━━━━━━────││                                              │
-╰──────────────────────────────╯│                                              │
-╭─ [2] ─ Changes╭─ Commit message ─────────────────────────────╮               │
-│  ▾ /          │Fix status parsing                            │               │
+│Root      /home/alice/work/wc ││changelist: (staged)                          │
+│Source    /home/alice/work/wc ││                                              │
+│CWD       /home/alice/work/wc ││Loading diff…                                 │
+│Revision  r42                 ││                                              │
+│                              ││                                              │
+╰───────────────╭─ Commit message ─────────────────────────────╮               │
+╭─ [2] ─ Changes│Fix status parsing                            │               │
+│  ▾ /          │                                              │               │
 │>   ● M modifie│                                              │               │
 │               │                                              │               │
 │               │                                              │               │
@@ -13,8 +14,7 @@
 │               │                                              │               │
 ╰───────────────│                                              │               │
 ╭─ [3] Log ─────│                                              │               │
-│  Rev Author Me│                                              │               │
-│               │ctrl+s submit · esc cancel                    │               │
+│  Rev Author Me│ctrl+s submit · esc cancel                    │               │
 │               ╰──────────────────────────────────────────────╯               │
 │                              ││                                              │
 │                              ││                                              │

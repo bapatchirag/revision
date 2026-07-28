@@ -7,6 +7,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -125,6 +126,8 @@ type Model struct {
 	clCollapsedDirs  map[string]bool
 	logEntries       []svn.LogEntry
 	wcRevision       string
+	// workDir is the directory revision was launched from (os.Getwd at startup).
+	workDir string
 
 	source        mainSource
 	diffPath      string
@@ -248,6 +251,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	if info != nil {
 		m.wcRevision = info.Revision
 	}
+	m.workDir, _ = os.Getwd()
 	m.refreshChrome()
 	return m
 }
@@ -2157,7 +2161,7 @@ func (m *Model) layout() {
 	leftWidth := clamp(m.width*2/5, 24, m.width-20)
 	rightWidth := m.width - leftWidth
 
-	statusHeight := clamp(6, 3, max(bodyHeight-6, 3))
+	statusHeight := clamp(7, 3, max(bodyHeight-6, 3))
 	rest := bodyHeight - statusHeight
 	filesHeight := rest / 2
 	logHeight := rest - filesHeight
@@ -2179,16 +2183,31 @@ func (m *Model) refreshChrome() {
 	m.updateBar()
 }
 
-// updateStatus fills the Status panel with repo/revision/summary info.
+// updateStatus fills the Status panel with the working copy's locations and
+// revision state: the working-copy root, the source path revision operates on,
+// the current working directory, and the checked-out and HEAD revision numbers.
+// A value that is not yet known is omitted so the panel only lists facts.
 func (m *Model) updateStatus() {
-	lines := make([]string, 0, 3)
+	lines := make([]string, 0, 5)
+	bold := lipgloss.NewStyle().Bold(true)
+	add := func(label, value string) {
+		if value != "" {
+			lines = append(lines, bold.Render(fmt.Sprintf("%-8s", label))+"  "+value)
+		}
+	}
 	if m.info != nil {
-		lines = append(lines, m.info.URL)
+		add("Root", m.info.WorkingCopyRoot)
 	}
-	if rev := m.revisionLabel(); rev != "" {
-		lines = append(lines, rev)
+	if m.client != nil {
+		add("Source", m.client.Dir)
 	}
-	lines = append(lines, fmt.Sprintf("%d change(s)", len(m.fileItems)))
+	add("CWD", m.workDir)
+	if m.wcRevision != "" {
+		add("Revision", "r"+m.wcRevision)
+	}
+	if head := m.headRevision(); head != "" {
+		add("HEAD", "r"+head)
+	}
 	m.status.SetContent(strings.Join(lines, "\n"))
 }
 
