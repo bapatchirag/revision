@@ -2,13 +2,13 @@
 │Root      /home/alice/work/wc         ││             _    _                                       │
 │Source    /home/alice/work/wc         ││ _ _ _____ _(_)__(_)___ _ _                               │
 │CWD       /home/alice/work/wc         ││| '_/ -_) V / (_-< / _ \ ' \                              │
-│Revision  r42                         ││|_| \___|\_/|_/__/_\___/_||_|                             │
-│                                      ││                                                          │
-╰──────────────────────────────────────╯│MIT © Chirag Bapat                                        │
-╭─ [2] ─ Changes ─── Changelists ──────╮│                                                          │
-│  ▾ /                                 ││Report an issue                                           │
-│      M modified.go                   ││  https://github.com/bapatchirag/revision/issues          │
-│                                      ││                                                          │
+│Branch    trunk                       ││|_| \___|\_/|_/__/_\___/_||_|                             │
+│Revision  r42                         ││                                                          │
+│                                      ││MIT © Chirag Bapat                                        │
+╰──────────────────────────────────────╯│                                                          │
+╭─ [2] ─ Changes ─── Changelists ──────╮│Report an issue                                           │
+│  ▾ /                                 ││  https://github.com/bapatchirag/revision/issues          │
+│      M modified.go                   ││                                                          │
 │                                      ││Release notes                                             │
 │                                      ││  https://github.com/bapatchirag/revision/releases        │
 │                                      ││                                                          │

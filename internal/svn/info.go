@@ -58,3 +58,22 @@ func parseInfo(data []byte) (*Info, error) {
 func (i *Info) IsOverSSH() bool {
 	return strings.HasPrefix(strings.ToLower(i.URL), "svn+ssh://")
 }
+
+// Branch names the line of development the working copy is checked out from,
+// read off the URL in the conventional trunk/branches/tags layout: "trunk",
+// "branches/<name>" or "tags/<name>". Subversion has no first-class branches, so
+// a repository that does not follow that convention yields an empty name.
+func (i *Info) Branch() string {
+	segs := strings.Split(strings.Trim(strings.TrimPrefix(i.URL, i.RepositoryRoot), "/"), "/")
+	for n, seg := range segs {
+		switch seg {
+		case "trunk":
+			return "trunk"
+		case "branches", "tags":
+			if n+1 < len(segs) {
+				return seg + "/" + segs[n+1]
+			}
+		}
+	}
+	return ""
+}

@@ -65,7 +65,7 @@ func TestModelRendersStatus(t *testing.T) {
 	})
 
 	view := stripANSI(m.View())
-	for _, want := range []string{"added.txt", "committed.txt", "/home/alice/work/wc", "Revision", "r42"} {
+	for _, want := range []string{"added.txt", "committed.txt", "/home/alice/work/wc", "Branch", "trunk", "Revision", "r42"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q\n---\n%s", want, view)
 		}
