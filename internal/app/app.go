@@ -7,6 +7,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -83,6 +84,7 @@ type mainSource int
 const (
 	sourceFiles mainSource = iota
 	sourceLog
+	sourceStatus
 )
 
 // Model is the root Bubble Tea model. It composes reusable components into the
@@ -125,6 +127,8 @@ type Model struct {
 	clCollapsedDirs  map[string]bool
 	logEntries       []svn.LogEntry
 	wcRevision       string
+	// workDir is the directory revision was launched from (os.Getwd at startup).
+	workDir string
 
 	source        mainSource
 	diffPath      string
@@ -248,6 +252,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	if info != nil {
 		m.wcRevision = info.Revision
 	}
+	m.workDir, _ = os.Getwd()
 	m.refreshChrome()
 	return m
 }
@@ -1830,6 +1835,8 @@ func (m *Model) handleSelection(sel uimsg.SelectedMsg) tea.Cmd {
 // loads a diff when Main now follows the Files panel.
 func (m *Model) afterFocusChange() tea.Cmd {
 	switch m.focus.Index() {
+	case panelStatus:
+		m.source = sourceStatus
 	case panelLog:
 		m.source = sourceLog
 	case panelMain:
@@ -1847,13 +1854,13 @@ func (m *Model) afterFocusChange() tea.Cmd {
 }
 
 // syncMainTitle names the Main panel after the focused side panel: the Status
-// panel makes it "Status", the Files panel "Diff", and the Log panel "Commit
+// panel makes it "About", the Files panel "Diff", and the Log panel "Commit
 // message". Focusing Main itself leaves the heading unchanged, so it keeps
 // naming whichever side panel last drove it.
 func (m *Model) syncMainTitle() {
 	switch m.focus.Index() {
 	case panelStatus:
-		m.panels[panelMain].SetTitle("Status")
+		m.panels[panelMain].SetTitle("About")
 	case panelFiles:
 		m.panels[panelMain].SetTitle("Diff")
 	case panelLog:
@@ -2157,7 +2164,7 @@ func (m *Model) layout() {
 	leftWidth := clamp(m.width*2/5, 24, m.width-20)
 	rightWidth := m.width - leftWidth
 
-	statusHeight := clamp(6, 3, max(bodyHeight-6, 3))
+	statusHeight := clamp(7, 3, max(bodyHeight-6, 3))
 	rest := bodyHeight - statusHeight
 	filesHeight := rest / 2
 	logHeight := rest - filesHeight
@@ -2179,16 +2186,31 @@ func (m *Model) refreshChrome() {
 	m.updateBar()
 }
 
-// updateStatus fills the Status panel with repo/revision/summary info.
+// updateStatus fills the Status panel with the working copy's locations and
+// revision state: the working-copy root, the source path revision operates on,
+// the current working directory, and the checked-out and HEAD revision numbers.
+// A value that is not yet known is omitted so the panel only lists facts.
 func (m *Model) updateStatus() {
-	lines := make([]string, 0, 3)
+	lines := make([]string, 0, 5)
+	bold := lipgloss.NewStyle().Bold(true)
+	add := func(label, value string) {
+		if value != "" {
+			lines = append(lines, bold.Render(fmt.Sprintf("%-8s", label))+"  "+value)
+		}
+	}
 	if m.info != nil {
-		lines = append(lines, m.info.URL)
+		add("Root", m.info.WorkingCopyRoot)
 	}
-	if rev := m.revisionLabel(); rev != "" {
-		lines = append(lines, rev)
+	if m.client != nil {
+		add("Source", m.client.Dir)
 	}
-	lines = append(lines, fmt.Sprintf("%d change(s)", len(m.fileItems)))
+	add("CWD", m.workDir)
+	if m.wcRevision != "" {
+		add("Revision", "r"+m.wcRevision)
+	}
+	if head := m.headRevision(); head != "" {
+		add("HEAD", "r"+head)
+	}
 	m.status.SetContent(strings.Join(lines, "\n"))
 }
 
@@ -2236,6 +2258,9 @@ func (m *Model) updateMain() {
 // mainContent computes the raw Main text for the current state, setting the diff
 // gutter as a side effect when it renders a unified diff.
 func (m *Model) mainContent() string {
+	if m.source == sourceStatus {
+		return m.statusDetail()
+	}
 	switch {
 	case m.err != nil:
 		return "Error: " + m.err.Error() + "\n\nPress R to retry."

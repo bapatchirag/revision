@@ -1,8 +1,9 @@
 ╭─ [1] Status ─────────────────╮╭─ [0] Diff ───────────────────────────────────╮
-│https://svn.example.com/repo/t││changelist: feature-x                         │
-│r42                           ││                                              │
-│2 change(s)                   ││Loading diff…                                 │
-│━━━━━━━━━━━━━━━━━━━━━━━━━━────││                                              │
+│Root      /home/alice/work/wc ││changelist: feature-x                         │
+│Source    /home/alice/work/wc ││                                              │
+│CWD       /home/alice/work/wc ││Loading diff…                                 │
+│Revision  r42                 ││                                              │
+│                              ││                                              │
 ╰──────────────────────────────╯│                                              │
 ╭─ [2] ─ feature-x ────────────╮│                                              │
 │  ▾ /                         ││                                              │
@@ -14,7 +15,6 @@
 ╰──────────────────────────────╯│                                              │
 ╭─ [3] Log ────────────────────╮│                                              │
 │  Rev Author Message          ││                                              │
-│                              ││                                              │
 │                              ││                                              │
 │                              ││                                              │
 │                              ││                                              │

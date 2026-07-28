@@ -1,0 +1,30 @@
+╭─ [1] Status ─────────────────────────╮╭─ [0] About ──────────────────────────────────────────────╮
+│Root      /home/alice/work/wc         ││             _    _                                       │
+│Source    /home/alice/work/wc         ││ _ _ _____ _(_)__(_)___ _ _                               │
+│CWD       /home/alice/work/wc         ││| '_/ -_) V / (_-< / _ \ ' \                              │
+│Revision  r42                         ││|_| \___|\_/|_/__/_\___/_||_|                             │
+│                                      ││                                                          │
+╰──────────────────────────────────────╯│MIT © Chirag Bapat                                        │
+╭─ [2] ─ Changes ─── Changelists ──────╮│                                                          │
+│  ▾ /                                 ││Report an issue                                           │
+│      M modified.go                   ││  https://github.com/bapatchirag/revision/issues          │
+│                                      ││                                                          │
+│                                      ││Release notes                                             │
+│                                      ││  https://github.com/bapatchirag/revision/releases        │
+│                                      ││                                                          │
+│                                      ││Press S to review the active settings and any overrides.  │
+│                                      ││                                                          │
+│                                      ││                                                          │
+╰──────────────────────────────────────╯│                                                          │
+╭─ [3] Log ────────────────────────────╮│                                                          │
+│  Rev Author Message                  ││                                                          │
+│                                      ││                                                          │
+│                                      ││                                                          │
+│                                      ││                                                          │
+│                                      ││                                                          │
+│                                      ││                                                          │
+│                                      ││                                                          │
+│                                      ││                                                          │
+│                                      ││                                                          │
+╰──────────────────────────────────────╯╰──────────────────────────────────────────────────────────╯
+space stage · n changelist · c commit · r revert · d delete · ? help                                

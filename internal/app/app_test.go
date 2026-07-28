@@ -40,7 +40,14 @@ func sizedModel(t *testing.T) *Model {
 
 func sizedModelCfg(t *testing.T, cfg config.Config) *Model {
 	t.Helper()
-	m := New(nil, &svn.Info{URL: "https://svn.example.com/repo/trunk", Revision: "42"}, selfupdate.Build{}, cfg)
+	info := &svn.Info{
+		URL:             "https://svn.example.com/repo/trunk",
+		WorkingCopyRoot: "/home/alice/work/wc",
+		Revision:        "42",
+	}
+	m := New(svn.New("/home/alice/work/wc"), info, selfupdate.Build{}, cfg)
+	m.workDir = "/home/alice/work/wc"
+	m.refreshChrome()
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return next.(*Model)
 }
@@ -58,7 +65,7 @@ func TestModelRendersStatus(t *testing.T) {
 	})
 
 	view := stripANSI(m.View())
-	for _, want := range []string{"added.txt", "committed.txt", "svn.example.com", "r42", "2 change(s)"} {
+	for _, want := range []string{"added.txt", "committed.txt", "/home/alice/work/wc", "Revision", "r42"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q\n---\n%s", want, view)
 		}
@@ -581,6 +588,44 @@ func TestModelGoldenLayout(t *testing.T) {
 		{Path: "modified.go", State: svn.StateModified},
 		{Path: "gone.txt", State: svn.StateDeleted},
 	})
+	// History reveals HEAD (r50) so the Status panel shows every field.
+	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{{Revision: "50"}, {Revision: "42"}}})
+	m = next.(*Model)
+	golden.RequireEqual(t, []byte(m.View()))
+}
+
+func TestStatusPanelShowsAbout(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	// Widen so the full project URLs fit without horizontal scrolling.
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m = next.(*Model)
+	// Focusing the Status panel (1) turns Main into the about screen.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	m = next.(*Model)
+
+	view := stripANSI(m.View())
+	for _, want := range []string{
+		"revision/issues",
+		"revision/releases",
+		"Chirag Bapat",
+		"Press S",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("about screen missing %q\n---\n%s", want, view)
+		}
+	}
+}
+
+func TestStatusPanelAboutGolden(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = next.(*Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	m = next.(*Model)
 	golden.RequireEqual(t, []byte(m.View()))
 }
 
@@ -1319,15 +1364,16 @@ func TestRevisionIndicatorTracksUpdate(t *testing.T) {
 		{Revision: "50"}, {Revision: "49"}, {Revision: "42"},
 	}})
 	m = next.(*Model)
-	if view := stripANSI(m.View()); !strings.Contains(view, "r42 · HEAD r50") {
-		t.Errorf("expected the working copy shown trailing HEAD, got:\n%s", view)
+	// The Status panel lists the checked-out revision and HEAD on their own rows.
+	if view := stripANSI(m.View()); !strings.Contains(view, "Revision  r42") || !strings.Contains(view, "HEAD      r50") {
+		t.Errorf("expected the status panel to show r42 and HEAD r50, got:\n%s", view)
 	}
 
-	// Updating to HEAD moves the indicator to r50 and marks it as HEAD.
+	// Updating to HEAD moves the checked-out revision to r50.
 	next, _ = m.Update(updatedMsg{revision: "50"})
 	m = next.(*Model)
-	if view := stripANSI(m.View()); !strings.Contains(view, "r50 (HEAD)") {
-		t.Errorf("expected r50 (HEAD) after updating, got:\n%s", view)
+	if view := stripANSI(m.View()); !strings.Contains(view, "Revision  r50") {
+		t.Errorf("expected the checked-out revision to track to r50, got:\n%s", view)
 	}
 }
 

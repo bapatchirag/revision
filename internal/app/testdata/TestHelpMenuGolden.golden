@@ -1,20 +1,20 @@
 ╭─ [1] Status ──────╭─ Keybindings ────────────────────────╮───────────────────╮
-│https://svn.example│> Stage / unstage                space│                   │
-│r42                │  Assign changelist                  n│                   │
-│1 change(s)        │  Commit staged / changelist         c│                   │
-│━━━━━━━━━━━━━━━━━━━│  Switch file view               [ / ]│                   │
-╰───────────────────│  Expand changelist              enter│                   │
-╭─ [2] ─ Changes ───│  Revert file                        r│                   │
-│  ▾ /              │  Delete file                        d│                   │
-│>     M modified.go│  Update working copy                u│                   │
-│                   │  Update to revision (Log panel) space│                   │
+│Root      /home/ali│> Stage / unstage                space│                   │
+│Source    /home/ali│  Assign changelist                  n│                   │
+│CWD       /home/ali│  Commit staged / changelist         c│                   │
+│Revision  r42      │  Switch file view               [ / ]│                   │
+│                   │  Expand changelist              enter│                   │
+╰───────────────────│  Revert file                        r│                   │
+╭─ [2] ─ Changes ───│  Delete file                        d│                   │
+│  ▾ /              │  Update working copy                u│                   │
+│>     M modified.go│  Update to revision (Log panel) space│                   │
 │                   │  Refresh                            R│                   │
 │                   │  Edit settings                      S│                   │
 │                   │  Jump to panel                1 2 3 0│                   │
-╰───────────────────│  Cycle panels         tab / shift+tab│                   │
-╭─ [3] Log ─────────│  Move up / down                 k / j│                   │
-│  Rev Author Messag│  Jump top / bottom              g / G│                   │
-│                   │  Scroll main up / down          K / J│                   │
+│                   │  Cycle panels         tab / shift+tab│                   │
+╰───────────────────│  Move up / down                 k / j│                   │
+╭─ [3] Log ─────────│  Jump top / bottom              g / G│                   │
+│  Rev Author Messag│  Scroll main up / down          K / J│                   │
 │                   │  Scroll main left / right       h / l│                   │
 │                   │  Line start / end          home / end│                   │
 │                   │  Toggle directory diff              D│                   │
