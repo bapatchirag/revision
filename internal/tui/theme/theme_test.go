@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func TestByNameResolvesBuiltins(t *testing.T) {
@@ -60,6 +61,51 @@ func TestByNameUnknownFallsBackToAuto(t *testing.T) {
 	}
 	if got != Auto() {
 		t.Error(`ByName("nope") did not fall back to Auto()`)
+	}
+}
+
+func TestApplyColorProfileForcesTrueColorForNamedThemes(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	// Start from a downsampling profile so a change is observable.
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	for _, name := range []string{"everforest", "dracula", "nord", "gruvbox", "cipher"} {
+		lipgloss.SetColorProfile(termenv.ANSI256)
+		ApplyColorProfile(name)
+		if got := lipgloss.ColorProfile(); got != termenv.TrueColor {
+			t.Errorf("ApplyColorProfile(%q) profile = %v, want TrueColor", name, got)
+		}
+	}
+}
+
+func TestApplyColorProfileAutoRestoresDetected(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	// Force a non-detected profile, then auto must restore the detected one.
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	for _, name := range []string{"auto", "default", "  AUTO  "} {
+		lipgloss.SetColorProfile(termenv.TrueColor)
+		ApplyColorProfile(name)
+		if got := lipgloss.ColorProfile(); got != detectedProfile {
+			t.Errorf("ApplyColorProfile(%q) profile = %v, want detected %v", name, got, detectedProfile)
+		}
+	}
+}
+
+func TestApplyColorProfileDisabledIsNoOp(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() {
+		DisableColorProfile = false
+		lipgloss.SetColorProfile(prev)
+	})
+
+	DisableColorProfile = true
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	ApplyColorProfile("cipher")
+	if got := lipgloss.ColorProfile(); got != termenv.ANSI256 {
+		t.Errorf("disabled ApplyColorProfile changed profile to %v, want ANSI256", got)
 	}
 }
 

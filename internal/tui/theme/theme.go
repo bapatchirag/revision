@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 // Theme is a palette of semantic colors shared across the UI.
@@ -179,20 +180,56 @@ var aliases = map[string]string{
 	"gold":    "gruvbox",
 }
 
+// canonical normalizes a theme identifier for lookup: it lowercases, trims
+// surrounding space, and resolves any accepted alias (see aliases) to its
+// built-in name.
+func canonical(name string) string {
+	key := strings.ToLower(strings.TrimSpace(name))
+	if canon, ok := aliases[key]; ok {
+		key = canon
+	}
+	return key
+}
+
 // ByName resolves a theme identifier to its palette. The lookup is
 // case-insensitive and trims surrounding space; a few aliases (see aliases) are
 // accepted so older or more intuitive config values keep working. The boolean
 // reports whether name matched a built-in theme or alias; on no match it returns
 // Auto so callers always get a usable palette.
 func ByName(name string) (Theme, bool) {
-	key := strings.ToLower(strings.TrimSpace(name))
-	if canon, ok := aliases[key]; ok {
-		key = canon
-	}
+	key := canonical(name)
 	for _, n := range registry {
 		if n.Name == key {
 			return n.Theme, true
 		}
 	}
 	return Auto(), false
+}
+
+// detectedProfile is the terminal's color profile as auto-detected at process
+// start, captured before any theme forces an override. ApplyColorProfile
+// restores it for the auto theme so that theme keeps adapting to the terminal.
+var detectedProfile = lipgloss.ColorProfile()
+
+// DisableColorProfile makes ApplyColorProfile a no-op. Tests set it so that
+// exercising theme switches never disturbs the deterministic profile the golden
+// suite pins in TestMain.
+var DisableColorProfile bool
+
+// ApplyColorProfile aligns Lip Gloss's global color profile with the selected
+// theme. The named themes are defined in true-color hex, so forcing the
+// TrueColor profile stops Lip Gloss from downsampling them to whatever the
+// terminal advertises: they then render identically whether revision runs in a
+// VS Code remote-SSH terminal (which reports TrueColor) or a bare SSH session
+// (which often reports only ANSI256). The auto theme restores the terminal's
+// detected profile so it stays adaptive.
+func ApplyColorProfile(name string) {
+	if DisableColorProfile {
+		return
+	}
+	if canonical(name) == "auto" {
+		lipgloss.SetColorProfile(detectedProfile)
+		return
+	}
+	lipgloss.SetColorProfile(termenv.TrueColor)
 }

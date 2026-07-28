@@ -17,6 +17,7 @@ import (
 	"github.com/bapatchirag/revision/internal/selfupdate"
 	"github.com/bapatchirag/revision/internal/sshagent"
 	"github.com/bapatchirag/revision/internal/svn"
+	"github.com/bapatchirag/revision/internal/tui/theme"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -103,6 +104,11 @@ func run(path string, build selfupdate.Build) error {
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "revision: using default config:", err)
 	}
+
+	// Named themes are true-color; pin the color profile so they render
+	// identically regardless of what the terminal advertises. Auto keeps the
+	// terminal's detected profile so it stays adaptive.
+	theme.ApplyColorProfile(cfg.Theme)
 
 	model := app.New(client, info, build, cfg)
 	model.SetStartupNotice(rec.Notice())

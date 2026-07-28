@@ -1444,6 +1444,9 @@ func (m *Model) chooseUpdate(index int) tea.Cmd {
 func (m *Model) previewTheme(name string) {
 	th, _ := theme.ByName(name)
 	m.theme = th
+	// Pin the color profile before re-theming so the palette (and the diff
+	// re-colorized by refreshChrome) renders in the profile the theme expects.
+	theme.ApplyColorProfile(name)
 	for _, p := range m.panels {
 		p.SetTheme(th)
 	}
