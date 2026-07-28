@@ -19,6 +19,7 @@ type Modal struct {
 	id      string
 	title   string
 	message string
+	hint    string
 	width   int
 	focused bool
 	theme   theme.Theme
@@ -34,7 +35,7 @@ var (
 
 // NewModal builds a confirmation modal.
 func NewModal(id, title, message string, th theme.Theme, keys keymap.KeyMap) *Modal {
-	return &Modal{id: id, title: title, message: message, theme: th, keys: keys}
+	return &Modal{id: id, title: title, message: message, hint: "enter confirm · esc cancel", theme: th, keys: keys}
 }
 
 // SetPrompt replaces the modal's title and message so a single modal can be
@@ -42,6 +43,10 @@ func NewModal(id, title, message string, th theme.Theme, keys keymap.KeyMap) *Mo
 func (mo *Modal) SetPrompt(title, message string) {
 	mo.title, mo.message = title, message
 }
+
+// SetHint overrides the footer hint. Passing "" renders a non-interactive modal
+// (no confirm/cancel prompt), e.g. a progress box.
+func (mo *Modal) SetHint(hint string) { mo.hint = hint }
 
 // Init implements tui.Component.
 func (mo *Modal) Init() tea.Cmd { return nil }
@@ -84,14 +89,19 @@ func (mo *Modal) SetTheme(th theme.Theme) { mo.theme = th }
 // View renders the modal as a titled box. When sized, a long message is
 // word-wrapped to the box width; unsized (width ≤ 0) the box hugs its content.
 func (mo *Modal) View() string {
-	hint := "enter confirm · esc cancel"
 	if mo.width <= 0 {
-		body := []string{mo.message, "", hint}
+		body := []string{mo.message}
+		if mo.hint != "" {
+			body = append(body, "", mo.hint)
+		}
 		innerW := maxWidth(append([]string{" " + mo.title + " "}, body...))
 		return box(strings.Join(body, "\n"), mo.title, innerW, len(body), mo.theme, mo.focused)
 	}
 	innerW := mo.width - 2
 	wrapped := lipgloss.NewStyle().Width(innerW).Render(mo.message)
-	body := append(strings.Split(wrapped, "\n"), "", hint)
+	body := strings.Split(wrapped, "\n")
+	if mo.hint != "" {
+		body = append(body, "", mo.hint)
+	}
 	return box(strings.Join(body, "\n"), mo.title, innerW, len(body), mo.theme, mo.focused)
 }

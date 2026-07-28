@@ -1328,6 +1328,45 @@ func TestRevisionIndicatorTracksUpdate(t *testing.T) {
 	}
 }
 
+func TestUpdateShowsProgressModal(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	// History reveals HEAD r50; the working copy opens at r42.
+	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+		{Revision: "50"}, {Revision: "42"},
+	}})
+	m = next.(*Model)
+
+	// u (off the Log panel) confirms a HEAD update; with no conflicts the single
+	// confirm dispatches it and raises the progress modal.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	m = next.(*Model)
+	m, cmd := confirmModal(t, m)
+	if !m.updatingWC {
+		t.Fatal("expected the updating overlay after confirming")
+	}
+	if cmd == nil {
+		t.Error("expected the update command to run")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "Updating from r42 to r50") {
+		t.Errorf("expected the progress modal, got:\n%s", view)
+	}
+
+	// While the update runs, keys are swallowed so the panels stay put.
+	if _, kc := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}); kc != nil {
+		t.Error("keys should be ignored while the update runs")
+	}
+
+	// Completion clears the overlay.
+	next, _ = m.Update(updatedMsg{revision: "50"})
+	m = next.(*Model)
+	if m.updatingWC {
+		t.Error("the overlay should clear when the update completes")
+	}
+	if view := stripANSI(m.View()); strings.Contains(view, "Updating from") {
+		t.Errorf("the progress modal should be gone after completion, got:\n%s", view)
+	}
+}
+
 func TestUpdateToRevisionConfirms(t *testing.T) {
 	m := loadItems(t, sizedModel(t), nil)
 	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{

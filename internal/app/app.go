@@ -110,6 +110,7 @@ type Model struct {
 	nameEditor *component.Prompt
 	passEditor *component.Prompt
 	modal      *component.Modal
+	progress   *component.Modal
 	menu       *component.Menu
 	updateMenu *component.Menu
 	form       *component.Form
@@ -151,8 +152,11 @@ type Model struct {
 	pending       tea.Cmd
 	// updateConflictPrompt stages a second "conflicts will be skipped" confirm shown after the default update confirm.
 	updateConflictPrompt string
-	showingToast         bool
-	startupNotice        string
+	// updatingWC is true while an svn update runs, showing the progress modal.
+	updatingWC     bool
+	updateProgress string
+	showingToast   bool
+	startupNotice  string
 
 	build        selfupdate.Build
 	updating     bool
@@ -212,6 +216,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		nameEditor:      component.NewPrompt(changelistEditorID, "Changelist name", "e.g. feature-x", th, keys),
 		passEditor:      component.NewPrompt(passphraseEditorID, "SSH key passphrase", "passphrase for "+cfg.SSHKeyPath, th, keys),
 		modal:           component.NewModal(confirmModalID, "", "", th, keys),
+		progress:        component.NewModal("update-progress", "", "", th, keys),
 		menu:            component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
 		updateMenu:      component.NewMenu(updateMenuID, "Update available", updateMenuItems(), th, keys),
 		form:            component.NewForm(settingsFormID, "Settings", settingsFields(cfg, cfg.DirectoryDiff), th, keys),
@@ -229,6 +234,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		loading:         true,
 	}
 	m.passEditor.SetSecret(true)
+	m.progress.SetHint("")
 	m.focus = focus.New(panels[panelStatus], panels[panelFiles], panels[panelLog], panels[panelMain])
 	m.focus.Focus(panelFiles)
 
@@ -287,6 +293,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.unlocking {
 			m.sizeUnlock()
+		}
+		if m.updatingWC {
+			m.sizeProgress()
 		}
 		return m, nil
 
@@ -380,6 +389,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, loadStatusCmd(m.client)
 
 	case updatedMsg:
+		m.updatingWC = false
+		m.updateProgress = ""
 		if msg.err != nil {
 			m.loading = false
 			m.showToast(failureText("update", msg.err), component.LevelError)
@@ -512,6 +523,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			cmd := m.pending
 			m.pending = nil
+			if m.updateProgress != "" {
+				// The pending command is an svn update; show the progress modal
+				// until it completes (cleared in the updatedMsg handler).
+				m.showUpdating()
+			}
 			return m, cmd
 		}
 		return m, nil
@@ -533,6 +549,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.closeConfirm()
 			m.pending = nil
 			m.updateConflictPrompt = ""
+			m.updateProgress = ""
 		case updateMenuID:
 			m.closeUpdate()
 		case settingsFormID:
@@ -546,6 +563,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.aborting {
 			// A fatal SSH error is on screen; any key quits so the user can retry.
 			return m, tea.Quit
+		}
+		if m.updatingWC {
+			// An svn update is running behind the progress modal; ignore keys so
+			// they can't disturb the panels until it completes.
+			return m, nil
 		}
 		if m.unlocking {
 			// While the entered passphrase is being added, the input is locked so
@@ -624,6 +646,8 @@ func (m *Model) View() string {
 		view = m.overlayToast(view)
 	}
 	switch {
+	case m.updatingWC:
+		view = m.overlayCenter(view, m.progress.View())
 	case m.unlocking:
 		view = m.overlayCenter(view, m.passEditor.View())
 	case m.editing:
@@ -1270,6 +1294,7 @@ func deleteDirectoryMessage(n fileNode, acts []deleteAction) string {
 func (m *Model) requestUpdate() tea.Cmd {
 	m.pending = updateCmd(m.client)
 	m.updateConflictPrompt = conflictUpdatePrompt(m.conflictedPaths(), "the latest revision")
+	m.updateProgress = updateProgressText(m.wcRevision, m.headRevision())
 	m.openConfirm("Update working copy?", "Update the working copy to the latest revision? Uncommitted changes are kept and merged.")
 	return nil
 }
@@ -1285,6 +1310,7 @@ func (m *Model) requestUpdateToRevision() tea.Cmd {
 	}
 	m.pending = updateToRevisionCmd(m.client, entry.Revision)
 	m.updateConflictPrompt = conflictUpdatePrompt(m.conflictedPaths(), "r"+entry.Revision)
+	m.updateProgress = updateProgressText(m.wcRevision, entry.Revision)
 	m.openConfirm("Update to revision?", "Update the working copy to r"+entry.Revision+"? Uncommitted changes are kept and merged.")
 	return nil
 }
@@ -1317,6 +1343,21 @@ func conflictUpdatePrompt(conflicts []string, target string) string {
 		subject = fmt.Sprintf("%d files are", n)
 	}
 	return fmt.Sprintf("%s already in conflict and will be left untouched; the rest of the working copy will still update to %s. Continue?", subject, target)
+}
+
+// updateProgressText builds the message shown in the progress modal while an svn
+// update runs, e.g. "Updating from r38 to r50…". An unknown target falls back to
+// "HEAD" so the box still reads sensibly before history has loaded.
+func updateProgressText(from, to string) string {
+	fromLabel := "the current revision"
+	if from != "" {
+		fromLabel = "r" + from
+	}
+	toLabel := "HEAD"
+	if to != "" {
+		toLabel = "r" + to
+	}
+	return fmt.Sprintf("Updating from %s to %s…", fromLabel, toLabel)
 }
 
 // openConfirm arms the shared modal with a prompt and shows it; the pending
@@ -1708,6 +1749,21 @@ func isNamedChangelist(cl string) bool {
 func (m *Model) sizeModal() {
 	w := clamp(m.width/2, 34, max(m.width-6, 34))
 	m.modal.SetSize(w, 0)
+}
+
+// showUpdating raises the progress modal for the staged update message and marks
+// an update in flight; the updatedMsg handler clears it when svn returns.
+func (m *Model) showUpdating() {
+	m.updatingWC = true
+	m.progress.SetPrompt("", m.updateProgress)
+	m.progress.Focus()
+	m.sizeProgress()
+}
+
+// sizeProgress sizes the update-progress modal like the confirmation modal.
+func (m *Model) sizeProgress() {
+	w := clamp(m.width/2, 34, max(m.width-6, 34))
+	m.progress.SetSize(w, 0)
 }
 
 // sizeMenu sizes the help menu to a centered portion of the screen (only its
