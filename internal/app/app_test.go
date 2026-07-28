@@ -1245,8 +1245,58 @@ func TestDeleteDirectoryNothingToDelete(t *testing.T) {
 
 func TestUpdateRunsCommand(t *testing.T) {
 	m := loadItems(t, sizedModel(t), nil)
-	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}}); cmd == nil {
-		t.Error("u should run an update command")
+	// u (off the Log panel) confirms an update to the latest revision; with no
+	// conflicts the single confirm runs the update.
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	m = next.(*Model)
+	if !m.confirming {
+		t.Fatal("u should open the update confirmation")
+	}
+	if cmd != nil {
+		t.Error("opening the modal should not run a command yet")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "Update working copy?") {
+		t.Errorf("expected the update confirm, got:\n%s", view)
+	}
+	m, cmd = confirmModal(t, m)
+	if m.confirming {
+		t.Error("the modal should close after confirming")
+	}
+	if cmd == nil {
+		t.Error("confirming should run the update command")
+	}
+}
+
+func TestUpdateToHeadConflictAsksAgain(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "conflicted.go", State: svn.StateConflicted},
+	})
+	// Default focus is the Files panel, so u targets HEAD rather than a revision.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	m = next.(*Model)
+	if view := stripANSI(m.View()); !strings.Contains(view, "Update working copy?") {
+		t.Fatalf("expected the default update confirm, got:\n%s", view)
+	}
+
+	// Accepting the first confirm surfaces the conflict warning, not the update.
+	m, cmd := confirmModal(t, m)
+	if cmd != nil {
+		t.Error("the update must not run before the conflict confirm is accepted")
+	}
+	if !m.confirming {
+		t.Fatal("a second confirmation should be open when conflicts exist")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "Conflicts present") || !strings.Contains(view, "untouched") {
+		t.Errorf("expected the conflict warning, got:\n%s", view)
+	}
+
+	// Accepting the conflict warning runs the update.
+	m, cmd = confirmModal(t, m)
+	if m.confirming {
+		t.Error("both modals should be closed after the second confirm")
+	}
+	if cmd == nil {
+		t.Error("expected the update command after the second confirm")
 	}
 }
 
@@ -1256,6 +1306,299 @@ func TestUpdateResultShowsToast(t *testing.T) {
 	m = next.(*Model)
 	if view := stripANSI(m.View()); !strings.Contains(view, "updated to r7") {
 		t.Errorf("expected the update toast, got:\n%s", view)
+	}
+}
+
+func TestRevisionIndicatorTracksUpdate(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	// History (newest first) reveals HEAD as r50; the working copy opens at r42.
+	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+		{Revision: "50"}, {Revision: "49"}, {Revision: "42"},
+	}})
+	m = next.(*Model)
+	if view := stripANSI(m.View()); !strings.Contains(view, "r42 · HEAD r50") {
+		t.Errorf("expected the working copy shown trailing HEAD, got:\n%s", view)
+	}
+
+	// Updating to HEAD moves the indicator to r50 and marks it as HEAD.
+	next, _ = m.Update(updatedMsg{revision: "50"})
+	m = next.(*Model)
+	if view := stripANSI(m.View()); !strings.Contains(view, "r50 (HEAD)") {
+		t.Errorf("expected r50 (HEAD) after updating, got:\n%s", view)
+	}
+}
+
+func TestLogStarsWorkingCopyRevision(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	// The working copy opens at r42 (from info); history includes it.
+	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+		{Revision: "50"}, {Revision: "42"}, {Revision: "41"},
+	}})
+	m = next.(*Model)
+	if view := stripANSI(m.View()); !strings.Contains(view, "* r42") {
+		t.Errorf("expected an asterisk on the working-copy revision r42, got:\n%s", view)
+	}
+	if view := stripANSI(m.View()); strings.Contains(view, "* r50") {
+		t.Errorf("only the working-copy revision should be starred, got:\n%s", view)
+	}
+
+	// After updating to r50 the star follows the working copy.
+	next, _ = m.Update(updatedMsg{revision: "50"})
+	m = next.(*Model)
+	if view := stripANSI(m.View()); !strings.Contains(view, "* r50") {
+		t.Errorf("expected the asterisk to move to r50 after updating, got:\n%s", view)
+	}
+}
+
+func TestRenderLogRowColorsWorkingCopyAsterisk(t *testing.T) {
+	// Emit ANSI so the styling is observable, then restore the Ascii profile.
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+	th := theme.Default()
+
+	// The working-copy row carries a coloured asterisk that strips to "* r42".
+	star := renderLogRow(svn.LogEntry{Revision: "42"}, "42", th)[0]
+	if stripANSI(star) == star {
+		t.Errorf("expected the asterisk to be coloured (ANSI), got plain %q", star)
+	}
+	if got := stripANSI(star); got != "* r42" {
+		t.Errorf("marker cell should read %q, got %q", "* r42", got)
+	}
+
+	// Other rows are a plain, unstyled two-space prefix of the same width.
+	other := renderLogRow(svn.LogEntry{Revision: "41"}, "42", th)[0]
+	if other != "  r41" {
+		t.Errorf("non-working-copy row should be plain %q, got %q", "  r41", other)
+	}
+}
+
+func TestUpdateShowsProgressModal(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	// History reveals HEAD r50; the working copy opens at r42.
+	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+		{Revision: "50"}, {Revision: "42"},
+	}})
+	m = next.(*Model)
+
+	// u (off the Log panel) confirms a HEAD update; with no conflicts the single
+	// confirm dispatches it and raises the progress modal. The exact target is
+	// only known once svn reports it, so the box names "the latest revision".
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	m = next.(*Model)
+	m, cmd := confirmModal(t, m)
+	if !m.updatingWC {
+		t.Fatal("expected the updating overlay after confirming")
+	}
+	if cmd == nil {
+		t.Error("expected the update command to run")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "Updating from r42 to the latest revision") {
+		t.Errorf("expected the progress modal, got:\n%s", view)
+	}
+
+	// While the update runs, keys are swallowed so the panels stay put.
+	if _, kc := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}); kc != nil {
+		t.Error("keys should be ignored while the update runs")
+	}
+
+	// Completion clears the overlay.
+	next, _ = m.Update(updatedMsg{revision: "50"})
+	m = next.(*Model)
+	if m.updatingWC {
+		t.Error("the overlay should clear when the update completes")
+	}
+	if view := stripANSI(m.View()); strings.Contains(view, "Updating from") {
+		t.Errorf("the progress modal should be gone after completion, got:\n%s", view)
+	}
+}
+
+func TestUpdateToRevisionProgressShowsTarget(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+		{Revision: "50"}, {Revision: "42"},
+	}})
+	m = next.(*Model)
+	// Focus the Log panel (r50 is the selected row) and update to it with space.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m = next.(*Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = next.(*Model)
+	m, _ = confirmModal(t, m)
+	// A specific revision is known up front, so the box names it exactly.
+	if view := stripANSI(m.View()); !strings.Contains(view, "Updating from r42 to r50") {
+		t.Errorf("expected the exact target revision in the progress modal, got:\n%s", view)
+	}
+}
+
+func TestUpdateToRevisionConfirms(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+		{Revision: "42", Author: "alice", Message: "first"},
+		{Revision: "41", Author: "bob", Message: "second"},
+	}})
+	m = next.(*Model)
+
+	// Focus the Log panel (key "3"), then space targets the selected revision.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m = next.(*Model)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = next.(*Model)
+	if !m.confirming {
+		t.Fatal("space on the Log panel should open the confirmation modal")
+	}
+	if cmd != nil {
+		t.Error("opening the modal should not run a command yet")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "Update to revision?") || !strings.Contains(view, "r42") {
+		t.Errorf("expected the update-to-revision prompt, got:\n%s", view)
+	}
+
+	// Confirming turns into the update command.
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected a ConfirmMsg command from the modal")
+	}
+	conf, ok := cmd().(uimsg.ConfirmMsg)
+	if !ok {
+		t.Fatalf("expected ConfirmMsg, got %T", cmd())
+	}
+	next, cmd = m.Update(conf)
+	m = next.(*Model)
+	if m.confirming {
+		t.Error("the modal should close after confirming")
+	}
+	if cmd == nil {
+		t.Error("expected an update command after confirming")
+	}
+}
+
+func TestUpdateToRevisionNoSelectionWarns(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	// Focus the Log panel; with no history there is nothing to select.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m = next.(*Model)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = next.(*Model)
+	if m.confirming {
+		t.Error("no revision selected should not open the modal")
+	}
+	if cmd != nil {
+		t.Error("no revision selected should not run a command")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "no revision selected") {
+		t.Errorf("expected a guard toast, got:\n%s", view)
+	}
+}
+
+// focusLogWithRevision loads a single revision, focuses the Log panel, and
+// returns the model ready for an update-to-revision keypress.
+func focusLogWithRevision(t *testing.T, items []svn.StatusItem) *Model {
+	t.Helper()
+	m := loadItems(t, sizedModel(t), items)
+	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+		{Revision: "42", Author: "alice", Message: "first"},
+	}})
+	m = next.(*Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	return next.(*Model)
+}
+
+// confirmModal presses enter on the open confirmation modal and feeds the
+// resulting ConfirmMsg back into the model, returning the follow-up command.
+func confirmModal(t *testing.T, m *Model) (*Model, tea.Cmd) {
+	t.Helper()
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("the modal should emit a command on enter")
+	}
+	conf, ok := cmd().(uimsg.ConfirmMsg)
+	if !ok {
+		t.Fatalf("expected ConfirmMsg, got %T", cmd())
+	}
+	next, out := m.Update(conf)
+	return next.(*Model), out
+}
+
+func TestUpdateToRevisionConflictAsksAgain(t *testing.T) {
+	m := focusLogWithRevision(t, []svn.StatusItem{
+		{Path: "conflicted.go", State: svn.StateConflicted},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = next.(*Model)
+	if view := stripANSI(m.View()); !strings.Contains(view, "Update to revision?") {
+		t.Fatalf("expected the default update confirm, got:\n%s", view)
+	}
+
+	// Accepting the first confirm surfaces the conflict warning rather than
+	// running the update.
+	m, cmd := confirmModal(t, m)
+	if cmd != nil {
+		t.Error("the update must not run before the conflict confirm is accepted")
+	}
+	if !m.confirming {
+		t.Fatal("a second confirmation should be open when conflicts exist")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "Conflicts present") || !strings.Contains(view, "untouched") {
+		t.Errorf("expected the conflict warning, got:\n%s", view)
+	}
+
+	// Accepting the conflict warning finally runs the update.
+	m, cmd = confirmModal(t, m)
+	if m.confirming {
+		t.Error("both modals should be closed after the second confirm")
+	}
+	if cmd == nil {
+		t.Error("expected the update command after the second confirm")
+	}
+}
+
+func TestUpdateToRevisionNoConflictSkipsSecondConfirm(t *testing.T) {
+	m := focusLogWithRevision(t, []svn.StatusItem{
+		{Path: "clean.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = next.(*Model)
+
+	// With no conflicts the single confirm runs the update directly.
+	m, cmd := confirmModal(t, m)
+	if m.confirming {
+		t.Error("a clean working copy should not open a second confirmation")
+	}
+	if cmd == nil {
+		t.Error("expected the update command straight after the only confirm")
+	}
+}
+
+func TestUpdateToRevisionConflictCancelAborts(t *testing.T) {
+	m := focusLogWithRevision(t, []svn.StatusItem{
+		{Path: "conflicted.go", State: svn.StateConflicted},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = next.(*Model)
+	m, _ = confirmModal(t, m) // accept the first confirm to reach the warning
+	if !m.confirming {
+		t.Fatal("expected the conflict confirmation to be open")
+	}
+
+	// Cancelling the conflict warning drops the staged update entirely.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd == nil {
+		t.Fatal("esc should emit a dismiss command")
+	}
+	dis, ok := cmd().(uimsg.DismissMsg)
+	if !ok {
+		t.Fatalf("expected DismissMsg, got %T", cmd())
+	}
+	next, _ = m.Update(dis)
+	m = next.(*Model)
+	if m.confirming {
+		t.Error("cancelling should close the modal")
+	}
+	if m.pending != nil {
+		t.Error("cancelling must clear the pending update")
+	}
+	if m.updateConflictPrompt != "" {
+		t.Error("cancelling must clear the staged conflict prompt")
 	}
 }
 

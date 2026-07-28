@@ -14,7 +14,19 @@ var updatedRevisionRE = regexp.MustCompile(`(?m)^(?:Updated to|At) revision (\d+
 // and returns the revision it is now at, parsed from svn's output (empty when
 // none was reported).
 func (c *Client) Update(ctx context.Context) (string, error) {
-	out, err := c.run(ctx, "update")
+	return c.update(ctx, "update")
+}
+
+// UpdateToRevision moves the working copy to a specific revision (svn update -r
+// <rev>), which may take it backwards or forwards in history. It returns the
+// revision the working copy is now at, parsed from svn's output.
+func (c *Client) UpdateToRevision(ctx context.Context, rev string) (string, error) {
+	return c.update(ctx, "update", "-r", rev)
+}
+
+// update runs an svn update variant and returns the revision it reports.
+func (c *Client) update(ctx context.Context, args ...string) (string, error) {
+	out, err := c.run(ctx, args...)
 	if err != nil {
 		return "", err
 	}

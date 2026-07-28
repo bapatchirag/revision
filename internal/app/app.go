@@ -110,6 +110,7 @@ type Model struct {
 	nameEditor *component.Prompt
 	passEditor *component.Prompt
 	modal      *component.Modal
+	progress   *component.Modal
 	menu       *component.Menu
 	updateMenu *component.Menu
 	form       *component.Form
@@ -123,6 +124,7 @@ type Model struct {
 	clItems          []svn.StatusItem
 	clCollapsedDirs  map[string]bool
 	logEntries       []svn.LogEntry
+	wcRevision       string
 
 	source        mainSource
 	diffPath      string
@@ -148,8 +150,13 @@ type Model struct {
 	aborting      bool
 	passAttempts  int
 	pending       tea.Cmd
-	showingToast  bool
-	startupNotice string
+	// updateConflictPrompt stages a second "conflicts will be skipped" confirm shown after the default update confirm.
+	updateConflictPrompt string
+	// updatingWC is true while an svn update runs, showing the progress modal.
+	updatingWC     bool
+	updateProgress string
+	showingToast   bool
+	startupNotice  string
 
 	build        selfupdate.Build
 	updating     bool
@@ -172,6 +179,10 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	th, _ := theme.ByName(cfg.Theme)
 	keys := keymap.Default()
 
+	// m is captured by the log renderer below so a row can be starred when it
+	// matches the working-copy revision; it is assigned before any render runs.
+	var m *Model
+
 	status := component.NewViewport(th, keys)
 	files := component.NewList[fileNode]("files", renderFileNode(th), th, keys)
 	changelists := component.NewList[changelistGroup](changelistsListID, renderChangelistGroup(th), th, keys)
@@ -180,7 +191,9 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		{Name: "Changes", Content: files},
 		{Name: "Changelists", Content: changelists},
 	}, th, keys)
-	logTable := component.NewTable[svn.LogEntry]("log", logColumns(), renderLogRow, th, keys)
+	logTable := component.NewTable[svn.LogEntry]("log", logColumns(), func(it svn.LogEntry) []string {
+		return renderLogRow(it, m.wcRevision, m.theme)
+	}, th, keys)
 	main := component.NewViewport(th, keys)
 
 	panels := []*component.Panel{
@@ -190,7 +203,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		component.NewPanel("Main", 0, main, th),
 	}
 
-	m := &Model{
+	m = &Model{
 		client:          client,
 		info:            info,
 		theme:           th,
@@ -209,6 +222,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		nameEditor:      component.NewPrompt(changelistEditorID, "Changelist name", "e.g. feature-x", th, keys),
 		passEditor:      component.NewPrompt(passphraseEditorID, "SSH key passphrase", "passphrase for "+cfg.SSHKeyPath, th, keys),
 		modal:           component.NewModal(confirmModalID, "", "", th, keys),
+		progress:        component.NewModal("update-progress", "", "", th, keys),
 		menu:            component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
 		updateMenu:      component.NewMenu(updateMenuID, "Update available", updateMenuItems(), th, keys),
 		form:            component.NewForm(settingsFormID, "Settings", settingsFields(cfg, cfg.DirectoryDiff), th, keys),
@@ -226,9 +240,13 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		loading:         true,
 	}
 	m.passEditor.SetSecret(true)
+	m.progress.SetHint("")
 	m.focus = focus.New(panels[panelStatus], panels[panelFiles], panels[panelLog], panels[panelMain])
 	m.focus.Focus(panelFiles)
 
+	if info != nil {
+		m.wcRevision = info.Revision
+	}
 	m.refreshChrome()
 	return m
 }
@@ -282,6 +300,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.unlocking {
 			m.sizeUnlock()
 		}
+		if m.updatingWC {
+			m.sizeProgress()
+		}
 		return m, nil
 
 	case statusLoadedMsg:
@@ -300,6 +321,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logErr = msg.err
 		m.logEntries = msg.entries
 		m.applyLogFilter()
+		// History reveals HEAD, shown by the revision indicator next to the
+		// working-copy revision, so refresh the Status panel and bar.
+		m.updateStatus()
+		m.updateBar()
 		if m.source == sourceLog {
 			m.updateMain()
 		}
@@ -342,6 +367,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.revision != "" {
+			m.wcRevision = msg.revision
 			m.showToast("committed r"+msg.revision, component.LevelSuccess)
 		} else {
 			m.showToast("commit complete", component.LevelSuccess)
@@ -369,6 +395,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, loadStatusCmd(m.client)
 
 	case updatedMsg:
+		m.updatingWC = false
+		m.updateProgress = ""
 		if msg.err != nil {
 			m.loading = false
 			m.showToast(failureText("update", msg.err), component.LevelError)
@@ -376,11 +404,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.revision != "" {
+			m.wcRevision = msg.revision
 			m.showToast("updated to r"+msg.revision, component.LevelSuccess)
 		} else {
 			m.showToast("update complete", component.LevelSuccess)
 		}
 		m.diffPath, m.diffText = "", ""
+		m.updateStatus()
+		m.updateBar()
 		return m, tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client))
 
 	case updateAvailableMsg:
@@ -488,8 +519,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uimsg.ConfirmMsg:
 		if msg.ID == confirmModalID {
 			m.closeConfirm()
+			if prompt := m.updateConflictPrompt; prompt != "" {
+				// The default update confirm was accepted, but the working copy
+				// holds conflicts svn would silently skip: confirm once more,
+				// spelling that out, before actually updating.
+				m.updateConflictPrompt = ""
+				m.openConfirm("Conflicts present — continue?", prompt)
+				return m, nil
+			}
 			cmd := m.pending
 			m.pending = nil
+			if m.updateProgress != "" {
+				// The pending command is an svn update; show the progress modal
+				// until it completes (cleared in the updatedMsg handler).
+				m.showUpdating()
+			}
 			return m, cmd
 		}
 		return m, nil
@@ -510,6 +554,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case confirmModalID:
 			m.closeConfirm()
 			m.pending = nil
+			m.updateConflictPrompt = ""
+			m.updateProgress = ""
 		case updateMenuID:
 			m.closeUpdate()
 		case settingsFormID:
@@ -523,6 +569,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.aborting {
 			// A fatal SSH error is on screen; any key quits so the user can retry.
 			return m, tea.Quit
+		}
+		if m.updatingWC {
+			// An svn update is running behind the progress modal; ignore keys so
+			// they can't disturb the panels until it completes.
+			return m, nil
 		}
 		if m.unlocking {
 			// While the entered passphrase is being added, the input is locked so
@@ -601,6 +652,8 @@ func (m *Model) View() string {
 		view = m.overlayToast(view)
 	}
 	switch {
+	case m.updatingWC:
+		view = m.overlayCenter(view, m.progress.View())
 	case m.unlocking:
 		view = m.overlayCenter(view, m.passEditor.View())
 	case m.editing:
@@ -702,8 +755,11 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		m.focus.Focus(panelMain)
 		return m.afterFocusChange(), true
 	case " ":
-		if m.focus.Index() == panelFiles {
+		switch m.focus.Index() {
+		case panelFiles:
 			return m.stageSelected(), true
+		case panelLog:
+			return m.requestUpdateToRevision(), true
 		}
 		return nil, false
 	case "n":
@@ -1238,11 +1294,73 @@ func deleteDirectoryMessage(n fileNode, acts []deleteAction) string {
 	return strings.Join(parts, "; ") + "."
 }
 
-// requestUpdate brings the working copy up to date with the repository.
+// requestUpdate brings the working copy up to date with the repository's latest
+// revision. It confirms first — like the update-to-revision flow — and adds a
+// second confirmation when the working copy already holds conflicts svn skips.
 func (m *Model) requestUpdate() tea.Cmd {
-	m.loading = true
-	m.refreshChrome()
-	return updateCmd(m.client)
+	m.pending = updateCmd(m.client)
+	m.updateConflictPrompt = conflictUpdatePrompt(m.conflictedPaths(), "the latest revision")
+	m.updateProgress = updateProgressText(m.wcRevision, "the latest revision")
+	m.openConfirm("Update working copy?", "Update the working copy to the latest revision? Uncommitted changes are kept and merged.")
+	return nil
+}
+
+// requestUpdateToRevision updates the working copy to the revision selected in
+// the Log panel. Because this can move the working copy backwards in history, it
+// asks for confirmation first; with no revision selected it warns instead.
+func (m *Model) requestUpdateToRevision() tea.Cmd {
+	entry, ok := m.log.Selected()
+	if !ok {
+		m.showToast("no revision selected", component.LevelWarning)
+		return nil
+	}
+	m.pending = updateToRevisionCmd(m.client, entry.Revision)
+	m.updateConflictPrompt = conflictUpdatePrompt(m.conflictedPaths(), "r"+entry.Revision)
+	m.updateProgress = updateProgressText(m.wcRevision, "r"+entry.Revision)
+	m.openConfirm("Update to revision?", "Update the working copy to r"+entry.Revision+"? Uncommitted changes are kept and merged.")
+	return nil
+}
+
+// conflictedPaths returns the working-copy paths currently in a conflicted
+// state, from the last-loaded status. svn update skips these — they stay in
+// conflict while everything else moves — so they drive the extra confirmation.
+func (m *Model) conflictedPaths() []string {
+	var paths []string
+	for _, it := range m.fileItems {
+		if it.State == svn.StateConflicted {
+			paths = append(paths, it.Path)
+		}
+	}
+	return paths
+}
+
+// conflictUpdatePrompt builds the additional confirmation shown before updating
+// when the working copy already holds conflicts, spelling out that svn leaves
+// those files untouched and updates the rest to target (e.g. "r42" or "the
+// latest revision"). It returns "" when nothing is in conflict, which suppresses
+// the extra step.
+func conflictUpdatePrompt(conflicts []string, target string) string {
+	n := len(conflicts)
+	if n == 0 {
+		return ""
+	}
+	subject := "1 file is"
+	if n > 1 {
+		subject = fmt.Sprintf("%d files are", n)
+	}
+	return fmt.Sprintf("%s already in conflict and will be left untouched; the rest of the working copy will still update to %s. Continue?", subject, target)
+}
+
+// updateProgressText builds the message shown in the progress modal while an svn
+// update runs, e.g. "Updating from r38 to r50…". target is a ready-made label:
+// "r50" for a specific revision, or "the latest revision" for a HEAD update whose
+// exact number svn only reports on completion.
+func updateProgressText(from, target string) string {
+	fromLabel := "the current revision"
+	if from != "" {
+		fromLabel = "r" + from
+	}
+	return fmt.Sprintf("Updating from %s to %s…", fromLabel, target)
 }
 
 // openConfirm arms the shared modal with a prompt and shows it; the pending
@@ -1476,6 +1594,7 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Revert file", Key: "r"},
 		{Label: "Delete file", Key: "d"},
 		{Label: "Update working copy", Key: "u"},
+		{Label: "Update to revision (Log panel)", Key: "space"},
 		{Label: "Refresh", Key: "R"},
 		{Label: "Edit settings", Key: "S"},
 		{Label: "Jump to panel", Key: "1 2 3 0"},
@@ -1633,6 +1752,22 @@ func isNamedChangelist(cl string) bool {
 func (m *Model) sizeModal() {
 	w := clamp(m.width/2, 34, max(m.width-6, 34))
 	m.modal.SetSize(w, 0)
+}
+
+// showUpdating raises the progress modal for the staged update message and marks
+// an update in flight; the updatedMsg handler clears it when svn returns.
+func (m *Model) showUpdating() {
+	m.updatingWC = true
+	m.progress.SetPrompt("", m.updateProgress)
+	m.progress.Focus()
+	m.sizeProgress()
+}
+
+// sizeProgress widths the update-progress modal to fit its one-line message,
+// capped to the screen so a narrow terminal wraps instead of overflowing.
+func (m *Model) sizeProgress() {
+	w := clamp(lipgloss.Width(m.updateProgress)+4, 34, max(m.width-6, 34))
+	m.progress.SetSize(w, 0)
 }
 
 // sizeMenu sizes the help menu to a centered portion of the screen (only its
@@ -2028,10 +2163,42 @@ func (m *Model) refreshChrome() {
 func (m *Model) updateStatus() {
 	lines := make([]string, 0, 3)
 	if m.info != nil {
-		lines = append(lines, m.info.URL, "r"+m.info.Revision)
+		lines = append(lines, m.info.URL)
+	}
+	if rev := m.revisionLabel(); rev != "" {
+		lines = append(lines, rev)
 	}
 	lines = append(lines, fmt.Sprintf("%d change(s)", len(m.fileItems)))
 	m.status.SetContent(strings.Join(lines, "\n"))
+}
+
+// headRevision returns the repository's latest revision, taken from the newest
+// log entry (history is pegged at HEAD, so entry 0 is HEAD). It is empty until
+// history has loaded.
+func (m *Model) headRevision() string {
+	if len(m.logEntries) == 0 {
+		return ""
+	}
+	return m.logEntries[0].Revision
+}
+
+// revisionLabel describes where the working copy sits relative to the
+// repository: its current revision and, once history has loaded, whether that is
+// HEAD or how far behind it trails. It is empty only before either is known.
+func (m *Model) revisionLabel() string {
+	wc, head := m.wcRevision, m.headRevision()
+	switch {
+	case wc == "" && head == "":
+		return ""
+	case wc == "":
+		return "HEAD r" + head
+	case head == "":
+		return "r" + wc
+	case head == wc:
+		return "r" + wc + " (HEAD)"
+	default:
+		return "r" + wc + " · HEAD r" + head
+	}
 }
 
 // updateMain fills the Main panel from whichever side panel currently drives it.
@@ -2229,7 +2396,11 @@ func (m *Model) updateBar() {
 	case m.loading:
 		m.bar.SetRight("loading…")
 	case m.info != nil:
-		m.bar.SetRight(fmt.Sprintf("%s @ r%s", m.info.URL, m.info.Revision))
+		right := m.info.URL
+		if rev := m.revisionLabel(); rev != "" {
+			right += " @ " + rev
+		}
+		m.bar.SetRight(right)
 	default:
 		m.bar.SetRight("")
 	}
@@ -2272,6 +2443,9 @@ func (m *Model) baseHint() string {
 			return "space unstage · c commit · esc back · [ ] view · ? help"
 		}
 		return "enter expand · c commit · [ ] view · n name · ? help"
+	}
+	if m.focus.Index() == panelLog {
+		return "space update to rev · c commit · ? help"
 	}
 	return "space stage · n changelist · c commit · r revert · d delete · ? help"
 }

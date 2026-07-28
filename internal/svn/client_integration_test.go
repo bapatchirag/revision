@@ -339,3 +339,31 @@ func TestIntegrationUpdate(t *testing.T) {
 		t.Errorf("shared.txt should exist in wc2 after update: %v", err)
 	}
 }
+
+func TestIntegrationUpdateToRevision(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+
+	// Two commits: first.txt lands in r1, second.txt in r2.
+	writeFile(t, filepath.Join(wc, "first.txt"), "one\n")
+	mustRun(t, wc, "svn", "add", "first.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "first")
+	writeFile(t, filepath.Join(wc, "second.txt"), "two\n")
+	mustRun(t, wc, "svn", "add", "second.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "second")
+
+	// Updating back to r1 drops second.txt and reports the revision.
+	rev, err := New(wc).UpdateToRevision(ctx, "1")
+	if err != nil {
+		t.Fatalf("UpdateToRevision: %v", err)
+	}
+	if rev != "1" {
+		t.Errorf("UpdateToRevision() = %q, want %q", rev, "1")
+	}
+	if _, err := os.Stat(filepath.Join(wc, "second.txt")); !os.IsNotExist(err) {
+		t.Errorf("second.txt should be gone after updating to r1, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wc, "first.txt")); err != nil {
+		t.Errorf("first.txt should remain after updating to r1: %v", err)
+	}
+}
