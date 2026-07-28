@@ -1309,6 +1309,25 @@ func TestUpdateResultShowsToast(t *testing.T) {
 	}
 }
 
+func TestRevisionIndicatorTracksUpdate(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	// History (newest first) reveals HEAD as r50; the working copy opens at r42.
+	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+		{Revision: "50"}, {Revision: "49"}, {Revision: "42"},
+	}})
+	m = next.(*Model)
+	if view := stripANSI(m.View()); !strings.Contains(view, "r42 · HEAD r50") {
+		t.Errorf("expected the working copy shown trailing HEAD, got:\n%s", view)
+	}
+
+	// Updating to HEAD moves the indicator to r50 and marks it as HEAD.
+	next, _ = m.Update(updatedMsg{revision: "50"})
+	m = next.(*Model)
+	if view := stripANSI(m.View()); !strings.Contains(view, "r50 (HEAD)") {
+		t.Errorf("expected r50 (HEAD) after updating, got:\n%s", view)
+	}
+}
+
 func TestUpdateToRevisionConfirms(t *testing.T) {
 	m := loadItems(t, sizedModel(t), nil)
 	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{

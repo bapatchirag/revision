@@ -123,6 +123,7 @@ type Model struct {
 	clItems          []svn.StatusItem
 	clCollapsedDirs  map[string]bool
 	logEntries       []svn.LogEntry
+	wcRevision       string
 
 	source        mainSource
 	diffPath      string
@@ -231,6 +232,9 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	m.focus = focus.New(panels[panelStatus], panels[panelFiles], panels[panelLog], panels[panelMain])
 	m.focus.Focus(panelFiles)
 
+	if info != nil {
+		m.wcRevision = info.Revision
+	}
 	m.refreshChrome()
 	return m
 }
@@ -302,6 +306,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logErr = msg.err
 		m.logEntries = msg.entries
 		m.applyLogFilter()
+		// History reveals HEAD, shown by the revision indicator next to the
+		// working-copy revision, so refresh the Status panel and bar.
+		m.updateStatus()
+		m.updateBar()
 		if m.source == sourceLog {
 			m.updateMain()
 		}
@@ -344,6 +352,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.revision != "" {
+			m.wcRevision = msg.revision
 			m.showToast("committed r"+msg.revision, component.LevelSuccess)
 		} else {
 			m.showToast("commit complete", component.LevelSuccess)
@@ -378,11 +387,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.revision != "" {
+			m.wcRevision = msg.revision
 			m.showToast("updated to r"+msg.revision, component.LevelSuccess)
 		} else {
 			m.showToast("update complete", component.LevelSuccess)
 		}
 		m.diffPath, m.diffText = "", ""
+		m.updateStatus()
+		m.updateBar()
 		return m, tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client))
 
 	case updateAvailableMsg:
@@ -2091,10 +2103,42 @@ func (m *Model) refreshChrome() {
 func (m *Model) updateStatus() {
 	lines := make([]string, 0, 3)
 	if m.info != nil {
-		lines = append(lines, m.info.URL, "r"+m.info.Revision)
+		lines = append(lines, m.info.URL)
+	}
+	if rev := m.revisionLabel(); rev != "" {
+		lines = append(lines, rev)
 	}
 	lines = append(lines, fmt.Sprintf("%d change(s)", len(m.fileItems)))
 	m.status.SetContent(strings.Join(lines, "\n"))
+}
+
+// headRevision returns the repository's latest revision, taken from the newest
+// log entry (history is pegged at HEAD, so entry 0 is HEAD). It is empty until
+// history has loaded.
+func (m *Model) headRevision() string {
+	if len(m.logEntries) == 0 {
+		return ""
+	}
+	return m.logEntries[0].Revision
+}
+
+// revisionLabel describes where the working copy sits relative to the
+// repository: its current revision and, once history has loaded, whether that is
+// HEAD or how far behind it trails. It is empty only before either is known.
+func (m *Model) revisionLabel() string {
+	wc, head := m.wcRevision, m.headRevision()
+	switch {
+	case wc == "" && head == "":
+		return ""
+	case wc == "":
+		return "HEAD r" + head
+	case head == "":
+		return "r" + wc
+	case head == wc:
+		return "r" + wc + " (HEAD)"
+	default:
+		return "r" + wc + " · HEAD r" + head
+	}
 }
 
 // updateMain fills the Main panel from whichever side panel currently drives it.
@@ -2292,7 +2336,11 @@ func (m *Model) updateBar() {
 	case m.loading:
 		m.bar.SetRight("loading…")
 	case m.info != nil:
-		m.bar.SetRight(fmt.Sprintf("%s @ r%s", m.info.URL, m.info.Revision))
+		right := m.info.URL
+		if rev := m.revisionLabel(); rev != "" {
+			right += " @ " + rev
+		}
+		m.bar.SetRight(right)
 	default:
 		m.bar.SetRight("")
 	}
