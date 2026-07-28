@@ -84,6 +84,7 @@ type mainSource int
 const (
 	sourceFiles mainSource = iota
 	sourceLog
+	sourceStatus
 )
 
 // Model is the root Bubble Tea model. It composes reusable components into the
@@ -1834,6 +1835,8 @@ func (m *Model) handleSelection(sel uimsg.SelectedMsg) tea.Cmd {
 // loads a diff when Main now follows the Files panel.
 func (m *Model) afterFocusChange() tea.Cmd {
 	switch m.focus.Index() {
+	case panelStatus:
+		m.source = sourceStatus
 	case panelLog:
 		m.source = sourceLog
 	case panelMain:
@@ -1851,13 +1854,13 @@ func (m *Model) afterFocusChange() tea.Cmd {
 }
 
 // syncMainTitle names the Main panel after the focused side panel: the Status
-// panel makes it "Status", the Files panel "Diff", and the Log panel "Commit
+// panel makes it "About", the Files panel "Diff", and the Log panel "Commit
 // message". Focusing Main itself leaves the heading unchanged, so it keeps
 // naming whichever side panel last drove it.
 func (m *Model) syncMainTitle() {
 	switch m.focus.Index() {
 	case panelStatus:
-		m.panels[panelMain].SetTitle("Status")
+		m.panels[panelMain].SetTitle("About")
 	case panelFiles:
 		m.panels[panelMain].SetTitle("Diff")
 	case panelLog:
@@ -2255,6 +2258,9 @@ func (m *Model) updateMain() {
 // mainContent computes the raw Main text for the current state, setting the diff
 // gutter as a side effect when it renders a unified diff.
 func (m *Model) mainContent() string {
+	if m.source == sourceStatus {
+		return m.statusDetail()
+	}
 	switch {
 	case m.err != nil:
 		return "Error: " + m.err.Error() + "\n\nPress R to retry."

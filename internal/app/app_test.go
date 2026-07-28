@@ -594,6 +594,41 @@ func TestModelGoldenLayout(t *testing.T) {
 	golden.RequireEqual(t, []byte(m.View()))
 }
 
+func TestStatusPanelShowsAbout(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	// Widen so the full project URLs fit without horizontal scrolling.
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m = next.(*Model)
+	// Focusing the Status panel (1) turns Main into the about screen.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	m = next.(*Model)
+
+	view := stripANSI(m.View())
+	for _, want := range []string{
+		"revision/issues",
+		"revision/releases",
+		"Chirag Bapat",
+		"Press S",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("about screen missing %q\n---\n%s", want, view)
+		}
+	}
+}
+
+func TestStatusPanelAboutGolden(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = next.(*Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	m = next.(*Model)
+	golden.RequireEqual(t, []byte(m.View()))
+}
+
 func TestStageTargetDecision(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "mod.go", State: svn.StateModified},
