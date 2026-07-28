@@ -7,7 +7,7 @@
 ╭─ [2] ─ Changes ───│  Revert file                        r│                   │
 │  ▾ /              │  Delete file                        d│                   │
 │>     M modified.go│  Update working copy                u│                   │
-│                   │  Update to revision (Log panel)     u│                   │
+│                   │  Update to revision (Log panel) space│                   │
 │                   │  Refresh                            R│                   │
 │                   │  Edit settings                      S│                   │
 │                   │  Jump to panel                1 2 3 0│                   │

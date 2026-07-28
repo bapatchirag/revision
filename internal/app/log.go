@@ -3,8 +3,11 @@ package app
 import (
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/bapatchirag/revision/internal/svn"
 	"github.com/bapatchirag/revision/internal/tui/component"
+	"github.com/bapatchirag/revision/internal/tui/theme"
 )
 
 // logLimit caps how many recent revisions the Log panel loads.
@@ -24,9 +27,16 @@ func logColumns() []component.Column {
 }
 
 // renderLogRow is the domain adapter that turns an svn.LogEntry into the cells
-// the reusable Table renders, keeping the Table component domain-agnostic.
-func renderLogRow(it svn.LogEntry) []string {
-	return []string{"r" + it.Revision, it.Author, firstLine(it.Message)}
+// the reusable Table renders, keeping the Table component domain-agnostic. The
+// revision the working copy currently sits at (wcRevision) is marked with a
+// leading coloured asterisk; every other row gets the same two-cell blank prefix
+// so the Rev column stays aligned.
+func renderLogRow(it svn.LogEntry, wcRevision string, th theme.Theme) []string {
+	marker := "  "
+	if wcRevision != "" && it.Revision == wcRevision {
+		marker = lipgloss.NewStyle().Foreground(th.Accent).Render("*") + " "
+	}
+	return []string{marker + "r" + it.Revision, it.Author, firstLine(it.Message)}
 }
 
 // firstLine returns the first line of s, used to keep multi-line commit messages

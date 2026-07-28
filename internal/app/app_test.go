@@ -1328,6 +1328,50 @@ func TestRevisionIndicatorTracksUpdate(t *testing.T) {
 	}
 }
 
+func TestLogStarsWorkingCopyRevision(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	// The working copy opens at r42 (from info); history includes it.
+	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+		{Revision: "50"}, {Revision: "42"}, {Revision: "41"},
+	}})
+	m = next.(*Model)
+	if view := stripANSI(m.View()); !strings.Contains(view, "* r42") {
+		t.Errorf("expected an asterisk on the working-copy revision r42, got:\n%s", view)
+	}
+	if view := stripANSI(m.View()); strings.Contains(view, "* r50") {
+		t.Errorf("only the working-copy revision should be starred, got:\n%s", view)
+	}
+
+	// After updating to r50 the star follows the working copy.
+	next, _ = m.Update(updatedMsg{revision: "50"})
+	m = next.(*Model)
+	if view := stripANSI(m.View()); !strings.Contains(view, "* r50") {
+		t.Errorf("expected the asterisk to move to r50 after updating, got:\n%s", view)
+	}
+}
+
+func TestRenderLogRowColorsWorkingCopyAsterisk(t *testing.T) {
+	// Emit ANSI so the styling is observable, then restore the Ascii profile.
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+	th := theme.Default()
+
+	// The working-copy row carries a coloured asterisk that strips to "* r42".
+	star := renderLogRow(svn.LogEntry{Revision: "42"}, "42", th)[0]
+	if stripANSI(star) == star {
+		t.Errorf("expected the asterisk to be coloured (ANSI), got plain %q", star)
+	}
+	if got := stripANSI(star); got != "* r42" {
+		t.Errorf("marker cell should read %q, got %q", "* r42", got)
+	}
+
+	// Other rows are a plain, unstyled two-space prefix of the same width.
+	other := renderLogRow(svn.LogEntry{Revision: "41"}, "42", th)[0]
+	if other != "  r41" {
+		t.Errorf("non-working-copy row should be plain %q, got %q", "  r41", other)
+	}
+}
+
 func TestUpdateShowsProgressModal(t *testing.T) {
 	m := loadItems(t, sizedModel(t), nil)
 	// History reveals HEAD r50; the working copy opens at r42.
@@ -1374,10 +1418,10 @@ func TestUpdateToRevisionProgressShowsTarget(t *testing.T) {
 		{Revision: "50"}, {Revision: "42"},
 	}})
 	m = next.(*Model)
-	// Focus the Log panel (r50 is the selected row) and update to it.
+	// Focus the Log panel (r50 is the selected row) and update to it with space.
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
 	m = next.(*Model)
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = next.(*Model)
 	m, _ = confirmModal(t, m)
 	// A specific revision is known up front, so the box names it exactly.
@@ -1394,13 +1438,13 @@ func TestUpdateToRevisionConfirms(t *testing.T) {
 	}})
 	m = next.(*Model)
 
-	// Focus the Log panel (key "3"), then u targets the selected revision.
+	// Focus the Log panel (key "3"), then space targets the selected revision.
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
 	m = next.(*Model)
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = next.(*Model)
 	if !m.confirming {
-		t.Fatal("u on the Log panel should open the confirmation modal")
+		t.Fatal("space on the Log panel should open the confirmation modal")
 	}
 	if cmd != nil {
 		t.Error("opening the modal should not run a command yet")
@@ -1433,7 +1477,7 @@ func TestUpdateToRevisionNoSelectionWarns(t *testing.T) {
 	// Focus the Log panel; with no history there is nothing to select.
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
 	m = next.(*Model)
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = next.(*Model)
 	if m.confirming {
 		t.Error("no revision selected should not open the modal")
@@ -1479,7 +1523,7 @@ func TestUpdateToRevisionConflictAsksAgain(t *testing.T) {
 	m := focusLogWithRevision(t, []svn.StatusItem{
 		{Path: "conflicted.go", State: svn.StateConflicted},
 	})
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = next.(*Model)
 	if view := stripANSI(m.View()); !strings.Contains(view, "Update to revision?") {
 		t.Fatalf("expected the default update confirm, got:\n%s", view)
@@ -1512,7 +1556,7 @@ func TestUpdateToRevisionNoConflictSkipsSecondConfirm(t *testing.T) {
 	m := focusLogWithRevision(t, []svn.StatusItem{
 		{Path: "clean.go", State: svn.StateModified},
 	})
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = next.(*Model)
 
 	// With no conflicts the single confirm runs the update directly.
@@ -1529,7 +1573,7 @@ func TestUpdateToRevisionConflictCancelAborts(t *testing.T) {
 	m := focusLogWithRevision(t, []svn.StatusItem{
 		{Path: "conflicted.go", State: svn.StateConflicted},
 	})
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = next.(*Model)
 	m, _ = confirmModal(t, m) // accept the first confirm to reach the warning
 	if !m.confirming {

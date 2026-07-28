@@ -179,6 +179,10 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	th, _ := theme.ByName(cfg.Theme)
 	keys := keymap.Default()
 
+	// m is captured by the log renderer below so a row can be starred when it
+	// matches the working-copy revision; it is assigned before any render runs.
+	var m *Model
+
 	status := component.NewViewport(th, keys)
 	files := component.NewList[fileNode]("files", renderFileNode(th), th, keys)
 	changelists := component.NewList[changelistGroup](changelistsListID, renderChangelistGroup(th), th, keys)
@@ -187,7 +191,9 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		{Name: "Changes", Content: files},
 		{Name: "Changelists", Content: changelists},
 	}, th, keys)
-	logTable := component.NewTable[svn.LogEntry]("log", logColumns(), renderLogRow, th, keys)
+	logTable := component.NewTable[svn.LogEntry]("log", logColumns(), func(it svn.LogEntry) []string {
+		return renderLogRow(it, m.wcRevision, m.theme)
+	}, th, keys)
 	main := component.NewViewport(th, keys)
 
 	panels := []*component.Panel{
@@ -197,7 +203,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		component.NewPanel("Main", 0, main, th),
 	}
 
-	m := &Model{
+	m = &Model{
 		client:          client,
 		info:            info,
 		theme:           th,
@@ -749,8 +755,11 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		m.focus.Focus(panelMain)
 		return m.afterFocusChange(), true
 	case " ":
-		if m.focus.Index() == panelFiles {
+		switch m.focus.Index() {
+		case panelFiles:
 			return m.stageSelected(), true
+		case panelLog:
+			return m.requestUpdateToRevision(), true
 		}
 		return nil, false
 	case "n":
@@ -781,9 +790,6 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		}
 		return nil, false
 	case "u":
-		if m.focus.Index() == panelLog {
-			return m.requestUpdateToRevision(), true
-		}
 		return m.requestUpdate(), true
 	case "D":
 		return m.toggleDirDiff(), true
@@ -1588,7 +1594,7 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Revert file", Key: "r"},
 		{Label: "Delete file", Key: "d"},
 		{Label: "Update working copy", Key: "u"},
-		{Label: "Update to revision (Log panel)", Key: "u"},
+		{Label: "Update to revision (Log panel)", Key: "space"},
 		{Label: "Refresh", Key: "R"},
 		{Label: "Edit settings", Key: "S"},
 		{Label: "Jump to panel", Key: "1 2 3 0"},
@@ -2439,7 +2445,7 @@ func (m *Model) baseHint() string {
 		return "enter expand · c commit · [ ] view · n name · ? help"
 	}
 	if m.focus.Index() == panelLog {
-		return "u update to rev · c commit · ? help"
+		return "space update to rev · c commit · ? help"
 	}
 	return "space stage · n changelist · c commit · r revert · d delete · ? help"
 }
