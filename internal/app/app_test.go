@@ -1337,7 +1337,8 @@ func TestUpdateShowsProgressModal(t *testing.T) {
 	m = next.(*Model)
 
 	// u (off the Log panel) confirms a HEAD update; with no conflicts the single
-	// confirm dispatches it and raises the progress modal.
+	// confirm dispatches it and raises the progress modal. The exact target is
+	// only known once svn reports it, so the box names "the latest revision".
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
 	m = next.(*Model)
 	m, cmd := confirmModal(t, m)
@@ -1347,7 +1348,7 @@ func TestUpdateShowsProgressModal(t *testing.T) {
 	if cmd == nil {
 		t.Error("expected the update command to run")
 	}
-	if view := stripANSI(m.View()); !strings.Contains(view, "Updating from r42 to r50") {
+	if view := stripANSI(m.View()); !strings.Contains(view, "Updating from r42 to the latest revision") {
 		t.Errorf("expected the progress modal, got:\n%s", view)
 	}
 
@@ -1364,6 +1365,24 @@ func TestUpdateShowsProgressModal(t *testing.T) {
 	}
 	if view := stripANSI(m.View()); strings.Contains(view, "Updating from") {
 		t.Errorf("the progress modal should be gone after completion, got:\n%s", view)
+	}
+}
+
+func TestUpdateToRevisionProgressShowsTarget(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+		{Revision: "50"}, {Revision: "42"},
+	}})
+	m = next.(*Model)
+	// Focus the Log panel (r50 is the selected row) and update to it.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m = next.(*Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	m = next.(*Model)
+	m, _ = confirmModal(t, m)
+	// A specific revision is known up front, so the box names it exactly.
+	if view := stripANSI(m.View()); !strings.Contains(view, "Updating from r42 to r50") {
+		t.Errorf("expected the exact target revision in the progress modal, got:\n%s", view)
 	}
 }
 

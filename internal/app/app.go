@@ -1294,7 +1294,7 @@ func deleteDirectoryMessage(n fileNode, acts []deleteAction) string {
 func (m *Model) requestUpdate() tea.Cmd {
 	m.pending = updateCmd(m.client)
 	m.updateConflictPrompt = conflictUpdatePrompt(m.conflictedPaths(), "the latest revision")
-	m.updateProgress = updateProgressText(m.wcRevision, m.headRevision())
+	m.updateProgress = updateProgressText(m.wcRevision, "the latest revision")
 	m.openConfirm("Update working copy?", "Update the working copy to the latest revision? Uncommitted changes are kept and merged.")
 	return nil
 }
@@ -1310,7 +1310,7 @@ func (m *Model) requestUpdateToRevision() tea.Cmd {
 	}
 	m.pending = updateToRevisionCmd(m.client, entry.Revision)
 	m.updateConflictPrompt = conflictUpdatePrompt(m.conflictedPaths(), "r"+entry.Revision)
-	m.updateProgress = updateProgressText(m.wcRevision, entry.Revision)
+	m.updateProgress = updateProgressText(m.wcRevision, "r"+entry.Revision)
 	m.openConfirm("Update to revision?", "Update the working copy to r"+entry.Revision+"? Uncommitted changes are kept and merged.")
 	return nil
 }
@@ -1346,18 +1346,15 @@ func conflictUpdatePrompt(conflicts []string, target string) string {
 }
 
 // updateProgressText builds the message shown in the progress modal while an svn
-// update runs, e.g. "Updating from r38 to r50…". An unknown target falls back to
-// "HEAD" so the box still reads sensibly before history has loaded.
-func updateProgressText(from, to string) string {
+// update runs, e.g. "Updating from r38 to r50…". target is a ready-made label:
+// "r50" for a specific revision, or "the latest revision" for a HEAD update whose
+// exact number svn only reports on completion.
+func updateProgressText(from, target string) string {
 	fromLabel := "the current revision"
 	if from != "" {
 		fromLabel = "r" + from
 	}
-	toLabel := "HEAD"
-	if to != "" {
-		toLabel = "r" + to
-	}
-	return fmt.Sprintf("Updating from %s to %s…", fromLabel, toLabel)
+	return fmt.Sprintf("Updating from %s to %s…", fromLabel, target)
 }
 
 // openConfirm arms the shared modal with a prompt and shows it; the pending
@@ -1760,9 +1757,10 @@ func (m *Model) showUpdating() {
 	m.sizeProgress()
 }
 
-// sizeProgress sizes the update-progress modal like the confirmation modal.
+// sizeProgress widths the update-progress modal to fit its one-line message,
+// capped to the screen so a narrow terminal wraps instead of overflowing.
 func (m *Model) sizeProgress() {
-	w := clamp(m.width/2, 34, max(m.width-6, 34))
+	w := clamp(lipgloss.Width(m.updateProgress)+4, 34, max(m.width-6, 34))
 	m.progress.SetSize(w, 0)
 }
 
