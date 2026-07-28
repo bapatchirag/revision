@@ -243,6 +243,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	m.progress.SetHint("")
 	m.focus = focus.New(panels[panelStatus], panels[panelFiles], panels[panelLog], panels[panelMain])
 	m.focus.Focus(panelFiles)
+	m.syncMainTitle()
 
 	if info != nil {
 		m.wcRevision = info.Revision
@@ -1836,12 +1837,28 @@ func (m *Model) afterFocusChange() tea.Cmd {
 	default:
 		m.source = sourceFiles
 	}
+	m.syncMainTitle()
 	m.updateBar()
 	m.updateMain()
 	if m.source == sourceFiles {
 		return m.diffLoadForSelection()
 	}
 	return nil
+}
+
+// syncMainTitle names the Main panel after the focused side panel: the Status
+// panel makes it "Status", the Files panel "Diff", and the Log panel "Commit
+// message". Focusing Main itself leaves the heading unchanged, so it keeps
+// naming whichever side panel last drove it.
+func (m *Model) syncMainTitle() {
+	switch m.focus.Index() {
+	case panelStatus:
+		m.panels[panelMain].SetTitle("Status")
+	case panelFiles:
+		m.panels[panelMain].SetTitle("Diff")
+	case panelLog:
+		m.panels[panelMain].SetTitle("Commit message")
+	}
 }
 
 // diffLoadForSelection returns a command to load the diff that Main should show

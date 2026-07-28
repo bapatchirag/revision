@@ -87,6 +87,10 @@ func (p *Panel) titleText() string {
 	return p.title
 }
 
+// SetTitle replaces the panel's heading so a single panel can be reused with a
+// changing title, such as the Main panel naming whichever side panel drives it.
+func (p *Panel) SetTitle(title string) { p.title = title }
+
 // SetSize sets the panel's outer size and propagates the inner size to the
 // child when it is sizeable.
 func (p *Panel) SetSize(width, height int) {
