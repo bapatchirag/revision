@@ -23,6 +23,9 @@ import (
 
 func TestMain(m *testing.M) {
 	lipgloss.SetColorProfile(termenv.Ascii)
+	// Theme switches call theme.ApplyColorProfile, which would otherwise force
+	// TrueColor and break the golden suite's deterministic Ascii output.
+	theme.DisableColorProfile = true
 	os.Exit(m.Run())
 }
 
