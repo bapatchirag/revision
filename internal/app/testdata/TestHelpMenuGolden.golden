@@ -10,15 +10,15 @@
 │>     M modified.go│  Update to revision (Log panel) space│                   │
 │                   │  Refresh                            R│                   │
 │                   │  Edit settings                      S│                   │
-│                   │  Jump to panel                1 2 3 0│                   │
+│                   │  Jump to panel              1 2 3 4 0│                   │
 │                   │  Cycle panels         tab / shift+tab│                   │
 ╰────────────────── │  Move up / down                 k / j│                   │
 ╭─ [3] Log ─────────│  Jump top / bottom              g / G│                   │
-│  Rev Author Messag│  Scroll main up / down          K / J│                   │
-│                   │  Scroll main left / right       h / l│                   │
+│  Rev Author Messag│  Scroll main up / down          K / J│───────────────────╯
+│                   │  Scroll main left / right       h / l│───────────────────╮
 │                   │  Line start / end          home / end│                   │
-│                   │  Toggle directory diff              D│                   │
-│                   │  Toggle untracked                   U│                   │
+│                   │  Toggle dir diff / untracked    D / U│                   │
+│                   │  Toggle command log                 x│                   │
 │                   │  Filter panel                       /│                   │
 ╰───────────────────│  Toggle help                        ?│───────────────────╯
 space stage · n chan│  Quit                               q│· ? help            

@@ -33,6 +33,9 @@ const (
 	panelFiles  = 1
 	panelLog    = 2
 	panelMain   = 3
+	// panelCmdLog is the command-log panel below Main. It is last in the focus
+	// ring and is skipped by Tab while hidden.
+	panelCmdLog = 4
 )
 
 // stagedChangelist is the SVN changelist name revision uses to emulate a
@@ -106,6 +109,12 @@ type Model struct {
 	log         *component.Table[svn.LogEntry]
 	main        *component.Viewport
 
+	// cmdLogView displays cmdLog: the svn commands revision runs and their
+	// output, shown in a toggleable panel below Main.
+	cmdLogView *component.Viewport
+	cmdLog     *commandLog
+	cmdLogSeen int64
+
 	panels     []*component.Panel
 	bar        *component.StatusBar
 	editor     *component.TextArea
@@ -135,25 +144,28 @@ type Model struct {
 	diffText      string
 	dirDiff       bool
 	hideUntracked bool
-	logErr        error
-	editing       bool
-	naming        bool
-	filtering     bool
-	filterPanel   int
-	filters       map[int]string
-	nameTargets   []changelistTarget
-	drilledCL     string
-	commitCL      string
-	themeBefore   string
-	confirming    bool
-	helping       bool
-	configuring   bool
-	needsSSHKey   bool
-	unlocking     bool
-	adding        bool
-	aborting      bool
-	passAttempts  int
-	pending       tea.Cmd
+	// showCmdLog controls whether the command-log panel below Main is displayed.
+	// It defaults to on and is toggled at runtime; it is not persisted.
+	showCmdLog   bool
+	logErr       error
+	editing      bool
+	naming       bool
+	filtering    bool
+	filterPanel  int
+	filters      map[int]string
+	nameTargets  []changelistTarget
+	drilledCL    string
+	commitCL     string
+	themeBefore  string
+	confirming   bool
+	helping      bool
+	configuring  bool
+	needsSSHKey  bool
+	unlocking    bool
+	adding       bool
+	aborting     bool
+	passAttempts int
+	pending      tea.Cmd
 	// updateConflictPrompt stages a second "conflicts will be skipped" confirm shown after the default update confirm.
 	updateConflictPrompt string
 	// updatingWC is true while an svn update runs, showing the progress modal.
@@ -199,12 +211,14 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		return renderLogRow(it, m.wcRevision, m.theme)
 	}, th, keys)
 	main := component.NewViewport(th, keys)
+	cmdLogView := component.NewViewport(th, keys)
 
 	panels := []*component.Panel{
 		component.NewPanel("Status", 1, status, th),
 		component.NewPanel("Files", 2, filesViews, th),
 		component.NewPanel("Log", 3, logTable, th),
 		component.NewPanel("Main", 0, main, th),
+		component.NewPanel("Command Log", 4, cmdLogView, th),
 	}
 
 	m = &Model{
@@ -220,6 +234,8 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		filesViews:      filesViews,
 		log:             logTable,
 		main:            main,
+		cmdLogView:      cmdLogView,
+		cmdLog:          newCommandLog(commandLogLimit),
 		panels:          panels,
 		bar:             component.NewStatusBar(th),
 		editor:          component.NewTextArea(commitEditorID, "Commit message", "Enter a commit message…", th, keys),
@@ -238,6 +254,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		source:          sourceFiles,
 		dirDiff:         cfg.DirectoryDiff,
 		hideUntracked:   cfg.HideUntracked,
+		showCmdLog:      true,
 		needsSSHKey:     info != nil && info.IsOverSSH(),
 		commitCL:        stagedChangelist,
 		build:           build,
@@ -245,7 +262,20 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	}
 	m.passEditor.SetSecret(true)
 	m.progress.SetHint("")
-	m.focus = focus.New(panels[panelStatus], panels[panelFiles], panels[panelLog], panels[panelMain])
+	// Mirror user-initiated svn actions into the command log, skipping the
+	// read-only queries revision runs automatically. The recorder is set before
+	// Init runs any command, so no action is missed.
+	if m.client != nil {
+		log := m.cmdLog
+		m.client.Recorder = func(r svn.CommandRecord) {
+			if isReadOnlyCommand(r.Subcommand) {
+				return
+			}
+			log.record(r)
+		}
+	}
+	m.cmdLogView.SetContent(m.renderCommandLog(nil))
+	m.focus = focus.New(panels[panelStatus], panels[panelFiles], panels[panelLog], panels[panelMain], panels[panelCmdLog])
 	m.focus.Focus(panelFiles)
 	m.syncMainTitle()
 
@@ -281,6 +311,9 @@ func (m *Model) Init() tea.Cmd {
 // Update handles messages, global keys, and forwards the rest to the focused
 // panel.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Refresh the command log from any invocations that finished since the last
+	// message; every svn command completes by delivering a message here.
+	m.syncCommandLog()
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -698,7 +731,8 @@ func (m *Model) overlayToast(base string) string {
 }
 
 // baseView renders the lazygit layout: the left column of panels beside Main,
-// over the status bar.
+// over the status bar. When the command log is shown it sits below Main in the
+// right column.
 func (m *Model) baseView() string {
 	m.panels[panelFiles].SetFooter(m.filesFooter())
 	left := lipgloss.JoinVertical(lipgloss.Left,
@@ -706,7 +740,11 @@ func (m *Model) baseView() string {
 		m.panels[panelFiles].View(),
 		m.panels[panelLog].View(),
 	)
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, m.panels[panelMain].View())
+	right := m.panels[panelMain].View()
+	if m.showCmdLog {
+		right = lipgloss.JoinVertical(lipgloss.Left, right, m.panels[panelCmdLog].View())
+	}
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	// While a filter is being typed the search bar takes the status bar's row so
 	// the panel content stays fully visible above it.
 	bottom := m.bar.View()
@@ -728,15 +766,17 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		m.refreshChrome()
 		return tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client)), true
 	case key.Matches(k, m.keys.FocusNext):
-		m.focus.Next()
+		m.focusNextPanel()
 		return m.afterFocusChange(), true
 	case key.Matches(k, m.keys.FocusPrev):
-		m.focus.Prev()
+		m.focusPrevPanel()
 		return m.afterFocusChange(), true
 	case key.Matches(k, m.keys.Settings):
 		return m.openSettings(), true
 	case key.Matches(k, m.keys.Filter):
 		return m.openFilter(), true
+	case key.Matches(k, m.keys.ToggleCmdLog):
+		return m.toggleCmdLog(), true
 	case key.Matches(k, m.keys.Back):
 		// esc clears the focused panel's filter when it has one; otherwise it is
 		// left for the panel (e.g. to pop a changelist drill).
@@ -757,6 +797,15 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return m.afterFocusChange(), true
 	case "3":
 		m.focus.Focus(panelLog)
+		return m.afterFocusChange(), true
+	case "4":
+		// Focusing the command log reveals it first when hidden, since it cannot
+		// be focused while off-screen.
+		if !m.showCmdLog {
+			m.showCmdLog = true
+			m.layout()
+		}
+		m.focus.Focus(panelCmdLog)
 		return m.afterFocusChange(), true
 	case "0":
 		m.focus.Focus(panelMain)
@@ -1659,15 +1708,15 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Update to revision (Log panel)", Key: "space"},
 		{Label: "Refresh", Key: "R"},
 		{Label: "Edit settings", Key: "S"},
-		{Label: "Jump to panel", Key: "1 2 3 0"},
+		{Label: "Jump to panel", Key: "1 2 3 4 0"},
 		{Label: "Cycle panels", Key: "tab / shift+tab"},
 		{Label: "Move up / down", Key: "k / j"},
 		{Label: "Jump top / bottom", Key: "g / G"},
 		{Label: "Scroll main up / down", Key: "K / J"},
 		{Label: "Scroll main left / right", Key: "h / l"},
 		{Label: "Line start / end", Key: "home / end"},
-		{Label: "Toggle directory diff", Key: "D"},
-		{Label: "Toggle untracked", Key: "U"},
+		{Label: "Toggle dir diff / untracked", Key: "D / U"},
+		{Label: "Toggle command log", Key: "x"},
 		{Label: "Filter panel", Key: "/"},
 		{Label: "Toggle help", Key: "?"},
 		{Label: "Quit", Key: "q"},
@@ -1892,10 +1941,10 @@ func (m *Model) afterFocusChange() tea.Cmd {
 		m.source = sourceStatus
 	case panelLog:
 		m.source = sourceLog
-	case panelMain:
-		// Focusing Main only scrolls it; keep the current source.
-	default:
+	case panelFiles:
 		m.source = sourceFiles
+	case panelMain, panelCmdLog:
+		// Focusing Main or the command log only scrolls it; keep the current source.
 	}
 	m.syncMainTitle()
 	m.updateBar()
@@ -1904,6 +1953,24 @@ func (m *Model) afterFocusChange() tea.Cmd {
 		return m.diffLoadForSelection()
 	}
 	return nil
+}
+
+// focusNextPanel and focusPrevPanel cycle focus like the focus manager but skip
+// the command-log panel while it is hidden, so Tab never lands on an off-screen
+// panel. It is the only hideable panel and sits at the end of the ring, so a
+// single extra step is always enough to pass it.
+func (m *Model) focusNextPanel() {
+	m.focus.Next()
+	if m.focus.Index() == panelCmdLog && !m.showCmdLog {
+		m.focus.Next()
+	}
+}
+
+func (m *Model) focusPrevPanel() {
+	m.focus.Prev()
+	if m.focus.Index() == panelCmdLog && !m.showCmdLog {
+		m.focus.Prev()
+	}
 }
 
 // syncMainTitle names the Main panel after the focused side panel: the Status
@@ -1976,6 +2043,26 @@ func (m *Model) toggleUntracked() tea.Cmd {
 	}
 	m.updateMain()
 	return m.diffLoadForSelection()
+}
+
+// toggleCmdLog flips the command-log panel shown below Main, which mirrors the
+// svn actions revision runs. It re-lays out the right column so Main reclaims
+// the space when the log is hidden, moves focus to Main if the log was focused
+// as it hides, and reports the new state with a toast.
+func (m *Model) toggleCmdLog() tea.Cmd {
+	m.showCmdLog = !m.showCmdLog
+	m.layout()
+	var cmd tea.Cmd
+	if !m.showCmdLog && m.focus.Index() == panelCmdLog {
+		m.focus.Focus(panelMain)
+		cmd = m.afterFocusChange()
+	}
+	if m.showCmdLog {
+		m.showToast("command log shown", component.LevelInfo)
+	} else {
+		m.showToast("command log hidden", component.LevelInfo)
+	}
+	return cmd
 }
 
 // rebuildFilesViews re-flattens every Files-panel view — the Changes tree, the
@@ -2225,7 +2312,19 @@ func (m *Model) layout() {
 	m.panels[panelStatus].SetSize(leftWidth, statusHeight)
 	m.panels[panelFiles].SetSize(leftWidth, filesHeight)
 	m.panels[panelLog].SetSize(leftWidth, logHeight)
-	m.panels[panelMain].SetSize(rightWidth, bodyHeight)
+
+	// The right column is Main alone, or Main above the command log when it is
+	// shown; the split keeps the two columns the same overall height.
+	mainHeight := bodyHeight
+	if m.showCmdLog {
+		cmdLogHeight := clamp(bodyHeight/4, 6, 12)
+		if cmdLogHeight > bodyHeight-3 {
+			cmdLogHeight = max(bodyHeight-3, 0)
+		}
+		mainHeight = bodyHeight - cmdLogHeight
+		m.panels[panelCmdLog].SetSize(rightWidth, cmdLogHeight)
+	}
+	m.panels[panelMain].SetSize(rightWidth, mainHeight)
 	m.bar.SetSize(m.width, barHeight)
 	m.searchBar.SetSize(m.width, barHeight)
 	m.updateMain()
