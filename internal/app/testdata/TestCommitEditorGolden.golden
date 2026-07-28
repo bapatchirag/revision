@@ -1,4 +1,4 @@
-╭─ [1] Status ─────────────────╮╭─ Diff ───────────────────────────────────────╮
+╭─ [1] Status ─────────────────╮╭─ [0] Diff ───────────────────────────────────╮
 │https://svn.example.com/repo/t││changelist: (staged)                          │
 │r42                           ││                                              │
 │1 change(s)                   ││Loading diff…                                 │

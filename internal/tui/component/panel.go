@@ -14,7 +14,7 @@ import (
 // panels. Focus, size and theme are forwarded to the child.
 type Panel struct {
 	title   string
-	number  int // 0 means no number badge
+	number  int // negative means no number badge
 	child   tui.Component
 	theme   theme.Theme
 	width   int
@@ -40,8 +40,9 @@ var (
 	_ tui.Themeable = (*Panel)(nil)
 )
 
-// NewPanel wraps child in a titled border. A number greater than zero renders a
-// "[n]" badge in the title, matching lazygit's numbered panels.
+// NewPanel wraps child in a titled border. A non-negative number renders a
+// "[n]" badge in the title, matching lazygit's numbered panels; a negative
+// number omits it.
 func NewPanel(title string, number int, child tui.Component, th theme.Theme) *Panel {
 	return &Panel{title: title, number: number, child: child, theme: th}
 }
@@ -81,7 +82,7 @@ func (p *Panel) View() string {
 }
 
 func (p *Panel) titleText() string {
-	if p.number > 0 {
+	if p.number >= 0 {
 		return fmt.Sprintf("[%d] %s", p.number, p.title)
 	}
 	return p.title
