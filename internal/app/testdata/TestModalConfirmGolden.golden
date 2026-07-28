@@ -2,15 +2,15 @@
 │Root      /home/alice/work/wc ││Loading diff…                                 │
 │Source    /home/alice/work/wc ││                                              │
 │CWD       /home/alice/work/wc ││                                              │
+│Branch    trunk               ││                                              │
 │Revision  r42                 ││                                              │
 │                              ││                                              │
 ╰──────────────────────────────╯│                                              │
-╭─ [2] ─ Changes ─── Changelist╮│                                              │
-│  ▾ /              ╭─ Delete file? ───────────────────────╮                   │
-│    ▾ internal/    │internal/app/app.go will be scheduled │                   │
-│      ▾ app/       │for deletion (removed on the next     │                   │
-│>         M app.go │commit).                              │                   │
-│                   │                                      │                   │
+╭─ [2] ─ Changes ───╭─ Delete file? ───────────────────────╮                   │
+│  ▾ /              │internal/app/app.go will be scheduled │                   │
+│    ▾ internal/    │for deletion (removed on the next     │                   │
+│      ▾ app/       │commit).                              │                   │
+│>         M app.go │                                      │                   │
 │                   │enter confirm · esc cancel            │                   │
 ╰────────────────── ╰──────────────────────────────────────╯                   │
 ╭─ [3] Log ────────────────────╮│                                              │

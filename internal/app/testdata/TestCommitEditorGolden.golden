@@ -2,13 +2,13 @@
 │Root      /home/alice/work/wc ││changelist: (staged)                          │
 │Source    /home/alice/work/wc ││                                              │
 │CWD       /home/alice/work/wc ││Loading diff…                                 │
+│Branch    trunk               ││                                              │
 │Revision  r42                 ││                                              │
-│                              ││                                              │
-╰───────────────╭─ Commit message ─────────────────────────────╮               │
-╭─ [2] ─ Changes│Fix status parsing                            │               │
+│               ╭─ Commit message ─────────────────────────────╮               │
+╰───────────────│Fix status parsing                            │               │
+╭─ [2] ─ Changes│                                              │               │
 │  ▾ /          │                                              │               │
 │>   ● M modifie│                                              │               │
-│               │                                              │               │
 │               │                                              │               │
 │               │                                              │               │
 │               │                                              │               │

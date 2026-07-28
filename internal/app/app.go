@@ -2304,7 +2304,8 @@ func (m *Model) layout() {
 	leftWidth := clamp(m.width*2/5, 24, m.width-20)
 	rightWidth := m.width - leftWidth
 
-	statusHeight := clamp(7, 3, max(bodyHeight-6, 3))
+	// Tall enough for the Status panel's six rows plus its border.
+	statusHeight := clamp(8, 3, max(bodyHeight-6, 3))
 	rest := bodyHeight - statusHeight
 	filesHeight := rest / 2
 	logHeight := rest - filesHeight
@@ -2340,10 +2341,11 @@ func (m *Model) refreshChrome() {
 
 // updateStatus fills the Status panel with the working copy's locations and
 // revision state: the working-copy root, the source path revision operates on,
-// the current working directory, and the checked-out and HEAD revision numbers.
+// the current working directory, the branch it is checked out from, and the
+// checked-out and HEAD revision numbers.
 // A value that is not yet known is omitted so the panel only lists facts.
 func (m *Model) updateStatus() {
-	lines := make([]string, 0, 5)
+	lines := make([]string, 0, 6)
 	bold := lipgloss.NewStyle().Bold(true)
 	add := func(label, value string) {
 		if value != "" {
@@ -2357,6 +2359,9 @@ func (m *Model) updateStatus() {
 		add("Source", m.client.Dir)
 	}
 	add("CWD", m.workDir)
+	if m.info != nil {
+		add("Branch", m.info.Branch())
+	}
 	if m.wcRevision != "" {
 		add("Revision", "r"+m.wcRevision)
 	}

@@ -2,13 +2,13 @@
 │Root      /home/alice/work/wc ││Loading diff…                                 │
 │Source    /home/alice/work/wc ││                                              │
 │CWD       /home/alice/work/wc ││                                              │
+│Branch    trunk               ││                                              │
 │Revision  r42                 ││                                              │
-│                              ││                                              │
-╰───────────────╭─ Settings ───────────────────────────────────╮               │
-╭─ [2] ─ Changes│> Default path                                │               │
-│  ▾ /          │  Log limit      100                          │               │
-│>     M modifie│  Editor                                      │               │
-│               │  Theme          auto                         │               │
+│               ╭─ Settings ───────────────────────────────────╮               │
+╰───────────────│> Default path                                │               │
+╭─ [2] ─ Changes│  Log limit      100                          │               │
+│  ▾ /          │  Editor                                      │               │
+│>     M modifie│  Theme          auto                         │               │
 │               │  Directory diff on                           │               │
 │               │  Hide untracked off                          │               │
 │               │  SSH key        ~/.ssh/id_rsa                │               │

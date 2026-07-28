@@ -2,13 +2,13 @@
 │Root      /home/ali│> Stage / unstage                space│                   │
 │Source    /home/ali│  Assign changelist                  n│                   │
 │CWD       /home/ali│  Commit staged / changelist         c│                   │
-│Revision  r42      │  Switch file view               [ / ]│                   │
-│                   │  Expand changelist              enter│                   │
-╰───────────────────│  Revert file                        r│                   │
-╭─ [2] ─ Changes ───│  Delete file                        d│                   │
-│  ▾ /              │  Update working copy                u│                   │
-│>     M modified.go│  Update to revision (Log panel) space│                   │
-│                   │  Refresh                            R│                   │
+│Branch    trunk    │  Switch file view               [ / ]│                   │
+│Revision  r42      │  Expand changelist              enter│                   │
+│                   │  Revert file                        r│                   │
+╰───────────────────│  Delete file                        d│                   │
+╭─ [2] ─ Changes ───│  Update working copy                u│                   │
+│  ▾ /              │  Update to revision (Log panel) space│                   │
+│>     M modified.go│  Refresh                            R│                   │
 │                   │  Edit settings                      S│                   │
 │                   │  Jump to panel              1 2 3 4 0│                   │
 │                   │  Cycle panels         tab / shift+tab│                   │

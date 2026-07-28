@@ -2,6 +2,7 @@
 │Root      /home/alice/work/wc ││changelist: (staged)                          │
 │Source    /home/alice/work/wc ││                                              │
 │CWD       /home/alice/work/wc ││Loading diff…                                 │
+│Branch    trunk               ││                                              │
 │Revision  r42                 ││                                              │
 │                              ││                                              │
 ╰──────────────────────────────╯│                                              │
@@ -9,7 +10,6 @@
 │> ◆ feature-x (1)             ││                                              │
 │  ◆ (staged) (1)              ││                                              │
 │  ◆ (unstaged) (1)            ││                                              │
-│                              ││                                              │
 │                              ││                                              │
 │                              ││                                              │
 ╰────────────────── 1 of 3 ────╯│                                              │

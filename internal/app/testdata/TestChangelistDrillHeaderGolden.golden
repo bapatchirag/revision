@@ -2,6 +2,7 @@
 │Root      /home/alice/work/wc ││changelist: feature-x                         │
 │Source    /home/alice/work/wc ││                                              │
 │CWD       /home/alice/work/wc ││Loading diff…                                 │
+│Branch    trunk               ││                                              │
 │Revision  r42                 ││                                              │
 │                              ││                                              │
 ╰──────────────────────────────╯│                                              │
@@ -9,7 +10,6 @@
 │  ▾ /                         ││                                              │
 │>   ● M feature.go            ││                                              │
 │    ● A other.go              ││                                              │
-│                              ││                                              │
 │                              ││                                              │
 │                              ││                                              │
 ╰────────────────── 1 of 2 ────╯│                                              │
