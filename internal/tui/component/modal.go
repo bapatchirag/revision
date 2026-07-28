@@ -95,7 +95,7 @@ func (mo *Modal) View() string {
 			body = append(body, "", mo.hint)
 		}
 		innerW := maxWidth(append([]string{" " + mo.title + " "}, body...))
-		return box(strings.Join(body, "\n"), mo.title, innerW, len(body), mo.theme, mo.focused)
+		return box(strings.Join(body, "\n"), mo.title, "", innerW, len(body), mo.theme, mo.focused)
 	}
 	innerW := mo.width - 2
 	wrapped := lipgloss.NewStyle().Width(innerW).Render(mo.message)
@@ -103,5 +103,5 @@ func (mo *Modal) View() string {
 	if mo.hint != "" {
 		body = append(body, "", mo.hint)
 	}
-	return box(strings.Join(body, "\n"), mo.title, innerW, len(body), mo.theme, mo.focused)
+	return box(strings.Join(body, "\n"), mo.title, "", innerW, len(body), mo.theme, mo.focused)
 }

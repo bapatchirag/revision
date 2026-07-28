@@ -171,7 +171,7 @@ func (ta *TextArea) View() string {
 	hint := lipgloss.NewStyle().Foreground(ta.theme.Muted).Render(textAreaHint)
 	rows = append(rows, fitLine(hint, innerW))
 
-	return box(strings.Join(rows, "\n"), ta.title, innerW, len(rows), ta.theme, ta.focused)
+	return box(strings.Join(rows, "\n"), ta.title, "", innerW, len(rows), ta.theme, ta.focused)
 }
 
 // renderLine fits row i to innerW, drawing a reverse-video cursor at the current

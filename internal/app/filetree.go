@@ -127,6 +127,35 @@ func firstFileIndex(rows []fileNode) int {
 	return -1
 }
 
+// leafCount returns the number of file leaves (rows carrying a status item)
+// among rows, ignoring the synthetic root and directory rows.
+func leafCount(rows []fileNode) int {
+	n := 0
+	for i := range rows {
+		if rows[i].Item != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// fileLeafStats returns a file-tree position indicator: the number of file
+// leaves at or before cursor — a 1-based position when the cursor rests on a
+// file, or the count of leaves already passed when it rests on a directory (0 on
+// the root) — together with the total leaf count.
+func fileLeafStats(rows []fileNode, cursor int) (index, count int) {
+	for i := range rows {
+		if rows[i].Item == nil {
+			continue
+		}
+		count++
+		if i <= cursor {
+			index = count
+		}
+	}
+	return index, count
+}
+
 // dirLabel is a directory row's display label: its segment name with a single
 // trailing slash (the "/" root already carries one).
 func dirLabel(n fileNode) string {

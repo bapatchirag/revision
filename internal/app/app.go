@@ -700,6 +700,7 @@ func (m *Model) overlayToast(base string) string {
 // baseView renders the lazygit layout: the left column of panels beside Main,
 // over the status bar.
 func (m *Model) baseView() string {
+	m.panels[panelFiles].SetFooter(m.filesFooter())
 	left := lipgloss.JoinVertical(lipgloss.Left,
 		m.panels[panelStatus].View(),
 		m.panels[panelFiles].View(),
@@ -1052,6 +1053,58 @@ func (m *Model) filesViewIsChangelists() bool {
 // changelist's file list.
 func (m *Model) inChangelistDrill() bool {
 	return m.filesViewIsChangelists() && m.filesViews.Depth() > 0
+}
+
+// filesFooter returns the position/count indicator inlaid into the Files panel's
+// bottom border: the 1-based position within the active view, the number of
+// entries shown, and — when a filter or the hide-untracked toggle hides some —
+// the full unfiltered count in brackets. It counts file leaves in the Changes
+// tree and a drilled-in changelist (ignoring the synthetic root and directory
+// rows) and changelists in the Changelists overview, following whichever view is
+// active.
+func (m *Model) filesFooter() string {
+	hiding := m.hideUntracked || m.filters[panelFiles] != ""
+	switch {
+	case m.inChangelistDrill():
+		index, shown := fileLeafStats(m.clFiles.Items(), m.clFiles.Index())
+		full := shown
+		if hiding {
+			full = leafCount(buildFileTree(m.clItems, m.clCollapsedDirs))
+		}
+		return countLabel(index, shown, full)
+	case m.filesViewIsChangelists():
+		shown := len(m.changelists.Items())
+		full := shown
+		if hiding {
+			full = len(groupChangelists(m.fileItems))
+		}
+		return countLabel(m.changelists.Index()+1, shown, full)
+	default:
+		index, shown := fileLeafStats(m.files.Items(), m.files.Index())
+		full := shown
+		if hiding {
+			full = leafCount(buildFileTree(m.fileItems, m.collapsedDirs))
+		}
+		return countLabel(index, shown, full)
+	}
+}
+
+// countLabel formats a "position of shown" indicator for a panel's bottom
+// border, appending the full count in brackets when hidden entries push it past
+// the shown count. index is 1-based (0 when the cursor sits above the first
+// entry, such as on the tree root); an empty, fully-unhidden view yields no
+// label.
+func countLabel(index, shown, full int) string {
+	switch {
+	case shown == 0 && full == 0:
+		return ""
+	case shown == 0:
+		return fmt.Sprintf("0 of 0 (%d)", full)
+	case full > shown:
+		return fmt.Sprintf("%d of %d (%d)", index, shown, full)
+	default:
+		return fmt.Sprintf("%d of %d", index, shown)
+	}
 }
 
 // assignChangelist opens the changelist-name prompt for the files that will move
