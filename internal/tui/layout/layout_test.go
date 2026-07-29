@@ -68,3 +68,26 @@ func TestCenterDimensions(t *testing.T) {
 		t.Errorf("Center height = %d, want 3", h)
 	}
 }
+
+func TestDimFlattensStylingAndKeepsWidth(t *testing.T) {
+	red := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	green := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	view := red.Render("alpha") + " " + green.Render("beta") + "\nplain"
+
+	got := layout.Dim(view, lipgloss.Color("8"))
+	if plain := ansi.Strip(got); plain != "alpha beta\nplain" {
+		t.Errorf("Dim changed the text to %q", plain)
+	}
+	for i, ln := range strings.Split(got, "\n") {
+		if want := ansi.StringWidth(strings.Split(view, "\n")[i]); ansi.StringWidth(ln) != want {
+			t.Errorf("line %d is %d cells wide, want %d — Overlay needs the width preserved", i, ansi.StringWidth(ln), want)
+		}
+	}
+	// Every line ends up in the one color, so nothing keeps its original styling.
+	if strings.Contains(got, red.Render("alpha")) || strings.Contains(got, green.Render("beta")) {
+		t.Errorf("Dim should drop the styling it found, got %q", got)
+	}
+	if !strings.Contains(got, "\x1b[") {
+		t.Errorf("Dim should render in the given color, got %q", got)
+	}
+}

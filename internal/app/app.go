@@ -51,6 +51,9 @@ const changelistEditorID = "changelist"
 // diffNameEditorID identifies the save-diff file-name prompt on emitted messages.
 const diffNameEditorID = "diff-name"
 
+// splitDiffID identifies the side-by-side diff overlay on emitted messages.
+const splitDiffID = "split-diff"
+
 // passphraseEditorID identifies the SSH passphrase prompt on emitted messages.
 const passphraseEditorID = "ssh-passphrase"
 
@@ -132,6 +135,7 @@ type Model struct {
 	form       *component.Form
 	toast      *component.Toast
 	searchBar  *component.SearchBar
+	splitDiff  *component.SplitView
 	focus      *focus.Manager
 
 	fileItems        []svn.StatusItem
@@ -172,11 +176,14 @@ type Model struct {
 	hideUntracked bool
 	// showCmdLog controls whether the command-log panel below Main is displayed.
 	// It defaults to on and is toggled at runtime; it is not persisted.
-	showCmdLog   bool
-	logErr       error
-	editing      bool
-	naming       bool
-	savingDiff   bool
+	showCmdLog bool
+	logErr     error
+	editing    bool
+	naming     bool
+	savingDiff bool
+	// splitting is true while the side-by-side view of the on-screen diff is
+	// floated over the layout.
+	splitting    bool
 	filtering    bool
 	filterPanel  int
 	filters      map[int]string
@@ -279,6 +286,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		form:            component.NewForm(settingsFormID, "Settings", settingsFields(cfg, cfg.DirectoryDiff), th, keys),
 		toast:           component.NewToast(th),
 		searchBar:       component.NewSearchBar(searchBarID, th, keys),
+		splitDiff:       component.NewSplitView(splitDiffID, "Side-by-side diff", th, keys),
 		collapsedDirs:   map[string]bool{},
 		clCollapsedDirs: map[string]bool{},
 		filters:         map[int]string{},
@@ -385,6 +393,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.savingDiff {
 			m.sizeDiffEditor()
+		}
+		if m.splitting {
+			m.sizeSplitDiff()
 		}
 		if m.confirming {
 			m.sizeModal()
@@ -700,6 +711,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.nameEditor.Blur()
 		case diffNameEditorID:
 			m.closeDiffName()
+		case splitDiffID:
+			m.closeSplitDiff()
 		case passphraseEditorID:
 			// The key is required and the user declined to unlock it, so exiting is
 			// the only sensible outcome; proceeding would leave a UI that cannot
@@ -745,6 +758,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.savingDiff {
 			return m, m.diffEditor.Update(msg)
+		}
+		if m.splitting {
+			// The side-by-side view owns the keyboard while open: it scrolls, esc
+			// closes it (as a DismissMsg), and the key that opened it closes it too.
+			if key.Matches(msg, m.keys.SplitDiff) {
+				m.closeSplitDiff()
+				return m, nil
+			}
+			return m, m.splitDiff.Update(msg)
 		}
 		if m.filtering {
 			// The filter input owns the keyboard while open. Every edit re-runs the
@@ -819,6 +841,10 @@ func (m *Model) View() string {
 		view = m.overlayCenter(view, m.nameEditor.View())
 	case m.savingDiff:
 		view = m.overlayCenter(view, m.diffEditor.View())
+	case m.splitting:
+		// The side-by-side view all but fills the screen and is read rather than
+		// acted on, so the layout behind it recedes to a single dim color.
+		view = m.overlayCenter(layout.Dim(view, m.theme.Muted), m.splitDiff.View())
 	case m.confirming:
 		view = m.overlayCenter(view, m.modal.View())
 	case m.updating:
@@ -899,6 +925,11 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return m.toggleCmdLog(), true
 	case key.Matches(k, m.keys.SaveDiff):
 		return m.saveDiff(), true
+	case key.Matches(k, m.keys.SplitDiff):
+		if m.focus.Index() == panelFiles {
+			return m.openSplitDiff(), true
+		}
+		return nil, false
 	case key.Matches(k, m.keys.OpenEditor):
 		return m.openInEditor(), true
 	case key.Matches(k, m.keys.Back):
@@ -1641,7 +1672,7 @@ func (m *Model) closeHelp() {
 // screen, so a background event (like the update check completing) knows not to
 // steal focus.
 func (m *Model) overlayActive() bool {
-	return m.aborting || m.unlocking || m.editing || m.naming || m.savingDiff || m.confirming || m.helping || m.updating || m.configuring
+	return m.aborting || m.unlocking || m.editing || m.naming || m.savingDiff || m.splitting || m.confirming || m.helping || m.updating || m.configuring
 }
 
 // openUpdate shows the startup update prompt for the given release as a centered
@@ -1704,6 +1735,7 @@ func (m *Model) previewTheme(name string) {
 	m.updateMenu.SetTheme(th)
 	m.form.SetTheme(th)
 	m.toast.SetTheme(th)
+	m.splitDiff.SetTheme(th)
 	m.files.SetRender(renderFileNode(th))
 	m.clFiles.SetRender(renderFileNode(th))
 	m.changelists.SetRender(renderChangelistGroup(th))
@@ -1878,7 +1910,7 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Scroll main up / down", Key: "K / J"},
 		{Label: "Scroll main left / right", Key: "h / l"},
 		{Label: "Line start / end", Key: "home / end"},
-		{Label: "Save diff to file", Key: "w"},
+		{Label: "Side-by-side / save diff", Key: "s / w"},
 		{Label: "Toggle dir diff / untracked", Key: "D / U"},
 		{Label: "Toggle command log", Key: "x"},
 		{Label: "Filter panel", Key: "/"},

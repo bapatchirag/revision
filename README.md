@@ -33,6 +33,7 @@ SVN's command line is powerful but verbose for day-to-day work. `revision` wraps
 - Changed files as a **collapsible directory tree** — each change grouped under its folder, expanded or collapsed with `enter`, with the position and count of visible files in the panel's footer
 - **Colour-coded diff** viewer that follows your selection — additions, deletions, hunk headers, and metadata each tinted, with the `+`/`-` gutter pinned as you scroll; highlight a directory for the **combined diff** of everything beneath it
 - **Save any diff** on screen to a file with `w` — one file's, a whole directory subtree's, or a changelist's — named in a prompt that suggests a default, written to the output directory of your choice
+- **Read any diff side by side** with `s` — the same diff the Main panel is showing, re-laid as a two-pane comparison in a centered overlay, each removal opposite the addition that replaced it and every line numbered in its own revision; a directory's combined diff is paged one file at a time, and the layout behind dims out of the way while you read
 - **Staging** via a SVN changelist (a git-index-like workflow) — stage or unstage a single file, or a whole directory subtree, with one keystroke
 - **Named changelists** — group the whole staged set (or just one file) in a tabbed Changelists view, drill into any list, and commit it as a unit
 - **Commit** the staged set (or a chosen changelist) through an inline message editor
@@ -142,6 +143,7 @@ The footer shows the most common actions, and `?` opens the full keybindings men
 | `e` | Open the highlighted file in your editor (see [Opening files in an editor](#opening-files-in-an-editor)) |
 | `u` | Update the working copy to the latest revision |
 | `w` | Save a diff to a file in `diffOutputDir` — the highlighted file's, the combined diff of everything under the highlighted directory, or, in the Changelists view, the highlighted changelist's; a prompt asks for the name, and leaving it blank uses the suggested default (see [Configuration](#configuration)) |
+| `s` | **Files:** open the diff the Main panel is showing as a side-by-side comparison in a centered overlay — the highlighted file's, the highlighted directory subtree's, or the saved patch being browsed. Both panes scroll together with the movement keys, a multi-file diff gets a page per file (`[` / `]` turn between them, and the bottom border names the open one), and `s` or `Esc` closes it |
 | `R` | Refresh status and history |
 | `/` | Filter (Files/Log) or search (Main/Status) the focused panel; `n`/`N` jump between search matches (see [Filtering & searching](#filtering--searching)) |
 | `D` | Toggle the directory-level diff for the highlighted directory (see [Configuration](#configuration)) |

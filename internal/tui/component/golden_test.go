@@ -289,3 +289,47 @@ func TestGoldenForm(t *testing.T) {
 	f.Focus()
 	golden.RequireEqual(t, []byte(f.View()))
 }
+
+func TestGoldenSplitView(t *testing.T) {
+	sv := component.NewSplitView("split", "Side-by-side", testTheme(), testKeys())
+	sv.SetLabels("before", "after")
+	sv.SetPages([]component.SplitPage{
+		{Title: "main.go", Rows: splitRows()},
+		{Title: "list.go", Rows: splitRows()},
+	})
+	sv.SetSize(46, 10)
+	sv.Focus()
+	golden.RequireEqual(t, []byte(sv.View()))
+}
+
+func TestGoldenSplitViewScrolled(t *testing.T) {
+	sv := component.NewSplitView("split", "Side-by-side", testTheme(), testKeys())
+	sv.SetLabels("before", "after")
+	sv.SetPages([]component.SplitPage{{Title: "words.txt", Rows: []component.SplitRow{
+		{Left: "@@ -1,3 +1,3 @@", Span: true},
+		{Left: "1  the quick brown fox jumps over it", Right: "1  the quick brown fox jumps over it"},
+		{Left: "2 -pack my box with five dozen jugs", Right: "2 +pack my crate with five dozen jugs"},
+		{Left: "3  how vexingly quick daft zebras", Right: "3  how vexingly quick daft zebras"},
+	}}})
+	sv.SetSize(46, 7)
+	sv.Focus()
+	// Scroll on both axes: the panes move together, so the pairing stays aligned.
+	sv.Update(keyDown())
+	for i := 0; i < 6; i++ {
+		sv.Update(keyRight())
+	}
+	golden.RequireEqual(t, []byte(sv.View()))
+}
+
+// splitRows is a small paired body with a spanning heading, a replacement, and
+// an insertion that has nothing opposite it.
+func splitRows() []component.SplitRow {
+	return []component.SplitRow{
+		{Left: "@@ -1,4 +1,5 @@", Span: true},
+		{Left: "1  package main", Right: "1  package main"},
+		{Left: `2 -import "fmt"`, Right: "2 +import ("},
+		{Right: `3 +    "fmt"`},
+		{Right: "4 +)"},
+		{Left: "3  func main() {", Right: "5  func main() {"},
+	}
+}
