@@ -48,6 +48,9 @@ const commitEditorID = "commit"
 // changelistEditorID identifies the changelist-name prompt on emitted messages.
 const changelistEditorID = "changelist"
 
+// diffNameEditorID identifies the save-diff file-name prompt on emitted messages.
+const diffNameEditorID = "diff-name"
+
 // passphraseEditorID identifies the SSH passphrase prompt on emitted messages.
 const passphraseEditorID = "ssh-passphrase"
 
@@ -119,6 +122,7 @@ type Model struct {
 	bar        *component.StatusBar
 	editor     *component.TextArea
 	nameEditor *component.Prompt
+	diffEditor *component.Prompt
 	passEditor *component.Prompt
 	modal      *component.Modal
 	progress   *component.Modal
@@ -144,9 +148,16 @@ type Model struct {
 	// the client has been re-rooted at the working copy.
 	launchDir string
 
-	source        mainSource
-	diffPath      string
-	diffText      string
+	source   mainSource
+	diffPath string
+	diffText string
+	// diffErr records that diffText is a load-failure notice rather than a patch,
+	// so it is never written out as one.
+	diffErr bool
+	// diffSrc is the diff (or the paths to diff) queued while the save prompt
+	// asks for a file name, so a reload landing behind the overlay cannot swap
+	// out what gets written.
+	diffSrc       diffSource
 	dirDiff       bool
 	hideUntracked bool
 	// showCmdLog controls whether the command-log panel below Main is displayed.
@@ -155,6 +166,7 @@ type Model struct {
 	logErr       error
 	editing      bool
 	naming       bool
+	savingDiff   bool
 	filtering    bool
 	filterPanel  int
 	filters      map[int]string
@@ -245,6 +257,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		bar:             component.NewStatusBar(th),
 		editor:          component.NewTextArea(commitEditorID, "Commit message", "Enter a commit message…", th, keys),
 		nameEditor:      component.NewPrompt(changelistEditorID, "Changelist name", "e.g. feature-x", th, keys),
+		diffEditor:      component.NewPrompt(diffNameEditorID, "Save diff as", "e.g. changes.diff", th, keys),
 		passEditor:      component.NewPrompt(passphraseEditorID, "SSH key passphrase", "passphrase for "+cfg.SSHKeyPath, th, keys),
 		modal:           component.NewModal(confirmModalID, "", "", th, keys),
 		progress:        component.NewModal("update-progress", "", "", th, keys),
@@ -354,6 +367,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.naming {
 			m.sizeNameEditor()
 		}
+		if m.savingDiff {
+			m.sizeDiffEditor()
+		}
 		if m.confirming {
 			m.sizeModal()
 		}
@@ -401,6 +417,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case diffLoadedMsg:
 		m.diffPath = msg.path
+		m.diffErr = msg.err != nil
 		if msg.err != nil {
 			m.diffText = "Unable to load diff: " + msg.err.Error()
 		} else {
@@ -409,6 +426,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.source == sourceFiles {
 			m.updateMain()
 		}
+		return m, nil
+
+	case diffSavedMsg:
+		if msg.err != nil {
+			m.showToast(failureText("save diff", msg.err), component.LevelError)
+			return m, nil
+		}
+		m.showToast("diff saved to "+msg.path, component.LevelSuccess)
 		return m, nil
 
 	case errMsg:
@@ -575,6 +600,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.submitCommit(msg.Value)
 		case changelistEditorID:
 			return m, m.submitChangelist(msg.Value)
+		case diffNameEditorID:
+			return m, m.submitDiffName(msg.Value)
 		case settingsFormID:
 			return m, m.submitSettings()
 		case passphraseEditorID:
@@ -615,6 +642,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case changelistEditorID:
 			m.naming = false
 			m.nameEditor.Blur()
+		case diffNameEditorID:
+			m.closeDiffName()
 		case passphraseEditorID:
 			// The key is required and the user declined to unlock it, so exiting is
 			// the only sensible outcome; proceeding would leave a UI that cannot
@@ -657,6 +686,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.naming {
 			return m, m.nameEditor.Update(msg)
+		}
+		if m.savingDiff {
+			return m, m.diffEditor.Update(msg)
 		}
 		if m.filtering {
 			// The filter input owns the keyboard while open. Every edit re-runs the
@@ -729,6 +761,8 @@ func (m *Model) View() string {
 		view = m.overlayCenter(view, m.editor.View())
 	case m.naming:
 		view = m.overlayCenter(view, m.nameEditor.View())
+	case m.savingDiff:
+		view = m.overlayCenter(view, m.diffEditor.View())
 	case m.confirming:
 		view = m.overlayCenter(view, m.modal.View())
 	case m.updating:
@@ -807,6 +841,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return m.openFilter(), true
 	case key.Matches(k, m.keys.ToggleCmdLog):
 		return m.toggleCmdLog(), true
+	case key.Matches(k, m.keys.SaveDiff):
+		return m.saveDiff(), true
 	case key.Matches(k, m.keys.Back):
 		// esc clears the focused panel's filter when it has one; otherwise it is
 		// left for the panel (e.g. to pop a changelist drill).
@@ -1534,7 +1570,7 @@ func (m *Model) closeHelp() {
 // screen, so a background event (like the update check completing) knows not to
 // steal focus.
 func (m *Model) overlayActive() bool {
-	return m.aborting || m.unlocking || m.editing || m.naming || m.confirming || m.helping || m.updating || m.configuring
+	return m.aborting || m.unlocking || m.editing || m.naming || m.savingDiff || m.confirming || m.helping || m.updating || m.configuring
 }
 
 // openUpdate shows the startup update prompt for the given release as a centered
@@ -1591,6 +1627,7 @@ func (m *Model) previewTheme(name string) {
 	m.bar.SetTheme(th)
 	m.editor.SetTheme(th)
 	m.nameEditor.SetTheme(th)
+	m.diffEditor.SetTheme(th)
 	m.modal.SetTheme(th)
 	m.menu.SetTheme(th)
 	m.updateMenu.SetTheme(th)
@@ -1747,8 +1784,7 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Commit staged / changelist", Key: "c"},
 		{Label: "Switch file view", Key: "[ / ]"},
 		{Label: "Expand changelist", Key: "enter"},
-		{Label: "Revert file", Key: "r"},
-		{Label: "Delete file", Key: "d"},
+		{Label: "Revert / delete file", Key: "r / d"},
 		{Label: "Update working copy", Key: "u"},
 		{Label: "Update to revision (Log panel)", Key: "space"},
 		{Label: "Refresh", Key: "R"},
@@ -1760,6 +1796,7 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Scroll main up / down", Key: "K / J"},
 		{Label: "Scroll main left / right", Key: "h / l"},
 		{Label: "Line start / end", Key: "home / end"},
+		{Label: "Save diff to file", Key: "w"},
 		{Label: "Toggle dir diff / untracked", Key: "D / U"},
 		{Label: "Toggle command log", Key: "x"},
 		{Label: "Filter panel", Key: "/"},
@@ -1830,6 +1867,13 @@ func (m *Model) sizeEditor() {
 func (m *Model) sizeNameEditor() {
 	w := clamp(m.width/2, 30, max(m.width-6, 30))
 	m.nameEditor.SetSize(w, 0)
+}
+
+// sizeDiffEditor sizes the save-diff file-name prompt like the changelist-name
+// prompt.
+func (m *Model) sizeDiffEditor() {
+	w := clamp(m.width/2, 30, max(m.width-6, 30))
+	m.diffEditor.SetSize(w, 0)
 }
 
 // beginInitialLoad kicks off the working-copy status and revision-history loads

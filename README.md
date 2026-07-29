@@ -32,6 +32,7 @@ SVN's command line is powerful but verbose for day-to-day work. `revision` wraps
 - **Working-copy status** at a glance — the Status panel names the working-copy root, the branch it's checked out from, and the revision it sits at against HEAD; focusing it shows project links in Main
 - Changed files as a **collapsible directory tree** — each change grouped under its folder, expanded or collapsed with `enter`, with the position and count of visible files in the panel's footer
 - **Colour-coded diff** viewer that follows your selection — additions, deletions, hunk headers, and metadata each tinted, with the `+`/`-` gutter pinned as you scroll; highlight a directory for the **combined diff** of everything beneath it
+- **Save any diff** on screen to a file with `w` — one file's, a whole directory subtree's, or a changelist's — named in a prompt that suggests a default, written to the output directory of your choice
 - **Staging** via a SVN changelist (a git-index-like workflow) — stage or unstage a single file, or a whole directory subtree, with one keystroke
 - **Named changelists** — group the whole staged set (or just one file) in a tabbed Changelists view, drill into any list, and commit it as a unit
 - **Commit** the staged set (or a chosen changelist) through an inline message editor
@@ -138,6 +139,7 @@ The footer shows the most common actions, and `?` opens the full keybindings men
 | `r` | Revert the selected file, or every change under the selected directory (with confirmation) |
 | `d` | Delete the selected file, or every file under the selected directory (with confirmation) |
 | `u` | Update the working copy to the latest revision |
+| `w` | Save a diff to a file in `diffOutputDir` — the highlighted file's, the combined diff of everything under the highlighted directory, or, in the Changelists view, the highlighted changelist's; a prompt asks for the name, and leaving it blank uses the suggested default (see [Configuration](#configuration)) |
 | `R` | Refresh status and history |
 | `/` | Filter (Files/Log) or search (Main/Status) the focused panel; `n`/`N` jump between search matches (see [Filtering & searching](#filtering--searching)) |
 | `D` | Toggle the directory-level diff for the highlighted directory (see [Configuration](#configuration)) |
@@ -190,11 +192,11 @@ You can edit these settings without leaving the app: press `S` to open the setti
 | `hideUntracked` | bool | `false` | Hide untracked (unversioned) files from the Changes and diff panels. Set to `true` to omit them globally; press `U` to toggle them back on for the current session. |
 | `displayFrom` | string | `cwd` | Where the working copy is displayed from: `cwd` shows only what lies under the directory `revision` was started in, `root` shows the whole sandbox from its working-copy root. |
 | `sshKeyPath` | string | `~/.ssh/id_rsa` | The SSH private key to load for `svn+ssh://` working copies (see [Authentication](#authentication)). |
-| `diffOutputDir` | string | `""` | Where diffs created by `revision` are written. Empty means the directory the working copy is displayed from, per `displayFrom`; a leading `~` is expanded to your home directory. |
+| `diffOutputDir` | string | `""` | Where diffs saved with `w` are written; the directory is created if it doesn't exist. Empty means the working copy's root, whichever directory inside it you started `revision` in; a leading `~` is expanded to your home directory. |
 | `logLimit` | int | `100` | How many revisions the Log panel loads. |
 | `editor` | string | `""` | External editor for commit messages. Empty means the in-app editor. |
 
-> `logLimit`, `editor`, and `diffOutputDir` are stored and editable today, but are not applied yet — see the [Roadmap](#roadmap).
+> `logLimit` and `editor` are stored and editable today, but are not applied yet — see the [Roadmap](#roadmap).
 
 Example `~/.config/revision/config.json`:
 
@@ -255,7 +257,7 @@ make cross      # dist/revision-darwin-arm64 and dist/revision-linux-amd64
 
 - **VS Code extension** — a bundled launcher that opens the TUI in an editor terminal, published to the VS Code Marketplace and Open VSX. The scaffolding exists but isn't ready yet.
 - **More configuration** — wiring up the settings already stored in `config.json` (`logLimit`, and an external `$EDITOR` for commit messages), plus keybinding overrides.
-- **Diff export & patching** — save a file's or a changelist's diff as a patch and apply one (`svn diff` → patch → `svn patch`), plus line- and hunk-level staging.
+- **Diff export & patching** — `w` already saves the diff of a file, a directory, or a changelist; still to come is applying a patch back (`svn patch`), plus line- and hunk-level staging.
 - **Branches & tags** — create and switch between them as server-side copies (`svn copy` / `svn switch`).
 - **More review tools** — blame / annotate and conflict-resolution helpers.
 

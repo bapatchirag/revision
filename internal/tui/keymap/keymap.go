@@ -34,6 +34,8 @@ type KeyMap struct {
 	ToggleUntracked key.Binding
 	ToggleCmdLog    key.Binding
 
+	SaveDiff key.Binding
+
 	Filter   key.Binding
 	Refresh  key.Binding
 	Settings key.Binding
@@ -66,6 +68,7 @@ func Default() KeyMap {
 		ToggleDirDiff:   key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "toggle dir diff")),
 		ToggleUntracked: key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "toggle untracked")),
 		ToggleCmdLog:    key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "toggle command log")),
+		SaveDiff:        key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "save diff")),
 		Filter:          key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Refresh:         key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh")),
 		Settings:        key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "settings")),

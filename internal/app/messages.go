@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,6 +29,13 @@ func (e errMsg) Error() string { return e.err.Error() }
 type diffLoadedMsg struct {
 	path string
 	diff string
+	err  error
+}
+
+// diffSavedMsg carries the result of writing a diff to disk, along with the
+// destination it was written to (or attempted).
+type diffSavedMsg struct {
+	path string
 	err  error
 }
 
@@ -161,6 +171,52 @@ func loadDiffCmd(client *svn.Client, path string) tea.Cmd {
 		diff, err := client.Diff(ctx, target)
 		return diffLoadedMsg{path: path, diff: diff, err: err}
 	}
+}
+
+// diffDirPerm and diffFilePerm are the permissions saved diffs are created with:
+// the standard user-owned rwx/rw a shell redirect would produce, since a diff of
+// a working copy the user can already read holds nothing more sensitive.
+const (
+	diffDirPerm  = 0o755
+	diffFilePerm = 0o644
+)
+
+// saveDiffCmd writes diff into dir as name off the UI goroutine.
+func saveDiffCmd(dir, name, diff string) tea.Cmd {
+	return func() tea.Msg { return writeDiff(dir, name, diff) }
+}
+
+// saveChangelistDiffCmd generates the combined diff of the given paths and
+// writes it, off the UI goroutine. It backs saving a changelist, whose diff is
+// not on screen and so has to be produced first.
+func saveChangelistDiffCmd(client *svn.Client, paths []string, dir, name string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		diff, err := client.DiffPaths(ctx, paths)
+		if err != nil {
+			return diffSavedMsg{path: filepath.Join(dir, name), err: err}
+		}
+		return writeDiff(dir, name, diff)
+	}
+}
+
+// writeDiff writes diff into dir as name, creating dir (and any missing parent)
+// when it does not exist yet. A trailing newline is ensured so the result is a
+// well-formed patch. The destination rides on the message either way, so success
+// can name it and failure can say which path it was.
+func writeDiff(dir, name, diff string) diffSavedMsg {
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(dir, diffDirPerm); err != nil {
+		return diffSavedMsg{path: path, err: err}
+	}
+	if !strings.HasSuffix(diff, "\n") {
+		diff += "\n"
+	}
+	if err := os.WriteFile(path, []byte(diff), diffFilePerm); err != nil {
+		return diffSavedMsg{path: path, err: err}
+	}
+	return diffSavedMsg{path: path}
 }
 
 // loadLogCmd runs `svn log` off the UI goroutine. Errors are carried on the

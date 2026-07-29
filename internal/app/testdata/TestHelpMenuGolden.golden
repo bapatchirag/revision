@@ -4,19 +4,19 @@
 │CWD       /home/ali│  Commit staged / changelist         c│                   │
 │Branch    trunk    │  Switch file view               [ / ]│                   │
 │Revision  r42      │  Expand changelist              enter│                   │
-│                   │  Revert file                        r│                   │
-╰───────────────────│  Delete file                        d│                   │
-╭─ [2] ─ Changes ───│  Update working copy                u│                   │
-│  ▾ /              │  Update to revision (Log panel) space│                   │
-│>     M modified.go│  Refresh                            R│                   │
-│                   │  Edit settings                      S│                   │
+│                   │  Revert / delete file           r / d│                   │
+╰───────────────────│  Update working copy                u│                   │
+╭─ [2] ─ Changes ───│  Update to revision (Log panel) space│                   │
+│  ▾ /              │  Refresh                            R│                   │
+│>     M modified.go│  Edit settings                      S│                   │
 │                   │  Jump to panel              1 2 3 4 0│                   │
 │                   │  Cycle panels         tab / shift+tab│                   │
-╰────────────────── │  Move up / down                 k / j│                   │
-╭─ [3] Log ─────────│  Jump top / bottom              g / G│                   │
-│  Rev Author Messag│  Scroll main up / down          K / J│───────────────────╯
-│                   │  Scroll main left / right       h / l│───────────────────╮
-│                   │  Line start / end          home / end│                   │
+│                   │  Move up / down                 k / j│                   │
+╰────────────────── │  Jump top / bottom              g / G│                   │
+╭─ [3] Log ─────────│  Scroll main up / down          K / J│                   │
+│  Rev Author Messag│  Scroll main left / right       h / l│───────────────────╯
+│                   │  Line start / end          home / end│───────────────────╮
+│                   │  Save diff to file                  w│                   │
 │                   │  Toggle dir diff / untracked    D / U│                   │
 │                   │  Toggle command log                 x│                   │
 │                   │  Filter panel                       /│                   │
