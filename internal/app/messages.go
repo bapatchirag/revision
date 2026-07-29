@@ -39,6 +39,21 @@ type diffSavedMsg struct {
 	err  error
 }
 
+// savedDiffsLoadedMsg carries the patch files found in the configured diff
+// output directory, for the Files panel's Diffs view.
+type savedDiffsLoadedMsg struct {
+	files []savedDiff
+	err   error
+}
+
+// savedDiffReadMsg carries the contents of a saved patch file, keyed by the path
+// it was read from so the current selection can match it.
+type savedDiffReadMsg struct {
+	path string
+	text string
+	err  error
+}
+
 // logLoadedMsg carries the result of a `svn log` load.
 type logLoadedMsg struct {
 	entries []svn.LogEntry
@@ -184,6 +199,25 @@ const (
 // saveDiffCmd writes diff into dir as name off the UI goroutine.
 func saveDiffCmd(dir, name, diff string) tea.Cmd {
 	return func() tea.Msg { return writeDiff(dir, name, diff) }
+}
+
+// loadSavedDiffsCmd lists the patch files already saved in dir, off the UI
+// goroutine, for the Diffs view to browse.
+func loadSavedDiffsCmd(dir string) tea.Cmd {
+	return func() tea.Msg {
+		files, err := scanSavedDiffs(dir)
+		return savedDiffsLoadedMsg{files: files, err: err}
+	}
+}
+
+// readSavedDiffCmd reads a saved patch file off the UI goroutine so it can be
+// shown in Main. A read failure is carried on the message rather than promoted
+// to a fatal error, so an unreadable file never tears down the UI.
+func readSavedDiffCmd(path string) tea.Cmd {
+	return func() tea.Msg {
+		b, err := os.ReadFile(path)
+		return savedDiffReadMsg{path: path, text: string(b), err: err}
+	}
 }
 
 // saveChangelistDiffCmd generates the combined diff of the given paths and
