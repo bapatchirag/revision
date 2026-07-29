@@ -181,19 +181,19 @@ If any file is already conflicted, a second prompt says so: `svn` leaves those f
 
 `revision` keeps its settings in `~/.config/revision/config.json` (or `$XDG_CONFIG_HOME/revision/config.json` when that variable is set), created with defaults on first run. Every setting falls back to its built-in default when the file, or an individual key, is absent.
 
-You can edit these settings without leaving the app: press `S` to open the settings editor, adjust a value (`↑`/`↓` move between fields, `←`/`→` cycle the theme and toggle switches), then `Ctrl+S` to save or `Esc` to cancel. Cycling the theme applies it live so you can preview each scheme in place; `Esc` reverts the preview, and `Ctrl+S` keeps it. Saving writes the same `config.json`, and the theme, directory-diff, and hide-untracked changes apply immediately.
+You can edit these settings without leaving the app: press `S` to open the settings editor, adjust a value (`↑`/`↓` move between fields, `←`/`→` cycle the theme and toggle switches), then `Ctrl+S` to save or `Esc` to cancel. Cycling the theme applies it live so you can preview each scheme in place; `Esc` reverts the preview, and `Ctrl+S` keeps it. Saving writes the same `config.json`, and the theme, directory-diff, hide-untracked, and display-scope changes apply immediately.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `theme` | string | `auto` | Colour scheme: `auto`, `everforest`, `dracula`, `nord`, `gruvbox`, or `cipher` (see [Themes](#themes)). |
 | `directoryDiff` | bool | `true` | Show the combined diff of every change beneath a directory when its row is highlighted. Set to `false` to turn directory-level diffs off globally; press `D` to reveal one on demand. |
 | `hideUntracked` | bool | `false` | Hide untracked (unversioned) files from the Changes and diff panels. Set to `true` to omit them globally; press `U` to toggle them back on for the current session. |
+| `displayFrom` | string | `cwd` | Where the working copy is displayed from: `cwd` shows only what lies under the directory `revision` was started in, `root` shows the whole sandbox from its working-copy root. |
 | `sshKeyPath` | string | `~/.ssh/id_rsa` | The SSH private key to load for `svn+ssh://` working copies (see [Authentication](#authentication)). |
-| `defaultPath` | string | `""` | Working copy to open when no `--path` is given. Empty means the current directory. |
 | `logLimit` | int | `100` | How many revisions the Log panel loads. |
 | `editor` | string | `""` | External editor for commit messages. Empty means the in-app editor. |
 
-> `defaultPath`, `logLimit`, and `editor` are stored and editable today, but are not applied yet — see the [Roadmap](#roadmap).
+> `logLimit` and `editor` are stored and editable today, but are not applied yet — see the [Roadmap](#roadmap).
 
 Example `~/.config/revision/config.json`:
 
@@ -201,13 +201,16 @@ Example `~/.config/revision/config.json`:
 {
   "theme": "cipher",
   "directoryDiff": false,
-  "hideUntracked": true
+  "hideUntracked": true,
+  "displayFrom": "root"
 }
 ```
 
 With `directoryDiff` set to `false`, highlighting a directory shows a short hint instead of its diff. Pressing `D` toggles the directory diff for the current session, so you can inspect one without changing the file.
 
 With `hideUntracked` set to `true`, untracked files are left out of the Changes tree, the Changelists view, and the diff panel. Pressing `U` toggles them back into view for the current session, so you can inspect or add one without changing the file.
+
+With `displayFrom` set to `root`, starting `revision` deep inside a working copy still shows the whole sandbox: status, history, and diffs are all rooted at the working-copy root shown on the Status panel's `Root` line. The default, `cwd`, keeps every panel scoped to the directory you started in — the `Source` line names whichever one is in effect.
 
 After an upgrade the file is brought up to date automatically: settings added by a newer version are merged in silently, and a value the running build no longer supports (a retired theme, say) is reset to its default and reported in a startup toast.
 
@@ -249,7 +252,7 @@ make cross      # dist/revision-darwin-arm64 and dist/revision-linux-amd64
 `revision` already covers the everyday SVN workflow. On the horizon:
 
 - **VS Code extension** — a bundled launcher that opens the TUI in an editor terminal, published to the VS Code Marketplace and Open VSX. The scaffolding exists but isn't ready yet.
-- **More configuration** — wiring up the settings already stored in `config.json` (`defaultPath`, `logLimit`, and an external `$EDITOR` for commit messages), plus keybinding overrides.
+- **More configuration** — wiring up the settings already stored in `config.json` (`logLimit`, and an external `$EDITOR` for commit messages), plus keybinding overrides.
 - **Diff export & patching** — save a file's or a changelist's diff as a patch and apply one (`svn diff` → patch → `svn patch`), plus line- and hunk-level staging.
 - **Branches & tags** — create and switch between them as server-side copies (`svn copy` / `svn switch`).
 - **More review tools** — blame / annotate and conflict-resolution helpers.

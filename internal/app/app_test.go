@@ -295,6 +295,78 @@ func fileTreeHasPath(m *Model, path string) bool {
 	return false
 }
 
+// subdirModel builds a model launched inside a subdirectory of the working copy,
+// so the directory the svn client is rooted at reveals the display scope in use.
+func subdirModel(t *testing.T, cfg config.Config) *Model {
+	t.Helper()
+	info := &svn.Info{
+		URL:             "https://svn.example.com/repo/trunk/src",
+		WorkingCopyRoot: "/home/alice/work/wc",
+		Revision:        "42",
+	}
+	m := New(svn.New("/home/alice/work/wc/src"), info, selfupdate.Build{}, cfg)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	return next.(*Model)
+}
+
+func TestDisplayFromCWDKeepsLaunchDirectory(t *testing.T) {
+	m := subdirModel(t, config.Default())
+	if got := m.client.Dir; got != "/home/alice/work/wc/src" {
+		t.Errorf("client.Dir = %q, want the launch directory", got)
+	}
+}
+
+func TestDisplayFromRootRootsClientAtWorkingCopy(t *testing.T) {
+	cfg := config.Default()
+	cfg.DisplayFrom = config.DisplayFromRoot
+	m := subdirModel(t, cfg)
+	if got := m.client.Dir; got != "/home/alice/work/wc" {
+		t.Errorf("client.Dir = %q, want the working-copy root", got)
+	}
+	if m.launchDir != "/home/alice/work/wc/src" {
+		t.Errorf("launchDir = %q, want the directory revision was launched in", m.launchDir)
+	}
+	// The Status panel reports the directory the working copy is displayed from.
+	if view := stripANSI(m.View()); !strings.Contains(view, "Source") {
+		t.Errorf("expected the Status panel to name the source directory, got:\n%s", view)
+	}
+}
+
+func TestSettingsSwitchesDisplayScope(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := subdirModel(t, config.Default())
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	m = next.(*Model)
+	for i := 0; i < 6; i++ {
+		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // to the Display from field
+		m = next.(*Model)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight}) // cwd -> root
+	m = next.(*Model)
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd())
+		m = next.(*Model)
+	}
+
+	if m.cfg.DisplayFrom != config.DisplayFromRoot {
+		t.Fatalf("cfg.DisplayFrom = %q, want %q", m.cfg.DisplayFrom, config.DisplayFromRoot)
+	}
+	if m.client.Dir != "/home/alice/work/wc" {
+		t.Errorf("client.Dir = %q, want the working-copy root after switching scope", m.client.Dir)
+	}
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.DisplayFrom != config.DisplayFromRoot {
+		t.Errorf("persisted DisplayFrom = %q, want %q", got.DisplayFrom, config.DisplayFromRoot)
+	}
+}
+
 func TestHideUntrackedHiddenByConfig(t *testing.T) {
 	cfg := config.Default()
 	cfg.HideUntracked = true
@@ -356,7 +428,7 @@ func TestSettingsSavesHideUntrackedToggle(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
 	m = next.(*Model)
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 4; i++ {
 		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // to the Hide untracked field
 		m = next.(*Model)
 	}
@@ -1982,7 +2054,7 @@ func TestSettingsOpensAndCancels(t *testing.T) {
 		t.Fatal("pressing S did not open the settings editor")
 	}
 	view := stripANSI(m.View())
-	for _, want := range []string{"Settings", "Default path", "Log limit", "Editor", "Theme", "Directory diff", "Hide untracked", "SSH key"} {
+	for _, want := range []string{"Settings", "Log limit", "Editor", "Theme", "Directory diff", "Hide untracked", "SSH key", "Display from"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("settings view missing %q\n---\n%s", want, view)
 		}
@@ -2017,7 +2089,7 @@ func TestSettingsSavesThemeChange(t *testing.T) {
 	m = next.(*Model)
 
 	// Move to the Theme field and cycle one option forward (auto -> everforest).
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 		m = next.(*Model)
 	}
@@ -2063,7 +2135,7 @@ func TestSettingsSavesDirectoryDiffToggle(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
 	m = next.(*Model)
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 3; i++ {
 		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // to the Directory diff field
 		m = next.(*Model)
 	}
@@ -2094,8 +2166,10 @@ func TestSettingsEditsPersistToConfig(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
 	m = next.(*Model)
-	// The cursor starts on the Default path field; type a path.
-	for _, r := range "/srv/repo" {
+	// Move to the Editor field and type an editor command.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(*Model)
+	for _, r := range "nvim" {
 		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		m = next.(*Model)
 	}
@@ -2108,8 +2182,8 @@ func TestSettingsEditsPersistToConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	if got.DefaultPath != "/srv/repo" {
-		t.Errorf("persisted DefaultPath = %q, want /srv/repo", got.DefaultPath)
+	if got.Editor != "nvim" {
+		t.Errorf("persisted Editor = %q, want nvim", got.Editor)
 	}
 }
 

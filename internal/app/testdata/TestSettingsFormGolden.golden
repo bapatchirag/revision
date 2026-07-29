@@ -5,13 +5,13 @@
 │Branch    trunk               ││                                              │
 │Revision  r42                 ││                                              │
 │               ╭─ Settings ───────────────────────────────────╮               │
-╰───────────────│> Default path                                │               │
-╭─ [2] ─ Changes│  Log limit      100                          │               │
-│  ▾ /          │  Editor                                      │               │
-│>     M modifie│  Theme          auto                         │               │
-│               │  Directory diff on                           │               │
+╰───────────────│> Log limit      100                          │               │
+╭─ [2] ─ Changes│  Editor                                      │               │
+│  ▾ /          │  Theme          auto                         │               │
+│>     M modifie│  Directory diff on                           │               │
 │               │  Hide untracked off                          │               │
 │               │  SSH key        ~/.ssh/id_rsa                │               │
+│               │  Display from   cwd                          │               │
 ╰───────────────│                                              │               │
 ╭─ [3] Log ─────│ctrl+s save · ↑↓ move · esc cancel            │               │
 │  Rev Author Me╰──────────────────────────────────────────────╯───────────────╯
