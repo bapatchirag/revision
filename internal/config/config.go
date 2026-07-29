@@ -49,6 +49,25 @@ const (
 // should offer them.
 func DisplayFromValues() []string { return []string{DisplayFromCWD, DisplayFromRoot} }
 
+// The editors accepted by Config.Editor name the program the highlighted file is
+// opened in for editing.
+const (
+	// EditorNative defers to the environment rather than naming a program: the
+	// editor the terminal belongs to, the one $VISUAL/$EDITOR names, or the
+	// desktop's default handler for the file.
+	EditorNative = "native"
+	// EditorVim opens the file in vim (or vi, where that is the one installed).
+	EditorVim = "vim"
+	// EditorNvim opens the file in neovim.
+	EditorNvim = "nvim"
+	// EditorNano opens the file in nano.
+	EditorNano = "nano"
+)
+
+// EditorValues lists the supported editors, in the order a chooser should offer
+// them.
+func EditorValues() []string { return []string{EditorNative, EditorVim, EditorNvim, EditorNano} }
+
 // Config holds revision's persisted user settings. Every field maps to a JSON
 // key; unknown keys in an on-disk file are ignored, and any key omitted from
 // the file falls back to its Default value when loaded.
@@ -57,8 +76,9 @@ type Config struct {
 	// positive; non-positive values found on disk are normalized back to the
 	// default when loaded.
 	LogLimit int `json:"logLimit"`
-	// Editor is the external editor invoked for commit messages. Empty means
-	// use the in-app editor.
+	// Editor names the program the highlighted file is opened in for editing. It
+	// must be one of EditorValues — "vi" is accepted as a spelling of vim — and
+	// any other value is reset to the default when loaded.
 	Editor string `json:"editor"`
 	// Theme selects the color palette by name. Empty is normalized to the
 	// built-in default palette.
@@ -94,7 +114,7 @@ type Config struct {
 func Default() Config {
 	return Config{
 		LogLimit:      100,
-		Editor:        "",
+		Editor:        EditorNative,
 		Theme:         "auto",
 		DirectoryDiff: true,
 		HideUntracked: false,
@@ -132,6 +152,20 @@ func validDisplayFrom(v string) bool {
 		return true
 	}
 	return false
+}
+
+// canonicalEditor resolves v to the editor name the schema stores, ignoring
+// surrounding whitespace and accepting "vi" as a spelling of vim. ok is false
+// when v names no supported editor.
+func canonicalEditor(v string) (string, bool) {
+	switch name := strings.TrimSpace(v); name {
+	case "vi", EditorVim:
+		return EditorVim, true
+	case EditorNative, EditorNvim, EditorNano:
+		return name, true
+	default:
+		return "", false
+	}
 }
 
 // Validator inspects a loaded Config for values that parse correctly but are no
@@ -303,6 +337,11 @@ func (c *Config) normalize() {
 	if strings.TrimSpace(c.SSHKeyPath) == "" {
 		c.SSHKeyPath = def.SSHKeyPath
 	}
+	if name, ok := canonicalEditor(c.Editor); ok {
+		c.Editor = name
+	} else {
+		c.Editor = def.Editor
+	}
 	c.DisplayFrom = strings.TrimSpace(c.DisplayFrom)
 	if !validDisplayFrom(c.DisplayFrom) {
 		c.DisplayFrom = def.DisplayFrom
@@ -334,6 +373,15 @@ func (c *Config) reconcileValues(present map[string]json.RawMessage, validate Va
 	if _, ok := present["displayFrom"]; ok && strings.TrimSpace(c.DisplayFrom) != "" && !validDisplayFrom(c.DisplayFrom) {
 		conflicts = append(conflicts,
 			fmt.Sprintf("displayFrom %q is invalid; reset to %q", c.DisplayFrom, def.DisplayFrom))
+	}
+
+	// Likewise for an editor this build cannot launch — including the blank value
+	// older builds wrote, which no longer selects anything.
+	if _, ok := present["editor"]; ok && strings.TrimSpace(c.Editor) != "" {
+		if _, valid := canonicalEditor(c.Editor); !valid {
+			conflicts = append(conflicts,
+				fmt.Sprintf("editor %q is invalid; reset to %q", c.Editor, def.Editor))
+		}
 	}
 
 	c.normalize()

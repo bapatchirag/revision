@@ -38,6 +38,7 @@ SVN's command line is powerful but verbose for day-to-day work. `revision` wraps
 - **Commit** the staged set (or a chosen changelist) through an inline message editor
 - **Update** the working copy to HEAD, or to any revision picked in the Log panel — conflicts are spelled out before you confirm, and progress shows while `svn` works
 - **Add / revert / delete** a single file or every change beneath a directory, with confirmation prompts before anything destructive
+- **Open the highlighted file in an editor** with `e` — vim, nvim or nano in the terminal, or `native` to hand it to whatever the environment provides, which opens a VS Code tab even when `revision` is running on a remote host
 - Read-only **log / history** viewer with full revision numbers and authors, per-revision detail (date, message, changed paths), and an asterisk marking where the working copy sits
 - **Filter or search any panel** with `/` — the Files and Log lists filter to matching rows (with `rev:` / `user:` / `state:` / `cl:` parameters plus free text over whole commit messages and paths), while the Main and Status views highlight matches in place and jump between them with `n` / `N`
 - **Command log** — the `svn` actions run on your behalf, newest first, each marked ✓ or ✗
@@ -138,6 +139,7 @@ The footer shows the most common actions, and `?` opens the full keybindings men
 | `c` | Commit the staged files, or the selected changelist (opens the message editor) |
 | `r` | Revert the selected file, or every change under the selected directory (with confirmation) |
 | `d` | Delete the selected file, or every file under the selected directory (with confirmation) |
+| `e` | Open the highlighted file in your editor (see [Opening files in an editor](#opening-files-in-an-editor)) |
 | `u` | Update the working copy to the latest revision |
 | `w` | Save a diff to a file in `diffOutputDir` — the highlighted file's, the combined diff of everything under the highlighted directory, or, in the Changelists view, the highlighted changelist's; a prompt asks for the name, and leaving it blank uses the suggested default (see [Configuration](#configuration)) |
 | `R` | Refresh status and history |
@@ -179,11 +181,43 @@ Press `u` to update to the repository's latest revision, or select a revision in
 
 If any file is already conflicted, a second prompt says so: `svn` leaves those files untouched and updates the rest. While `svn` works, a progress dialog shows where the working copy is coming from and going to; the Status panel's revision line and the Log panel's asterisk move once it finishes.
 
+## Opening files in an editor
+
+Press `e` to open the highlighted file for editing — a file in the Changes tree, a file inside an expanded changelist, or a saved patch file in the Diffs view. Directory rows and the Changelists overview have no single file to open, so `e` says so instead.
+
+The `editor` setting chooses what `e` runs:
+
+| Value | What happens |
+|-------|--------------|
+| `native` (default) | The environment decides — see below. |
+| `vim` | Runs `vim` in this terminal, falling back to `vi` when that is the one installed. |
+| `nvim` | Runs `nvim` in this terminal. |
+| `nano` | Runs `nano` in this terminal. |
+
+A terminal editor takes the whole screen over until you quit it, and `revision` re-reads the working copy when it exits, so an edit shows up in the Changes tree and the diff immediately. `native` usually opens the file *beside* `revision` instead, leaving the TUI on screen; refresh with `R` when you're done.
+
+`native` resolves in this order:
+
+1. **A VS Code integrated terminal** — the file opens as a tab in the window the terminal belongs to (Insiders, VSCodium and Cursor are recognized too).
+2. **`$VISUAL` or `$EDITOR`** — run in this terminal, with any flags they carry (`emacs -nw`, `code --wait`).
+3. **The desktop's default handler** — `open` on macOS, `xdg-open` on Linux.
+
+If none of those is available, `e` says so rather than guessing; pick a terminal editor with `S`.
+
+### In VS Code, over a remote connection
+
+When you open a folder with **Remote-SSH** (or a dev container/WSL) and run `revision` in the integrated terminal, `revision` — like the terminal itself — is running *on the server*. Both editor modes are built for that:
+
+- **`vim` / `nvim` / `nano`** run on the server, in the terminal panel, editing the remote file in place. This also works over a plain `ssh` session, `tmux`, or anything else.
+- **`native`** uses the `code` command VS Code injects into the remote shell. That command doesn't run an editor on the server: it forwards the request over the existing connection to the VS Code window on your workstation, which opens the remote file in a tab — exactly as if you had clicked it in the Explorer. `revision` keeps running in the terminal panel below, and the remote file is saved back over the same connection.
+
+One case to know about: if you open a *local* folder and then `ssh` to a server yourself from the integrated terminal, VS Code's environment isn't carried across (`ssh` doesn't forward it), so there is no window for `native` to talk to on the far side. It falls back to `$EDITOR`, and if that is unset the desktop opener fails on a headless server — set `editor` to `vim`, `nvim` or `nano` for those sessions.
+
 ## Configuration
 
 `revision` keeps its settings in `~/.config/revision/config.json` (or `$XDG_CONFIG_HOME/revision/config.json` when that variable is set), created with defaults on first run. Every setting falls back to its built-in default when the file, or an individual key, is absent.
 
-You can edit these settings without leaving the app: press `S` to open the settings editor, adjust a value (`↑`/`↓` move between fields, `←`/`→` cycle the theme and toggle switches), then `Ctrl+S` to save or `Esc` to cancel. Cycling the theme applies it live so you can preview each scheme in place; `Esc` reverts the preview, and `Ctrl+S` keeps it. Saving writes the same `config.json`, and the theme, directory-diff, hide-untracked, and display-scope changes apply immediately.
+You can edit these settings without leaving the app: press `S` to open the settings editor, adjust a value (`↑`/`↓` move between fields, `←`/`→` cycle the theme and editor and toggle switches), then `Ctrl+S` to save or `Esc` to cancel. Cycling the theme applies it live so you can preview each scheme in place; `Esc` reverts the preview, and `Ctrl+S` keeps it. Saving writes the same `config.json`, and the theme, directory-diff, hide-untracked, and display-scope changes apply immediately.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -194,9 +228,9 @@ You can edit these settings without leaving the app: press `S` to open the setti
 | `sshKeyPath` | string | `~/.ssh/id_rsa` | The SSH private key to load for `svn+ssh://` working copies (see [Authentication](#authentication)). |
 | `diffOutputDir` | string | `""` | Where diffs saved with `w` are written; the directory is created if it doesn't exist. Empty means the working copy's root, whichever directory inside it you started `revision` in; a leading `~` is expanded to your home directory. |
 | `logLimit` | int | `100` | How many revisions the Log panel loads. |
-| `editor` | string | `""` | External editor for commit messages. Empty means the in-app editor. |
+| `editor` | string | `native` | Which editor `e` opens the highlighted file in: `native`, `vim` (`vi` also works), `nvim`, or `nano` (see [Opening files in an editor](#opening-files-in-an-editor)). |
 
-> `logLimit` and `editor` are stored and editable today, but are not applied yet — see the [Roadmap](#roadmap).
+> `logLimit` is stored and editable today, but is not applied yet — see the [Roadmap](#roadmap).
 
 Example `~/.config/revision/config.json`:
 
@@ -256,7 +290,7 @@ make cross      # dist/revision-darwin-arm64 and dist/revision-linux-amd64
 `revision` already covers the everyday SVN workflow. On the horizon:
 
 - **VS Code extension** — a bundled launcher that opens the TUI in an editor terminal, published to the VS Code Marketplace and Open VSX. The scaffolding exists but isn't ready yet.
-- **More configuration** — wiring up the settings already stored in `config.json` (`logLimit`, and an external `$EDITOR` for commit messages), plus keybinding overrides.
+- **More configuration** — wiring up the settings already stored in `config.json` (`logLimit`), plus keybinding overrides.
 - **Diff export & patching** — `w` already saves the diff of a file, a directory, or a changelist; still to come is applying a patch back (`svn patch`), plus line- and hunk-level staging.
 - **Branches & tags** — create and switch between them as server-side copies (`svn copy` / `svn switch`).
 - **More review tools** — blame / annotate and conflict-resolution helpers.

@@ -6,7 +6,7 @@
 │Revision  r42                 ││                                              │
 │               ╭─ Settings ───────────────────────────────────╮               │
 ╰───────────────│> Log limit      100                          │               │
-╭─ [2] ─ Changes│  Editor                                      │               │
+╭─ [2] ─ Changes│  Editor         native                       │               │
 │  ▾ /          │  Theme          auto                         │               │
 │>     M modifie│  Directory diff on                           │               │
 │               │  Hide untracked off                          │               │

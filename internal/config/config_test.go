@@ -32,6 +32,9 @@ func TestDefault(t *testing.T) {
 	if def.DiffOutputDir != "" {
 		t.Errorf("Default().DiffOutputDir = %q, want empty (the display root)", def.DiffOutputDir)
 	}
+	if def.Editor != EditorNative {
+		t.Errorf("Default().Editor = %q, want %q", def.Editor, EditorNative)
+	}
 }
 
 func TestDirUsesXDGConfigHome(t *testing.T) {
@@ -210,6 +213,38 @@ func TestLoadDisplayFrom(t *testing.T) {
 			}
 			if got.DisplayFrom != tc.want {
 				t.Errorf("DisplayFrom = %q, want %q", got.DisplayFrom, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadEditor(t *testing.T) {
+	// An unsupported or blank editor falls back to the default; a supported one is
+	// kept, with vi accepted as a spelling of vim.
+	cases := map[string]struct {
+		json string
+		want string
+	}{
+		"native":  {`{"editor":"native"}`, EditorNative},
+		"nvim":    {`{"editor":"nvim"}`, EditorNvim},
+		"padded":  {`{"editor":" nano "}`, EditorNano},
+		"vi":      {`{"editor":"vi"}`, EditorVim},
+		"unknown": {`{"editor":"ed"}`, Default().Editor},
+		"empty":   {`{"editor":""}`, Default().Editor},
+		"absent":  {`{}`, Default().Editor},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(tc.json), 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			got, err := loadFrom(path)
+			if err != nil {
+				t.Fatalf("loadFrom: unexpected error %v", err)
+			}
+			if got.Editor != tc.want {
+				t.Errorf("Editor = %q, want %q", got.Editor, tc.want)
 			}
 		})
 	}
@@ -474,9 +509,30 @@ func TestReconcileResetsUnknownDisplayFrom(t *testing.T) {
 	}
 }
 
+func TestReconcileResetsUnknownEditor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"editor":"ed"}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got, rec, err := reconcileAt(path, nil)
+	if err != nil {
+		t.Fatalf("reconcileAt: unexpected error %v", err)
+	}
+	if got.Editor != Default().Editor {
+		t.Errorf("Editor = %q, want default %q", got.Editor, Default().Editor)
+	}
+	if len(rec.Conflicts) != 1 || !rec.Updated {
+		t.Fatalf("Reconciliation = %+v, want one conflict and Updated", rec)
+	}
+	if note := rec.Notice(); !strings.Contains(note, "editor") {
+		t.Errorf("Notice() = %q, want a message mentioning editor", note)
+	}
+}
+
 func TestReconcileRunsValidatorForDomainConflicts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	const onDisk = `{"logLimit":100,"editor":"","theme":"retired","directoryDiff":true}`
+	const onDisk = `{"logLimit":100,"editor":"native","theme":"retired","directoryDiff":true}`
 	if err := os.WriteFile(path, []byte(onDisk), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}

@@ -476,6 +476,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case editedMsg:
+		if msg.err != nil {
+			m.showToast(failureText("open "+msg.name, msg.err), component.LevelError)
+			return m, nil
+		}
+		if msg.detached {
+			return m, nil
+		}
+		// A terminal editor has exited, so the file may have changed: re-read the
+		// working copy (which reloads the diff on screen) and the saved-diff store.
+		return m, tea.Batch(loadStatusCmd(m.client), loadSavedDiffsCmd(m.diffDir()))
+
 	case errMsg:
 		m.loading = false
 		m.err = msg.err
@@ -887,6 +899,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return m.toggleCmdLog(), true
 	case key.Matches(k, m.keys.SaveDiff):
 		return m.saveDiff(), true
+	case key.Matches(k, m.keys.OpenEditor):
+		return m.openInEditor(), true
 	case key.Matches(k, m.keys.Back):
 		// esc clears the focused panel's filter when it has one; otherwise it is
 		// left for the panel (e.g. to pop a changelist drill).
@@ -1734,6 +1748,9 @@ func (m *Model) submitSettings() tea.Cmd {
 		cfg.LogLimit = n
 	}
 	cfg.Editor = strings.TrimSpace(vals[1])
+	if cfg.Editor == "" {
+		cfg.Editor = config.Default().Editor
+	}
 	cfg.Theme = strings.TrimSpace(vals[2])
 	cfg.DirectoryDiff = vals[3] == "true"
 	cfg.HideUntracked = vals[4] == "true"
@@ -1850,10 +1867,10 @@ func helpMenuItems() []component.MenuItem {
 		{Label: "Switch file view", Key: "[ / ]"},
 		{Label: "Expand changelist", Key: "enter"},
 		{Label: "Revert / delete file", Key: "r / d"},
+		{Label: "Open file in editor", Key: "e"},
 		{Label: "Update working copy", Key: "u"},
 		{Label: "Update to revision (Log panel)", Key: "space"},
-		{Label: "Refresh", Key: "R"},
-		{Label: "Edit settings", Key: "S"},
+		{Label: "Refresh / settings", Key: "R / S"},
 		{Label: "Jump to panel", Key: "1 2 3 4 0"},
 		{Label: "Cycle panels", Key: "tab / shift+tab"},
 		{Label: "Move up / down", Key: "k / j"},
@@ -1896,7 +1913,7 @@ const themeFieldIndex = 2
 func settingsFields(cfg config.Config, dirDiff bool) []component.Field {
 	return []component.Field{
 		{Label: "Log limit", Kind: component.FieldInt, Value: strconv.Itoa(cfg.LogLimit)},
-		{Label: "Editor", Kind: component.FieldText, Value: cfg.Editor},
+		{Label: "Editor", Kind: component.FieldChoice, Value: cfg.Editor, Options: config.EditorValues()},
 		{Label: "Theme", Kind: component.FieldChoice, Value: cfg.Theme, Options: theme.Names()},
 		{Label: "Directory diff", Kind: component.FieldBool, Value: strconv.FormatBool(dirDiff)},
 		{Label: "Hide untracked", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.HideUntracked)},

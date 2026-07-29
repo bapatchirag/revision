@@ -54,6 +54,16 @@ type savedDiffReadMsg struct {
 	err  error
 }
 
+// editedMsg carries the result of opening a file in the configured editor. name
+// is the file as it is shown on screen. detached is true when the editor was
+// handed the file and left running outside the terminal, so nothing can have
+// been saved yet and the working copy need not be re-read.
+type editedMsg struct {
+	name     string
+	detached bool
+	err      error
+}
+
 // logLoadedMsg carries the result of a `svn log` load.
 type logLoadedMsg struct {
 	entries []svn.LogEntry
