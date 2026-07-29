@@ -16,7 +16,7 @@
 ╭─ [3] Log ─────────│  Scroll main up / down          K / J│                   │
 │  Rev Author Messag│  Scroll main left / right       h / l│───────────────────╯
 │                   │  Line start / end          home / end│───────────────────╮
-│                   │  Save diff to file                  w│                   │
+│                   │  Side-by-side / save diff       s / w│                   │
 │                   │  Toggle dir diff / untracked    D / U│                   │
 │                   │  Toggle command log                 x│                   │
 │                   │  Filter panel                       /│                   │

@@ -1,0 +1,10 @@
+╭─ Side-by-side ─────────────────────────────╮
+│before               │after                 │
+│─────────────────────┼──────────────────────│
+│@@ -1,4 +1,5 @@                             │
+│1  package main      │1  package main       │
+│2 -import "fmt"      │2 +import (           │
+│                     │3 +    "fmt"          │
+│                     │4 +)                  │
+│3  func main() {     │5  func main() {      │
+╰── main.go (1/2) · 1-6 of 6 · esc close ────╯
