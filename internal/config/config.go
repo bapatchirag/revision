@@ -35,13 +35,24 @@ const (
 	filePerm fs.FileMode = 0o644
 )
 
+// The display scopes accepted by Config.DisplayFrom name the directory revision
+// shows the working copy from.
+const (
+	// DisplayFromCWD limits the views to the directory revision was started in.
+	DisplayFromCWD = "cwd"
+	// DisplayFromRoot widens the views to the working copy (sandbox) root, no
+	// matter which directory inside it revision was started in.
+	DisplayFromRoot = "root"
+)
+
+// DisplayFromValues lists the supported display scopes, in the order a chooser
+// should offer them.
+func DisplayFromValues() []string { return []string{DisplayFromCWD, DisplayFromRoot} }
+
 // Config holds revision's persisted user settings. Every field maps to a JSON
 // key; unknown keys in an on-disk file are ignored, and any key omitted from
 // the file falls back to its Default value when loaded.
 type Config struct {
-	// DefaultPath is the working copy revision opens when no -path flag is
-	// given. Empty means the current directory.
-	DefaultPath string `json:"defaultPath"`
 	// LogLimit caps how many revisions the Log panel requests. It must be
 	// positive; non-positive values found on disk are normalized back to the
 	// default when loaded.
@@ -66,20 +77,35 @@ type Config struct {
 	// location, ~/.ssh/id_rsa, so the setting always names a concrete key. A
 	// leading ~ is expanded to the user's home directory when the key is used.
 	SSHKeyPath string `json:"sshKeyPath"`
+	// DisplayFrom selects the directory the working copy is displayed from:
+	// DisplayFromCWD (the default) shows only what lies under the directory
+	// revision was started in, while DisplayFromRoot shows the whole working copy
+	// from its root. Any other value is reset to the default when loaded.
+	DisplayFrom string `json:"displayFrom"`
 }
 
 // Default returns the configuration used when no file exists yet or when a
 // field is absent from the on-disk document.
 func Default() Config {
 	return Config{
-		DefaultPath:   "",
 		LogLimit:      100,
 		Editor:        "",
 		Theme:         "auto",
 		DirectoryDiff: true,
 		HideUntracked: false,
 		SSHKeyPath:    "~/.ssh/id_rsa",
+		DisplayFrom:   DisplayFromCWD,
 	}
+}
+
+// validDisplayFrom reports whether v names a display scope the schema defines,
+// ignoring surrounding whitespace.
+func validDisplayFrom(v string) bool {
+	switch strings.TrimSpace(v) {
+	case DisplayFromCWD, DisplayFromRoot:
+		return true
+	}
+	return false
 }
 
 // Validator inspects a loaded Config for values that parse correctly but are no
@@ -251,6 +277,10 @@ func (c *Config) normalize() {
 	if strings.TrimSpace(c.SSHKeyPath) == "" {
 		c.SSHKeyPath = def.SSHKeyPath
 	}
+	c.DisplayFrom = strings.TrimSpace(c.DisplayFrom)
+	if !validDisplayFrom(c.DisplayFrom) {
+		c.DisplayFrom = def.DisplayFrom
+	}
 }
 
 // reconcileValues brings the loaded settings in line with the current schema. It
@@ -269,6 +299,13 @@ func (c *Config) reconcileValues(present map[string]json.RawMessage, validate Va
 	if _, ok := present["logLimit"]; ok && c.LogLimit <= 0 {
 		conflicts = append(conflicts,
 			fmt.Sprintf("logLimit %d is invalid; reset to %d", c.LogLimit, def.LogLimit))
+	}
+
+	// A displayFrom naming a scope the schema doesn't define cannot be honored, so
+	// report which value was dropped before normalize replaces it.
+	if _, ok := present["displayFrom"]; ok && strings.TrimSpace(c.DisplayFrom) != "" && !validDisplayFrom(c.DisplayFrom) {
+		conflicts = append(conflicts,
+			fmt.Sprintf("displayFrom %q is invalid; reset to %q", c.DisplayFrom, def.DisplayFrom))
 	}
 
 	c.normalize()

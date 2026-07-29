@@ -26,6 +26,9 @@ func TestDefault(t *testing.T) {
 	if def.SSHKeyPath != "~/.ssh/id_rsa" {
 		t.Errorf("Default().SSHKeyPath = %q, want %q", def.SSHKeyPath, "~/.ssh/id_rsa")
 	}
+	if def.DisplayFrom != DisplayFromCWD {
+		t.Errorf("Default().DisplayFrom = %q, want %q", def.DisplayFrom, DisplayFromCWD)
+	}
 }
 
 func TestDirUsesXDGConfigHome(t *testing.T) {
@@ -89,11 +92,11 @@ func TestLoadMissingReturnsDefault(t *testing.T) {
 func TestSaveThenLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	want := Config{
-		DefaultPath: "/work/trunk",
 		LogLimit:    50,
 		Editor:      "vim",
 		Theme:       "solarized",
 		SSHKeyPath:  "/home/me/.ssh/id_ed25519",
+		DisplayFrom: DisplayFromRoot,
 	}
 
 	if err := saveTo(path, want); err != nil {
@@ -175,6 +178,37 @@ func TestLoadNormalizesInvalidValues(t *testing.T) {
 	}
 	if got.Theme != Default().Theme {
 		t.Errorf("Theme = %q, want normalized to default %q", got.Theme, Default().Theme)
+	}
+}
+
+func TestLoadDisplayFrom(t *testing.T) {
+	// An unsupported or blank scope falls back to the default; a supported one is
+	// kept, ignoring surrounding whitespace.
+	cases := map[string]struct {
+		json string
+		want string
+	}{
+		"root":    {`{"displayFrom":"root"}`, DisplayFromRoot},
+		"cwd":     {`{"displayFrom":"cwd"}`, DisplayFromCWD},
+		"padded":  {`{"displayFrom":" root "}`, DisplayFromRoot},
+		"unknown": {`{"displayFrom":"sandbox"}`, Default().DisplayFrom},
+		"empty":   {`{"displayFrom":""}`, Default().DisplayFrom},
+		"absent":  {`{}`, Default().DisplayFrom},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(tc.json), 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			got, err := loadFrom(path)
+			if err != nil {
+				t.Fatalf("loadFrom: unexpected error %v", err)
+			}
+			if got.DisplayFrom != tc.want {
+				t.Errorf("DisplayFrom = %q, want %q", got.DisplayFrom, tc.want)
+			}
+		})
 	}
 }
 
@@ -326,7 +360,7 @@ func TestReconcileResetsInvalidValueWithConflict(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	// All keys present, but logLimit is non-positive: an explicit invalid value
 	// that conflicts with the schema and must revert to the default.
-	const onDisk = `{"defaultPath":"","logLimit":0,"editor":"","theme":"auto","directoryDiff":true}`
+	const onDisk = `{"logLimit":0,"editor":"","theme":"auto","directoryDiff":true}`
 	if err := os.WriteFile(path, []byte(onDisk), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -358,9 +392,30 @@ func TestReconcileResetsInvalidValueWithConflict(t *testing.T) {
 	}
 }
 
+func TestReconcileResetsUnknownDisplayFrom(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"displayFrom":"sandbox"}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got, rec, err := reconcileAt(path, nil)
+	if err != nil {
+		t.Fatalf("reconcileAt: unexpected error %v", err)
+	}
+	if got.DisplayFrom != Default().DisplayFrom {
+		t.Errorf("DisplayFrom = %q, want default %q", got.DisplayFrom, Default().DisplayFrom)
+	}
+	if len(rec.Conflicts) != 1 || !rec.Updated {
+		t.Fatalf("Reconciliation = %+v, want one conflict and Updated", rec)
+	}
+	if note := rec.Notice(); !strings.Contains(note, "displayFrom") {
+		t.Errorf("Notice() = %q, want a message mentioning displayFrom", note)
+	}
+}
+
 func TestReconcileRunsValidatorForDomainConflicts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	const onDisk = `{"defaultPath":"","logLimit":100,"editor":"","theme":"retired","directoryDiff":true}`
+	const onDisk = `{"logLimit":100,"editor":"","theme":"retired","directoryDiff":true}`
 	if err := os.WriteFile(path, []byte(onDisk), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}

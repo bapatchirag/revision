@@ -138,6 +138,11 @@ type Model struct {
 	wcRevision       string
 	// workDir is the directory revision was launched from (os.Getwd at startup).
 	workDir string
+	// launchDir is the directory the svn client was pointed at on startup — the
+	// -path target, which is the working directory by default. It is the anchor
+	// for the "cwd" display scope, kept so the scope can be switched back after
+	// the client has been re-rooted at the working copy.
+	launchDir string
 
 	source        mainSource
 	diffPath      string
@@ -262,6 +267,10 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	}
 	m.passEditor.SetSecret(true)
 	m.progress.SetHint("")
+	if client != nil {
+		m.launchDir = client.Dir
+	}
+	m.retargetDisplay(cfg.DisplayFrom)
 	// Mirror user-initiated svn actions into the command log, skipping the
 	// read-only queries revision runs automatically. The recorder is set before
 	// Init runs any command, so no action is missed.
@@ -285,6 +294,27 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	m.workDir, _ = os.Getwd()
 	m.refreshChrome()
 	return m
+}
+
+// retargetDisplay roots the svn client at the directory the given display scope
+// names — the working copy's root for config.DisplayFromRoot, otherwise the
+// directory revision was launched in — so status, history and diffs all describe
+// the same tree. The client is replaced rather than mutated so any command
+// already in flight keeps running against the directory it started with.
+func (m *Model) retargetDisplay(scope string) {
+	if m.client == nil {
+		return
+	}
+	dir := m.launchDir
+	if scope == config.DisplayFromRoot && m.info != nil && m.info.WorkingCopyRoot != "" {
+		dir = m.info.WorkingCopyRoot
+	}
+	if dir == "" || dir == m.client.Dir {
+		return
+	}
+	next := *m.client
+	next.Dir = dir
+	m.client = &next
 }
 
 // Init loads the initial working-copy status and revision history, and — on a
@@ -1598,30 +1628,31 @@ func (m *Model) closeSettings() {
 
 // submitSettings reads the edited fields back into the configuration, applies the
 // changes that take effect immediately (the theme palette, the directory-diff
-// default and the hide-untracked toggle), persists the result, and closes the
-// editor. A blank or non-positive log limit is ignored so the previous value
-// survives; a failed save is non-fatal and surfaced as a toast.
+// default, the hide-untracked toggle and the display scope), persists the result,
+// and closes the editor. A blank or non-positive log limit is ignored so the
+// previous value survives; a failed save is non-fatal and surfaced as a toast.
 func (m *Model) submitSettings() tea.Cmd {
 	vals := m.form.Values()
 	// Field order mirrors settingsFields.
 	cfg := m.cfg
-	cfg.DefaultPath = strings.TrimSpace(vals[0])
-	if n, err := strconv.Atoi(strings.TrimSpace(vals[1])); err == nil && n > 0 {
+	if n, err := strconv.Atoi(strings.TrimSpace(vals[0])); err == nil && n > 0 {
 		cfg.LogLimit = n
 	}
-	cfg.Editor = strings.TrimSpace(vals[2])
-	cfg.Theme = strings.TrimSpace(vals[3])
-	cfg.DirectoryDiff = vals[4] == "true"
-	cfg.HideUntracked = vals[5] == "true"
-	cfg.SSHKeyPath = strings.TrimSpace(vals[6])
+	cfg.Editor = strings.TrimSpace(vals[1])
+	cfg.Theme = strings.TrimSpace(vals[2])
+	cfg.DirectoryDiff = vals[3] == "true"
+	cfg.HideUntracked = vals[4] == "true"
+	cfg.SSHKeyPath = strings.TrimSpace(vals[5])
 	if cfg.SSHKeyPath == "" {
 		cfg.SSHKeyPath = config.Default().SSHKeyPath
 	}
+	cfg.DisplayFrom = strings.TrimSpace(vals[6])
 
 	m.closeSettings()
 
 	themeChanged := cfg.Theme != m.cfg.Theme
 	untrackedChanged := cfg.HideUntracked != m.hideUntracked
+	displayChanged := cfg.DisplayFrom != m.cfg.DisplayFrom
 	m.cfg = cfg
 	m.dirDiff = cfg.DirectoryDiff
 	m.hideUntracked = cfg.HideUntracked
@@ -1631,11 +1662,24 @@ func (m *Model) submitSettings() tea.Cmd {
 	if untrackedChanged {
 		m.rebuildFilesViews()
 	}
+	// A new display scope re-roots every svn command, so the status and history
+	// on screen no longer describe the tree being shown; load them afresh.
+	var reload tea.Cmd
+	if displayChanged {
+		m.retargetDisplay(cfg.DisplayFrom)
+		m.diffPath, m.diffText = "", ""
+		m.loading = true
+		m.refreshChrome()
+		reload = m.beginInitialLoad()
+	}
 	if err := config.Save(m.cfg); err != nil {
 		m.showToast("couldn't save settings: "+err.Error(), component.LevelWarning)
-		return nil
+		return reload
 	}
 	m.showToast("settings saved", component.LevelSuccess)
+	if reload != nil {
+		return reload
+	}
 	m.updateMain()
 	if m.source == sourceFiles {
 		return m.diffLoadForSelection()
@@ -1736,7 +1780,7 @@ func updateMenuItems() []component.MenuItem {
 // themeFieldIndex is the position of the Theme field within settingsFields; the
 // settings editor live-previews the palette when the field at this index
 // changes, and submitSettings reads the same position back as the theme.
-const themeFieldIndex = 3
+const themeFieldIndex = 2
 
 // settingsFields builds the settings editor's fields from the configuration, in
 // the field order submitSettings relies on. The directory-diff field is seeded
@@ -1748,13 +1792,13 @@ const themeFieldIndex = 3
 // from the persisted configuration.
 func settingsFields(cfg config.Config, dirDiff bool) []component.Field {
 	return []component.Field{
-		{Label: "Default path", Kind: component.FieldText, Value: cfg.DefaultPath},
 		{Label: "Log limit", Kind: component.FieldInt, Value: strconv.Itoa(cfg.LogLimit)},
 		{Label: "Editor", Kind: component.FieldText, Value: cfg.Editor},
 		{Label: "Theme", Kind: component.FieldChoice, Value: cfg.Theme, Options: theme.Names()},
 		{Label: "Directory diff", Kind: component.FieldBool, Value: strconv.FormatBool(dirDiff)},
 		{Label: "Hide untracked", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.HideUntracked)},
 		{Label: "SSH key", Kind: component.FieldText, Value: cfg.SSHKeyPath},
+		{Label: "Display from", Kind: component.FieldChoice, Value: cfg.DisplayFrom, Options: config.DisplayFromValues()},
 	}
 }
 
