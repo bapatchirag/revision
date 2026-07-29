@@ -131,8 +131,8 @@ func TestGoldenTableHScroll(t *testing.T) {
 
 func TestGoldenStatusBar(t *testing.T) {
 	b := component.NewStatusBar(testTheme())
-	b.SetLeft("2 files · tab cycle · q quit")
-	b.SetRight("trunk @ r42")
+	b.SetHints([]string{"2 files", "tab cycle", "q quit"})
+	b.SetRight("loading…")
 	b.SetSize(50, 1)
 	golden.RequireEqual(t, []byte(b.View()))
 }

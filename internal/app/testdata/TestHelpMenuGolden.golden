@@ -21,4 +21,4 @@
 │                   │  Toggle command log                 x│                   │
 │                   │  Filter panel                       /│                   │
 ╰───────────────────│  Toggle help                        ?│───────────────────╯
-space stage · n chan│  Quit                               q│· ? help            
+space stage · n chan│  Quit                               q│· [ ] view · ? help 

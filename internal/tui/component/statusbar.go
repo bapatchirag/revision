@@ -11,10 +11,16 @@ import (
 	"github.com/bapatchirag/revision/internal/tui/theme"
 )
 
+// hintSep joins adjacent key hints; hintMore marks hints dropped for width.
+const (
+	hintSep  = " · "
+	hintMore = "…"
+)
+
 // StatusBar is a single-line bar showing left-aligned contextual key hints and
-// right-aligned context (such as repo and revision). It is not focusable.
+// right-aligned context (such as a load state). It is not focusable.
 type StatusBar struct {
-	left  string
+	hints []string
 	right string
 	width int
 	theme theme.Theme
@@ -37,10 +43,11 @@ func (s *StatusBar) Init() tea.Cmd { return nil }
 // Update implements tui.Component; the status bar is passive.
 func (s *StatusBar) Update(tea.Msg) tea.Cmd { return nil }
 
-// SetLeft sets the left-aligned text (typically key hints).
-func (s *StatusBar) SetLeft(text string) { s.left = text }
+// SetHints sets the left-aligned key hints, shown in the given order. An empty
+// slice leaves the left side blank.
+func (s *StatusBar) SetHints(hints []string) { s.hints = hints }
 
-// SetRight sets the right-aligned text (typically repo/revision context).
+// SetRight sets the right-aligned text (typically a load state).
 func (s *StatusBar) SetRight(text string) { s.right = text }
 
 // SetSize implements tui.Sizeable; only the width is used.
@@ -49,16 +56,48 @@ func (s *StatusBar) SetSize(width, _ int) { s.width = width }
 // SetTheme implements tui.Themeable.
 func (s *StatusBar) SetTheme(th theme.Theme) { s.theme = th }
 
-// View renders the bar, truncating to the available width.
+// View renders the bar, dropping the hints that do not fit beside the
+// right-aligned text.
 func (s *StatusBar) View() string {
-	hint := lipgloss.NewStyle().Foreground(s.theme.Muted)
+	style := lipgloss.NewStyle().Foreground(s.theme.Muted)
 	if s.width <= 0 {
-		return hint.Render(strings.TrimSpace(s.left + " " + s.right))
+		return style.Render(strings.TrimSpace(strings.Join(s.hints, hintSep) + " " + s.right))
 	}
-	left := ansi.Truncate(s.left, s.width, "…")
+	avail := s.width
+	if s.right != "" {
+		avail -= ansi.StringWidth(s.right) + 1 // 1 column keeps the two sides apart
+	}
+	left := s.fitHints(avail)
 	gap := s.width - ansi.StringWidth(left) - ansi.StringWidth(s.right)
 	if gap < 1 {
-		return hint.Render(fitLine(left, s.width))
+		return style.Render(fitLine(left, s.width))
 	}
-	return hint.Render(left + strings.Repeat(" ", gap) + s.right)
+	return style.Render(left + strings.Repeat(" ", gap) + s.right)
+}
+
+// fitHints joins the hints into avail columns, keeping whole hints and ending
+// with an ellipsis when any had to be dropped.
+func (s *StatusBar) fitHints(avail int) string {
+	if len(s.hints) == 0 || avail <= 0 {
+		return ""
+	}
+	full := strings.Join(s.hints, hintSep)
+	if ansi.StringWidth(full) <= avail {
+		return full
+	}
+	kept := ""
+	for i, h := range s.hints {
+		if i > 0 {
+			h = hintSep + h
+		}
+		if ansi.StringWidth(kept+h+hintSep+hintMore) > avail {
+			break
+		}
+		kept += h
+	}
+	if kept == "" {
+		// Not even the first hint fits alongside the ellipsis; clip it instead.
+		return ansi.Truncate(s.hints[0], avail, hintMore)
+	}
+	return kept + hintSep + hintMore
 }

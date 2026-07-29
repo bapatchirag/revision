@@ -681,3 +681,31 @@ func TestPromptSecretMasksValue(t *testing.T) {
 		t.Errorf("Value() = %q, want hunter2", p.Value())
 	}
 }
+
+// TestStatusBarDropsHintsThatDoNotFit asserts the bar keeps whole hints and
+// marks the dropped tail with an ellipsis rather than clipping mid-hint.
+func TestStatusBarDropsHintsThatDoNotFit(t *testing.T) {
+	b := component.NewStatusBar(testTheme())
+	b.SetHints([]string{"space stage", "n changelist", "c commit", "r revert"})
+	b.SetSize(30, 1)
+
+	got := strings.TrimRight(b.View(), " ")
+	if want := "space stage · n changelist · …"; got != want {
+		t.Errorf("View() = %q, want %q", got, want)
+	}
+	if w := ansi.StringWidth(b.View()); w != 30 {
+		t.Errorf("rendered width = %d, want 30", w)
+	}
+}
+
+// TestStatusBarWithoutHintsIsBlank asserts a panel with no keys of its own
+// leaves the bar empty instead of advertising another panel's keys.
+func TestStatusBarWithoutHintsIsBlank(t *testing.T) {
+	b := component.NewStatusBar(testTheme())
+	b.SetHints(nil)
+	b.SetSize(20, 1)
+
+	if got := strings.TrimSpace(b.View()); got != "" {
+		t.Errorf("View() = %q, want blank", got)
+	}
+}
