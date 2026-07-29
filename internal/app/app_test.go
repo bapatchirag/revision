@@ -2487,11 +2487,11 @@ func TestSettingsEditsPersistToConfig(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
 	m = next.(*Model)
-	// Move to the Editor field and type an editor command.
+	// Move to the Editor field and cycle it forward to nvim (native -> vim -> nvim).
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = next.(*Model)
-	for _, r := range "nvim" {
-		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	for i := 0; i < 2; i++ {
+		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
 		m = next.(*Model)
 	}
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
