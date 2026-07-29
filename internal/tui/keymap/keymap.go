@@ -18,6 +18,11 @@ type KeyMap struct {
 	LineStart key.Binding
 	LineEnd   key.Binding
 
+	WordLeft        key.Binding
+	WordRight       key.Binding
+	DeleteWordLeft  key.Binding
+	DeleteWordRight key.Binding
+
 	Enter   key.Binding
 	Confirm key.Binding
 	Cancel  key.Binding
@@ -48,16 +53,24 @@ type KeyMap struct {
 // Default returns the standard, lazygit-flavored bindings.
 func Default() KeyMap {
 	return KeyMap{
-		Up:              key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
-		Down:            key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
-		Left:            key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "left")),
-		Right:           key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "right")),
-		PageUp:          key.NewBinding(key.WithKeys("pgup", "K"), key.WithHelp("PgUp", "page up")),
-		PageDown:        key.NewBinding(key.WithKeys("pgdown", "J"), key.WithHelp("PgDn", "page down")),
-		Top:             key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "top")),
-		Bottom:          key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "bottom")),
-		LineStart:       key.NewBinding(key.WithKeys("home", "^"), key.WithHelp("home", "line start")),
-		LineEnd:         key.NewBinding(key.WithKeys("end", "$"), key.WithHelp("end", "line end")),
+		Up:        key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
+		Down:      key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
+		Left:      key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "left")),
+		Right:     key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "right")),
+		PageUp:    key.NewBinding(key.WithKeys("pgup", "K"), key.WithHelp("PgUp", "page up")),
+		PageDown:  key.NewBinding(key.WithKeys("pgdown", "J"), key.WithHelp("PgDn", "page down")),
+		Top:       key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "top")),
+		Bottom:    key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "bottom")),
+		LineStart: key.NewBinding(key.WithKeys("home", "^"), key.WithHelp("home", "line start")),
+		LineEnd:   key.NewBinding(key.WithKeys("end", "$"), key.WithHelp("end", "line end")),
+		// Word-wise editing inside text inputs. Each action lists every encoding a
+		// common macOS or Linux terminal sends for it: the modifier form (alt+←),
+		// the meta-prefixed form macOS Terminal sends for option+← (alt+b), and the
+		// ctrl+arrow / ctrl+w forms used across Linux terminals and readline.
+		WordLeft:        key.NewBinding(key.WithKeys("alt+left", "ctrl+left", "alt+b"), key.WithHelp("alt+←", "word left")),
+		WordRight:       key.NewBinding(key.WithKeys("alt+right", "ctrl+right", "alt+f"), key.WithHelp("alt+→", "word right")),
+		DeleteWordLeft:  key.NewBinding(key.WithKeys("alt+backspace", "ctrl+w"), key.WithHelp("alt+⌫", "delete word left")),
+		DeleteWordRight: key.NewBinding(key.WithKeys("alt+delete", "alt+d"), key.WithHelp("alt+⌦", "delete word right")),
 		Enter:           key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
 		Confirm:         key.NewBinding(key.WithKeys("enter", "y"), key.WithHelp("enter", "confirm")),
 		Cancel:          key.NewBinding(key.WithKeys("esc", "n"), key.WithHelp("esc", "cancel")),

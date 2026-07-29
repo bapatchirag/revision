@@ -130,6 +130,26 @@ func (p *Prompt) Update(m tea.Msg) tea.Cmd {
 	case key.Matches(km, p.keys.Back):
 		id := p.id
 		return func() tea.Msg { return msg.DismissMsg{ID: id} }
+	case key.Matches(km, p.keys.WordLeft):
+		if !p.listFocused {
+			p.wordMove(-1)
+		}
+		return nil
+	case key.Matches(km, p.keys.WordRight):
+		if !p.listFocused {
+			p.wordMove(1)
+		}
+		return nil
+	case key.Matches(km, p.keys.DeleteWordLeft):
+		if !p.listFocused {
+			p.wordDelete(-1)
+		}
+		return nil
+	case key.Matches(km, p.keys.DeleteWordRight):
+		if !p.listFocused {
+			p.wordDelete(1)
+		}
+		return nil
 	}
 	switch km.Type {
 	case tea.KeyTab, tea.KeyShiftTab:
@@ -224,6 +244,37 @@ func (p *Prompt) backspace() {
 	}
 	p.value = append(p.value[:p.col-1], p.value[p.col:]...)
 	p.col--
+}
+
+// wordMove moves the cursor one word left (delta < 0) or right (delta > 0). A
+// secret value is masked on screen, so stepping over its words would expose
+// where they start and end; the cursor jumps to the ends of the value instead.
+func (p *Prompt) wordMove(delta int) {
+	switch {
+	case p.secret && delta < 0:
+		p.col = 0
+	case p.secret:
+		p.col = len(p.value)
+	case delta < 0:
+		p.col = wordStart(p.value, p.col)
+	default:
+		p.col = wordEnd(p.value, p.col)
+	}
+}
+
+// wordDelete removes the word before (delta < 0) or after (delta > 0) the
+// cursor, clearing to the corresponding end of a secret value instead.
+func (p *Prompt) wordDelete(delta int) {
+	switch {
+	case p.secret && delta < 0:
+		p.value, p.col = append([]rune(nil), p.value[p.col:]...), 0
+	case p.secret:
+		p.value = p.value[:p.col]
+	case delta < 0:
+		p.value, p.col = cutWordLeft(p.value, p.col)
+	default:
+		p.value = cutWordRight(p.value, p.col)
+	}
 }
 
 // View renders the input (with a cursor while focused) inside a titled box, over

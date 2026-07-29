@@ -63,5 +63,22 @@ func keyEnd() tea.KeyMsg   { return tea.KeyMsg{Type: tea.KeyEnd} }
 func keyBackspace() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyBackspace} }
 func keyCtrlS() tea.KeyMsg     { return tea.KeyMsg{Type: tea.KeyCtrlS} }
 
+// Word-wise editing keys, in the encodings the terminals send them: macOS
+// option+←/→ and option+delete arrive as alt+left/alt+right/alt+backspace on
+// most terminals and as the meta-prefixed alt+b/alt+f in macOS Terminal, while
+// Linux terminals also send ctrl+left/ctrl+right and ctrl+w.
+func keyAltLeft() tea.KeyMsg      { return tea.KeyMsg{Type: tea.KeyLeft, Alt: true} }
+func keyAltRight() tea.KeyMsg     { return tea.KeyMsg{Type: tea.KeyRight, Alt: true} }
+func keyAltBackspace() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyBackspace, Alt: true} }
+func keyAltDelete() tea.KeyMsg    { return tea.KeyMsg{Type: tea.KeyDelete, Alt: true} }
+func keyCtrlLeft() tea.KeyMsg     { return tea.KeyMsg{Type: tea.KeyCtrlLeft} }
+func keyCtrlRight() tea.KeyMsg    { return tea.KeyMsg{Type: tea.KeyCtrlRight} }
+func keyCtrlW() tea.KeyMsg        { return tea.KeyMsg{Type: tea.KeyCtrlW} }
+
+// altRunes builds the meta-prefixed key macOS Terminal sends for option+letter.
+func altRunes(s string) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s), Alt: true}
+}
+
 // runes builds a key message that types the given text.
 func runes(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }

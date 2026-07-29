@@ -103,6 +103,18 @@ func (s *SearchBar) Update(m tea.Msg) tea.Cmd {
 	case key.Matches(km, s.keys.Back):
 		id := s.id
 		return func() tea.Msg { return msg.DismissMsg{ID: id} }
+	case key.Matches(km, s.keys.WordLeft):
+		s.col = wordStart(s.value, s.col)
+		return nil
+	case key.Matches(km, s.keys.WordRight):
+		s.col = wordEnd(s.value, s.col)
+		return nil
+	case key.Matches(km, s.keys.DeleteWordLeft):
+		s.value, s.col = cutWordLeft(s.value, s.col)
+		return nil
+	case key.Matches(km, s.keys.DeleteWordRight):
+		s.value = cutWordRight(s.value, s.col)
+		return nil
 	}
 	switch km.Type {
 	case tea.KeyLeft:

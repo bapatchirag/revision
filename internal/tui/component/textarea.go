@@ -114,6 +114,10 @@ func (ta *TextArea) Update(m tea.Msg) tea.Cmd {
 		id, val := ta.id, ta.Value()
 		return func() tea.Msg { return msg.SubmitMsg{ID: id, Value: val} }
 	}
+	if ta.editWord(km) {
+		ta.clampOffset()
+		return nil
+	}
 	switch km.Type {
 	case tea.KeyEsc:
 		id := ta.id
@@ -284,6 +288,51 @@ func (ta *TextArea) moveDown() {
 	if n := len(ta.currentRunes()); ta.col > n {
 		ta.col = n
 	}
+}
+
+// editWord applies the word-wise motion and deletion keys, reporting whether km
+// was one of them. Like the plain cursor keys these wrap across rows, so a word
+// motion at the edge of a line steps onto the neighbouring one.
+func (ta *TextArea) editWord(km tea.KeyMsg) bool {
+	switch {
+	case key.Matches(km, ta.keys.WordLeft):
+		if ta.col == 0 {
+			ta.moveLeft()
+		}
+		ta.col = wordStart(ta.currentRunes(), ta.col)
+	case key.Matches(km, ta.keys.WordRight):
+		if ta.col >= len(ta.currentRunes()) {
+			ta.moveRight()
+		}
+		ta.col = wordEnd(ta.currentRunes(), ta.col)
+	case key.Matches(km, ta.keys.DeleteWordLeft):
+		if ta.col == 0 {
+			ta.backspace() // nothing to cut on this row: pull it onto the previous one
+			return true
+		}
+		runes, col := cutWordLeft(ta.currentRunes(), ta.col)
+		ta.lines[ta.row], ta.col = string(runes), col
+	case key.Matches(km, ta.keys.DeleteWordRight):
+		line := ta.currentRunes()
+		if ta.col >= len(line) {
+			ta.joinNextLine()
+			return true
+		}
+		ta.lines[ta.row] = string(cutWordRight(line, ta.col))
+	default:
+		return false
+	}
+	return true
+}
+
+// joinNextLine appends the following line to the current one, deleting the
+// newline between them.
+func (ta *TextArea) joinNextLine() {
+	if ta.row >= len(ta.lines)-1 {
+		return
+	}
+	ta.lines[ta.row] += ta.lines[ta.row+1]
+	ta.lines = append(ta.lines[:ta.row+1], ta.lines[ta.row+2:]...)
 }
 
 func (ta *TextArea) isEmpty() bool {
