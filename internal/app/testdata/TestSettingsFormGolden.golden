@@ -12,10 +12,10 @@
 │               │  Hide untracked off                          │               │
 │               │  SSH key        ~/.ssh/id_rsa                │               │
 │               │  Display from   cwd                          │               │
-╰───────────────│                                              │               │
-╭─ [3] Log ─────│ctrl+s save · ↑↓ move · esc cancel            │               │
-│  Rev Author Me╰──────────────────────────────────────────────╯───────────────╯
-│                              │╭─ [4] Command Log ────────────────────────────╮
+╰───────────────│  Diff output                                 │               │
+╭─ [3] Log ─────│                                              │               │
+│  Rev Author Me│ctrl+s save · ↑↓ move · esc cancel            │───────────────╯
+│               ╰──────────────────────────────────────────────╯───────────────╮
 │                              ││No svn commands run yet.                      │
 │                              ││                                              │
 │                              ││                                              │

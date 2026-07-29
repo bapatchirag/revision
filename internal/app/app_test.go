@@ -2054,7 +2054,7 @@ func TestSettingsOpensAndCancels(t *testing.T) {
 		t.Fatal("pressing S did not open the settings editor")
 	}
 	view := stripANSI(m.View())
-	for _, want := range []string{"Settings", "Log limit", "Editor", "Theme", "Directory diff", "Hide untracked", "SSH key", "Display from"} {
+	for _, want := range []string{"Settings", "Log limit", "Editor", "Theme", "Directory diff", "Hide untracked", "SSH key", "Display from", "Diff output"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("settings view missing %q\n---\n%s", want, view)
 		}

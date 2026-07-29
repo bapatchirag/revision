@@ -1647,6 +1647,7 @@ func (m *Model) submitSettings() tea.Cmd {
 		cfg.SSHKeyPath = config.Default().SSHKeyPath
 	}
 	cfg.DisplayFrom = strings.TrimSpace(vals[6])
+	cfg.DiffOutputDir = strings.TrimSpace(vals[7])
 
 	m.closeSettings()
 
@@ -1799,6 +1800,7 @@ func settingsFields(cfg config.Config, dirDiff bool) []component.Field {
 		{Label: "Hide untracked", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.HideUntracked)},
 		{Label: "SSH key", Kind: component.FieldText, Value: cfg.SSHKeyPath},
 		{Label: "Display from", Kind: component.FieldChoice, Value: cfg.DisplayFrom, Options: config.DisplayFromValues()},
+		{Label: "Diff output", Kind: component.FieldText, Value: cfg.DiffOutputDir},
 	}
 }
 
