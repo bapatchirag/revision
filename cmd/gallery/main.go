@@ -76,8 +76,8 @@ func newModel() model {
 	table.Focus()
 
 	bar := component.NewStatusBar(th)
-	bar.SetLeft("j/k move · enter select · q quit")
-	bar.SetRight("gallery @ demo")
+	bar.SetHints([]string{"j/k move", "enter select", "q quit"})
+	bar.SetRight("loading…")
 
 	inner := component.NewList[string]("panel-list", func(s string) string { return s }, th, keys)
 	inner.SetItems([]string{"README.md", "cmd/gallery/main.go", "PLAN.md", "LOG.md"})

@@ -120,13 +120,13 @@ func TestTeatestPanelRenders(t *testing.T) {
 
 func TestTeatestStatusBarRenders(t *testing.T) {
 	b := component.NewStatusBar(testTheme())
-	b.SetLeft("q quit")
-	b.SetRight("trunk @ r42")
+	b.SetHints([]string{"q quit"})
+	b.SetRight("loading…")
 	b.SetSize(40, 1)
 
 	tm := teatest.NewTestModel(t, asModel(b), teatest.WithInitialTermSize(60, 5))
 	nudge(tm)
-	assertContains(t, finalOutput(t, tm), "trunk @ r42")
+	assertContains(t, finalOutput(t, tm), "q quit", "loading…")
 }
 
 func TestTeatestToastRenders(t *testing.T) {

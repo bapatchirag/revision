@@ -2564,25 +2564,6 @@ func (m *Model) headRevision() string {
 	return m.logEntries[0].Revision
 }
 
-// revisionLabel describes where the working copy sits relative to the
-// repository: its current revision and, once history has loaded, whether that is
-// HEAD or how far behind it trails. It is empty only before either is known.
-func (m *Model) revisionLabel() string {
-	wc, head := m.wcRevision, m.headRevision()
-	switch {
-	case wc == "" && head == "":
-		return ""
-	case wc == "":
-		return "HEAD r" + head
-	case head == "":
-		return "r" + wc
-	case head == wc:
-		return "r" + wc + " (HEAD)"
-	default:
-		return "r" + wc + " · HEAD r" + head
-	}
-}
-
 // updateMain fills the Main panel from whichever side panel currently drives it.
 // The Main and Status panels are searched (not filtered): any active search
 // re-highlights against the new content inside the Viewport, so nothing is set
@@ -2788,71 +2769,84 @@ func (m *Model) logDetail() string {
 	return strings.Join(lines, "\n")
 }
 
-// updateBar sets the contextual key hints and right-aligned repo context.
+// updateBar sets the contextual key hints and the right-aligned load state.
 func (m *Model) updateBar() {
-	m.bar.SetLeft(m.barHint())
+	m.bar.SetHints(m.barHints())
 
 	switch {
 	case m.err != nil:
 		m.bar.SetRight("error")
 	case m.loading:
 		m.bar.SetRight("loading…")
-	case m.info != nil:
-		right := m.info.URL
-		if rev := m.revisionLabel(); rev != "" {
-			right += " @ " + rev
-		}
-		m.bar.SetRight(right)
 	default:
 		m.bar.SetRight("")
 	}
 }
 
-// barHint returns the contextual keybinding hint for the current Files-panel
-// view: the Changelists overview and its drill-down each get their own hints,
-// the Changes view (and every other panel) get the file-oriented hint. When the
-// focused panel has an active filter or search (and the input is closed) it is
-// prefixed so the user can see it, jump between search matches, and clear it.
-func (m *Model) barHint() string {
+// barHints returns the key hints for the focused panel — and, for the Files
+// panel, its active view — in the order the bar should drop them when they do
+// not all fit. Only keys that act on that panel are listed; the global ones live
+// in the help menu, so a panel that only scrolls (the command log) gets no hints
+// and leaves the bar empty. When the focused panel has an active filter or
+// search (and the input is closed) it is described first, so the user can see
+// it, jump between search matches, and clear it.
+func (m *Model) barHints() []string {
 	p := m.focus.Index()
+	hints := m.panelHints(p)
+	if len(hints) == 0 {
+		return nil
+	}
+	hints = append(hints, "? help")
 	if q := m.filters[p]; q != "" && !m.filtering {
 		if m.isSearchPanel(p) {
-			return m.searchHint(p, q) + " · " + m.baseHint()
+			return append(m.searchHints(p, q), hints...)
 		}
-		return "filter: " + q + " · esc clear · " + m.baseHint()
+		return append([]string{"filter: " + q, "esc clear"}, hints...)
 	}
-	return m.baseHint()
+	return hints
 }
 
-// searchHint describes the active search on a Viewport panel: the query, the
+// panelHints are the keys panel p responds to, most useful first.
+func (m *Model) panelHints(p int) []string {
+	switch p {
+	case panelStatus, panelMain:
+		return []string{"/ search"}
+	case panelFiles:
+		return m.filesHints()
+	case panelLog:
+		return []string{"space update to rev", "c commit", "/ filter"}
+	}
+	// The command log only scrolls; it has no actions of its own.
+	return nil
+}
+
+// filesHints are the Files panel's keys for its active view: the saved-diff
+// browser, a drilled-in changelist, the Changelists overview, or the Changes
+// tree.
+func (m *Model) filesHints() []string {
+	switch {
+	case m.filesViewIsDiffs():
+		return []string{"e open", "/ filter", "[ ] view"}
+	case m.inChangelistDrill():
+		return []string{"space unstage", "c commit", "esc back", "[ ] view"}
+	case m.filesViewIsChangelists():
+		return []string{"enter expand", "n name", "c commit", "[ ] view"}
+	}
+	return []string{"space stage", "n changelist", "c commit", "r revert", "d delete", "[ ] view"}
+}
+
+// searchHints describe the active search on a Viewport panel: the query, the
 // current match position (or that there are none), and the jump/clear keys.
-func (m *Model) searchHint(p int, q string) string {
+func (m *Model) searchHints(p int, q string) []string {
 	vp := m.searchViewport(p)
 	if vp.MatchCount() == 0 {
-		return "search: " + q + " · no matches · esc clear"
+		return []string{"search: " + q, "no matches", "esc clear"}
 	}
-	pos := vp.CurrentMatch()
-	if pos == 0 {
-		return fmt.Sprintf("search: %s · %d matches · n next · N prev · esc clear", q, vp.MatchCount())
+	where := fmt.Sprintf("%d matches", vp.MatchCount())
+	if pos := vp.CurrentMatch(); pos > 0 {
+		where = fmt.Sprintf("%d/%d", pos, vp.MatchCount())
 	}
-	return fmt.Sprintf("search: %s · %d/%d · n next · N prev · esc clear", q, pos, vp.MatchCount())
-}
-
-// baseHint is the panel-specific key hint without any filter annotation.
-func (m *Model) baseHint() string {
-	if m.focus.Index() == panelFiles && m.filesViewIsDiffs() {
-		return "saved diffs · [ ] view · ? help"
-	}
-	if m.focus.Index() == panelFiles && m.filesViewIsChangelists() {
-		if m.inChangelistDrill() {
-			return "space unstage · c commit · esc back · [ ] view · ? help"
-		}
-		return "enter expand · c commit · [ ] view · n name · ? help"
-	}
-	if m.focus.Index() == panelLog {
-		return "space update to rev · c commit · ? help"
-	}
-	return "space stage · n changelist · c commit · r revert · d delete · ? help"
+	return []string{"search: " + q, where, "n next", "N prev", "esc clear"}
 }
 
 func clamp(v, lo, hi int) int {
