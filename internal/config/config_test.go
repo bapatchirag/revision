@@ -29,6 +29,9 @@ func TestDefault(t *testing.T) {
 	if def.DisplayFrom != DisplayFromCWD {
 		t.Errorf("Default().DisplayFrom = %q, want %q", def.DisplayFrom, DisplayFromCWD)
 	}
+	if def.DiffOutputDir != "" {
+		t.Errorf("Default().DiffOutputDir = %q, want empty (the display root)", def.DiffOutputDir)
+	}
 }
 
 func TestDirUsesXDGConfigHome(t *testing.T) {
@@ -236,6 +239,64 @@ func TestLoadDefaultsSSHKeyWhenBlank(t *testing.T) {
 			}
 			if got.SSHKeyPath != tc.want {
 				t.Errorf("SSHKeyPath = %q, want %q", got.SSHKeyPath, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadDiffOutputDir(t *testing.T) {
+	// A blank directory is a valid value meaning "the display root", so it is kept
+	// as-is rather than replaced; an explicit one survives surrounding whitespace.
+	cases := map[string]struct {
+		json string
+		want string
+	}{
+		"explicit":   {`{"diffOutputDir":"/tmp/patches"}`, "/tmp/patches"},
+		"padded":     {`{"diffOutputDir":"  /tmp/patches  "}`, "/tmp/patches"},
+		"whitespace": {`{"diffOutputDir":"   "}`, ""},
+		"empty":      {`{"diffOutputDir":""}`, ""},
+		"absent":     {`{}`, ""},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(tc.json), 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			got, err := loadFrom(path)
+			if err != nil {
+				t.Fatalf("loadFrom: unexpected error %v", err)
+			}
+			if got.DiffOutputDir != tc.want {
+				t.Errorf("DiffOutputDir = %q, want %q", got.DiffOutputDir, tc.want)
+			}
+		})
+	}
+}
+
+func TestDiffDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	const displayRoot = "/home/alice/work/wc"
+
+	cases := map[string]struct {
+		configured string
+		want       string
+	}{
+		"unset falls back to the display root": {"", displayRoot},
+		"blank falls back to the display root": {"   ", displayRoot},
+		"absolute path is used as written":     {"/tmp/patches", "/tmp/patches"},
+		"relative path is used as written":     {"patches", "patches"},
+		"leading ~ expands to home":            {"~/patches", filepath.Join(home, "patches")},
+		"bare ~ expands to home":               {"~", home},
+		"~ inside a path is literal":           {"/tmp/~/patches", "/tmp/~/patches"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := Default()
+			cfg.DiffOutputDir = tc.configured
+			if got := cfg.DiffDir(displayRoot); got != tc.want {
+				t.Errorf("DiffDir(%q) with diffOutputDir %q = %q, want %q", displayRoot, tc.configured, got, tc.want)
 			}
 		})
 	}

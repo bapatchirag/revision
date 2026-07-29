@@ -190,10 +190,11 @@ You can edit these settings without leaving the app: press `S` to open the setti
 | `hideUntracked` | bool | `false` | Hide untracked (unversioned) files from the Changes and diff panels. Set to `true` to omit them globally; press `U` to toggle them back on for the current session. |
 | `displayFrom` | string | `cwd` | Where the working copy is displayed from: `cwd` shows only what lies under the directory `revision` was started in, `root` shows the whole sandbox from its working-copy root. |
 | `sshKeyPath` | string | `~/.ssh/id_rsa` | The SSH private key to load for `svn+ssh://` working copies (see [Authentication](#authentication)). |
+| `diffOutputDir` | string | `""` | Where diffs created by `revision` are written. Empty means the directory the working copy is displayed from, per `displayFrom`; a leading `~` is expanded to your home directory. |
 | `logLimit` | int | `100` | How many revisions the Log panel loads. |
 | `editor` | string | `""` | External editor for commit messages. Empty means the in-app editor. |
 
-> `logLimit` and `editor` are stored and editable today, but are not applied yet — see the [Roadmap](#roadmap).
+> `logLimit`, `editor`, and `diffOutputDir` are stored and editable today, but are not applied yet — see the [Roadmap](#roadmap).
 
 Example `~/.config/revision/config.json`:
 
@@ -202,7 +203,8 @@ Example `~/.config/revision/config.json`:
   "theme": "cipher",
   "directoryDiff": false,
   "hideUntracked": true,
-  "displayFrom": "root"
+  "displayFrom": "root",
+  "diffOutputDir": "~/patches"
 }
 ```
 

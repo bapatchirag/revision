@@ -82,6 +82,11 @@ type Config struct {
 	// revision was started in, while DisplayFromRoot shows the whole working copy
 	// from its root. Any other value is reset to the default when loaded.
 	DisplayFrom string `json:"displayFrom"`
+	// DiffOutputDir is the directory the diffs revision creates are written to.
+	// Empty — the default — means the directory the working copy is displayed
+	// from, per DisplayFrom. A leading ~ is expanded to the user's home directory.
+	// Resolve it with DiffDir rather than reading it directly.
+	DiffOutputDir string `json:"diffOutputDir"`
 }
 
 // Default returns the configuration used when no file exists yet or when a
@@ -95,7 +100,28 @@ func Default() Config {
 		HideUntracked: false,
 		SSHKeyPath:    "~/.ssh/id_rsa",
 		DisplayFrom:   DisplayFromCWD,
+		DiffOutputDir: "",
 	}
+}
+
+// DiffDir returns the directory the diffs revision creates are written to:
+// DiffOutputDir when it names one, otherwise displayRoot — the directory the
+// working copy is displayed from, which the caller resolves from DisplayFrom. A
+// leading ~ is expanded to the user's home directory; if the home directory
+// cannot be determined the configured path is returned as written.
+func (c Config) DiffDir(displayRoot string) string {
+	dir := strings.TrimSpace(c.DiffOutputDir)
+	if dir == "" {
+		return displayRoot
+	}
+	if dir != "~" && !strings.HasPrefix(dir, "~"+string(filepath.Separator)) {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return dir
+	}
+	return filepath.Join(home, strings.TrimPrefix(dir, "~"))
 }
 
 // validDisplayFrom reports whether v names a display scope the schema defines,
@@ -281,6 +307,8 @@ func (c *Config) normalize() {
 	if !validDisplayFrom(c.DisplayFrom) {
 		c.DisplayFrom = def.DisplayFrom
 	}
+	// A blank directory is meaningful: it selects the display root.
+	c.DiffOutputDir = strings.TrimSpace(c.DiffOutputDir)
 }
 
 // reconcileValues brings the loaded settings in line with the current schema. It
