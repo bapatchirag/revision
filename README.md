@@ -19,7 +19,7 @@
 A lazygit-style terminal UI for Subversion (SVN). `revision` gives you a fast, keyboard-driven interface over the `svn` command line — review changes, stage with changelists, commit, update, and browse history without leaving your terminal.
 
 <p align="center">
-  <img src="docs/hero.gif" alt="revision in action — a directory tree of changes, colour-coded diffs, directory staging, named changelists, history, and committing" width="100%" />
+  <img src="docs/hero.gif" alt="revision in action — working-copy status, colour-coded diffs with in-place search, filtering, directory staging, named changelists, history and update-to-revision, the svn command log, live theming, and committing" width="100%" />
 </p>
 
 ## Why
@@ -28,17 +28,21 @@ SVN's command line is powerful but verbose for day-to-day work. `revision` wraps
 
 ## Features
 
-- **lazygit-style layout** — a left column of Status, Files, and Log panels beside a Main detail view, with number-key and `Tab` focus switching; scroll any panel on both axes, with scrollbars that show what's off-screen
-- Working-copy **status** at a glance — changes colored by state, over a live repo/revision header
-- Changed files as a **collapsible directory tree** — each change grouped under its folder, expanded or collapsed with `enter`
+- **lazygit-style layout** — a left column of Status, Files, and Log panels beside a Main detail view, with a Command Log beneath it; switch panels with the number keys or `Tab`, and scroll any panel on both axes with scrollbars that show what's off-screen
+- **Working-copy status** at a glance — the Status panel names the working-copy root, the branch it's checked out from, and the revision it sits at against HEAD; focusing it shows project links in Main
+- Changed files as a **collapsible directory tree** — each change grouped under its folder, expanded or collapsed with `enter`, with the position and count of visible files in the panel's footer
 - **Colour-coded diff** viewer that follows your selection — additions, deletions, hunk headers, and metadata each tinted, with the `+`/`-` gutter pinned as you scroll; highlight a directory for the **combined diff** of everything beneath it
 - **Staging** via a SVN changelist (a git-index-like workflow) — stage or unstage a single file, or a whole directory subtree, with one keystroke
 - **Named changelists** — group the whole staged set (or just one file) in a tabbed Changelists view, drill into any list, and commit it as a unit
 - **Commit** the staged set (or a chosen changelist) through an inline message editor
-- **Update** the working copy to HEAD
-- **Add / revert / delete** files, with confirmation prompts before anything destructive
-- Read-only **log / history** viewer with full revision numbers and authors, plus per-revision detail (date, message, changed paths)
+- **Update** the working copy to HEAD, or to any revision picked in the Log panel — conflicts are spelled out before you confirm, and progress shows while `svn` works
+- **Add / revert / delete** a single file or every change beneath a directory, with confirmation prompts before anything destructive
+- Read-only **log / history** viewer with full revision numbers and authors, per-revision detail (date, message, changed paths), and an asterisk marking where the working copy sits
 - **Filter or search any panel** with `/` — the Files and Log lists filter to matching rows (with `rev:` / `user:` / `state:` / `cl:` parameters plus free text over whole commit messages and paths), while the Main and Status views highlight matches in place and jump between them with `n` / `N`
+- **Command log** — the `svn` actions run on your behalf, newest first, each marked ✓ or ✗
+- **Themes and in-app settings** — six colour schemes and every setting editable with `S`, previewed live and saved to your config file
+- **svn+ssh ready** — for a working copy served over SSH, `revision` checks your agent for the configured key and prompts once for its passphrase
+- **Self-update** — release builds offer to upgrade themselves when a newer version appears
 - **Discoverable keybindings** — a contextual footer plus a full `?` help menu
 - **Toast notifications** for every action, success or failure
 - **Non-blocking authentication** — clear, actionable hints instead of a hung credential prompt
@@ -47,6 +51,7 @@ SVN's command line is powerful but verbose for day-to-day work. `revision` wraps
 
 - The [`svn`](https://subversion.apache.org/) command-line client on your `PATH`
 - Run `revision` from inside an SVN working copy (or pass `--path`)
+- OpenSSH's `ssh-add` and `ssh-keygen` if your working copy is served over `svn+ssh://`
 
 ## Install
 
@@ -71,8 +76,6 @@ go install github.com/bapatchirag/revision/cmd/revision@latest
 Download the binary for your platform from the [Releases](https://github.com/bapatchirag/revision/releases) page and put it on your `PATH`.
 
 ### Updating
-
-> **Slated for v1.2.0.**
 
 Release builds check for a newer version on startup. When one is available, `revision` shows a prompt offering to **update with cURL** (re-runs the install script), **update with Go** (`go install …@latest`), or skip it for now — pick one with the arrow keys and `Enter`, or press `Esc` to dismiss.
 
@@ -104,15 +107,23 @@ Flags:
 - `--update-with <curl|go>` — method for `--update` (default: prompt)
 - `--help` — show help
 
+### The panels
+
+| Panel | Key | What it shows |
+|-------|-----|---------------|
+| Status | `1` | The working-copy root, the source path `revision` is operating on, the current directory, the branch, and the checked-out revision against HEAD. Focusing it shows project links in Main. |
+| Files | `2` | Pending changes, either as a directory tree (**Changes**) or grouped by changelist (**Changelists**) — switch with `[` / `]`. The footer counts the files in view, and how many are hidden. |
+| Log | `3` | Revision history, newest first. An asterisk marks the revision the working copy sits at. |
+| Command Log | `4` | The `svn` actions `revision` has run on your behalf, newest first, each marked ✓ or ✗ — read-only queries are left out. Press `x` to hide or show it. |
+| Main | `0` | Detail for whatever is selected: a diff for a file or directory, metadata and changed paths for a revision. |
+
 ### Keybindings
 
 The footer shows the most common actions, and `?` opens the full keybindings menu at any time.
 
-> **Slated for v1.2.0:** `/` (filter/search), `D` (directory diff), `U` (hide untracked), and `S` (settings).
-
 | Key | Action |
 |-----|--------|
-| `1` / `2` / `3` / `0` | Focus the Status / Files / Log / Main panel |
+| `1` / `2` / `3` / `4` / `0` | Focus the Status / Files / Log / Command Log / Main panel |
 | `Tab` / `Shift+Tab` | Cycle focus between panels |
 | `↑`/`k`, `↓`/`j` | Move the selection up / down |
 | `g` / `G` | Jump to the top / bottom of a list |
@@ -120,26 +131,25 @@ The footer shows the most common actions, and `?` opens the full keybindings men
 | `←`/`h`, `→`/`l` | Scroll the focused panel left / right (one column) |
 | `Home` / `End` (`^` / `$`) | Jump to the start / end of the line in the focused panel |
 | `[` / `]` | Switch the Files panel between the Changes and Changelists views |
-| `space` | Stage / unstage the selected file — or every change under the selected directory (an untracked file is `svn add`ed first) |
-| `n` | Assign the staged set — or just the selected file when nothing is staged — to a named changelist |
+| `space` | **Files:** stage / unstage the selected file — or every change under the selected directory (an untracked file is `svn add`ed first). **Log:** update the working copy to the selected revision |
+| `n` / `N` | **Files:** `n` assigns the staged set — or just the selected file when nothing is staged — to a named changelist. **Main/Status with an active search:** jump to the next / previous match |
 | `enter` | Expand / collapse the selected directory, or expand a changelist into its files |
 | `c` | Commit the staged files, or the selected changelist (opens the message editor) |
-| `r` | Revert the selected file (with confirmation) |
-| `d` | Delete the selected file (with confirmation) |
+| `r` | Revert the selected file, or every change under the selected directory (with confirmation) |
+| `d` | Delete the selected file, or every file under the selected directory (with confirmation) |
 | `u` | Update the working copy to the latest revision |
 | `R` | Refresh status and history |
 | `/` | Filter (Files/Log) or search (Main/Status) the focused panel; `n`/`N` jump between search matches (see [Filtering & searching](#filtering--searching)) |
 | `D` | Toggle the directory-level diff for the highlighted directory (see [Configuration](#configuration)) |
 | `U` | Toggle hiding untracked (unversioned) files in the Changes and diff panels (see [Configuration](#configuration)) |
+| `x` | Show / hide the Command Log panel |
 | `S` | Edit application settings (see [Configuration](#configuration)) |
 | `?` | Toggle the keybindings help |
 | `q` / `Ctrl+C` | Quit |
 
-In the commit editor, `Ctrl+S` submits and `Esc` cancels. In the changelist-name prompt, `Tab` toggles between typing a new name and picking an existing changelist. In a confirmation dialog, `Enter`/`y` confirms and `Esc`/`n` cancels.
+In the commit editor and the settings form, `Ctrl+S` submits and `Esc` cancels. In the changelist-name prompt, `Tab` toggles between typing a new name and picking an existing changelist. In a confirmation dialog, `Enter`/`y` confirms and `Esc`/`n` cancels.
 
 ### Filtering & searching
-
-> **Slated for v1.2.0.**
 
 Press `/` to narrow the focused panel. The query updates live as you type; `Enter` keeps it (the footer then shows it, with `Esc` to clear) and `Esc` clears it. The query is remembered per panel, so each panel can be narrowed independently.
 
@@ -161,23 +171,35 @@ SVN has no local staging index. `revision` emulates one using an SVN **changelis
 
 You can also group work into **named changelists** with `n`: it moves the staged files (or just the selected file when nothing is staged) into a real SVN changelist, which appears in the Changelists view and can be committed on its own. A file belongs to at most one changelist at a time — unstage it (`space`) before moving it elsewhere.
 
+## Updating the working copy
+
+Press `u` to update to the repository's latest revision, or select a revision in the Log panel and press `space` to move the working copy to that one — forwards or backwards in history. Both confirm first, and both keep your uncommitted changes, merging them into the incoming revision.
+
+If any file is already conflicted, a second prompt says so: `svn` leaves those files untouched and updates the rest. While `svn` works, a progress dialog shows where the working copy is coming from and going to; the Status panel's revision line and the Log panel's asterisk move once it finishes.
+
 ## Configuration
 
-> **Slated for v1.2.0.**
-
-`revision` reads optional settings from `~/.config/revision/config.json` (or `$XDG_CONFIG_HOME/revision/config.json` when that variable is set). The file is optional: every setting falls back to a built-in default when the file, or an individual key, is absent.
+`revision` keeps its settings in `~/.config/revision/config.json` (or `$XDG_CONFIG_HOME/revision/config.json` when that variable is set), created with defaults on first run. Every setting falls back to its built-in default when the file, or an individual key, is absent.
 
 You can edit these settings without leaving the app: press `S` to open the settings editor, adjust a value (`↑`/`↓` move between fields, `←`/`→` cycle the theme and toggle switches), then `Ctrl+S` to save or `Esc` to cancel. Cycling the theme applies it live so you can preview each scheme in place; `Esc` reverts the preview, and `Ctrl+S` keeps it. Saving writes the same `config.json`, and the theme, directory-diff, and hide-untracked changes apply immediately.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| `theme` | string | `auto` | Colour scheme: `auto`, `everforest`, `dracula`, `nord`, `gruvbox`, or `cipher` (see [Themes](#themes)). |
 | `directoryDiff` | bool | `true` | Show the combined diff of every change beneath a directory when its row is highlighted. Set to `false` to turn directory-level diffs off globally; press `D` to reveal one on demand. |
 | `hideUntracked` | bool | `false` | Hide untracked (unversioned) files from the Changes and diff panels. Set to `true` to omit them globally; press `U` to toggle them back on for the current session. |
+| `sshKeyPath` | string | `~/.ssh/id_rsa` | The SSH private key to load for `svn+ssh://` working copies (see [Authentication](#authentication)). |
+| `defaultPath` | string | `""` | Working copy to open when no `--path` is given. Empty means the current directory. |
+| `logLimit` | int | `100` | How many revisions the Log panel loads. |
+| `editor` | string | `""` | External editor for commit messages. Empty means the in-app editor. |
+
+> `defaultPath`, `logLimit`, and `editor` are stored and editable today, but are not applied yet — see the [Roadmap](#roadmap).
 
 Example `~/.config/revision/config.json`:
 
 ```json
 {
+  "theme": "cipher",
   "directoryDiff": false,
   "hideUntracked": true
 }
@@ -187,11 +209,25 @@ With `directoryDiff` set to `false`, highlighting a directory shows a short hint
 
 With `hideUntracked` set to `true`, untracked files are left out of the Changes tree, the Changelists view, and the diff panel. Pressing `U` toggles them back into view for the current session, so you can inspect or add one without changing the file.
 
+After an upgrade the file is brought up to date automatically: settings added by a newer version are merged in silently, and a value the running build no longer supports (a retired theme, say) is reset to its default and reported in a startup toast.
+
+### Themes
+
+Six palettes ship built in: `auto`, plus [Everforest](https://github.com/sainnhe/everforest), [Dracula](https://draculatheme.com), [Nord](https://www.nordtheme.com), [Gruvbox](https://github.com/morhetz/gruvbox), and Cipher. Press `S` and cycle the **Theme** field with `←`/`→` to preview each one live, then `Ctrl+S` to keep it.
+
+`auto` adapts to your terminal's own colours; the named themes are true-colour, so they look the same in every terminal — including over SSH.
+
 ## Authentication
 
 `revision` always runs `svn` with `--non-interactive`, so it never blocks on a hidden credential prompt. If a command needs credentials that aren't cached, it fails fast with a clear hint instead of hanging.
 
 Cache your credentials once by running an `svn` command yourself in the working copy (for example `svn info` or `svn update`). SVN stores them, and `revision` uses them on subsequent actions.
+
+### svn+ssh working copies
+
+When the working copy is served over `svn+ssh://`, `revision` checks at startup whether the key at `sshKeyPath` is already held by your `ssh-agent`, matching on the key's fingerprint — so a key that is already loaded is never asked about. If it isn't loaded, `revision` asks for the passphrase once and adds the key with `ssh-add` before loading anything, so the rest of the session runs without further prompts.
+
+If the agent isn't running, or the passphrase is wrong three times, `revision` says so and stops — SVN cannot reach the repository without the key.
 
 ## Building from source
 
@@ -213,12 +249,10 @@ make cross      # dist/revision-darwin-arm64 and dist/revision-linux-amd64
 `revision` already covers the everyday SVN workflow. On the horizon:
 
 - **VS Code extension** — a bundled launcher that opens the TUI in an editor terminal, published to the VS Code Marketplace and Open VSX. The scaffolding exists but isn't ready yet.
-- **More configuration** — the config file (`~/.config/revision/config.json`) already stores the color theme and the directory-diff toggle; planned additions include a default working-copy path, log limit, an external `$EDITOR` for commit messages, and keybinding overrides.
-- **Theming** — selectable, user-customizable color themes loaded from that configuration.
+- **More configuration** — wiring up the settings already stored in `config.json` (`defaultPath`, `logLimit`, and an external `$EDITOR` for commit messages), plus keybinding overrides.
 - **Diff export & patching** — save a file's or a changelist's diff as a patch and apply one (`svn diff` → patch → `svn patch`), plus line- and hunk-level staging.
-- **ssh-agent support** — seamless authentication for `svn+ssh://` working copies, alongside smoother handling of cached credentials.
 - **Branches & tags** — create and switch between them as server-side copies (`svn copy` / `svn switch`).
-- **More review tools** — blame / annotate, revision search and filtering, and conflict-resolution helpers.
+- **More review tools** — blame / annotate and conflict-resolution helpers.
 
 Have an idea or want to help build one of these? Contributions are welcome.
 
@@ -234,6 +268,7 @@ Issues and pull requests are welcome — bug reports, feature ideas, and documen
 - `cmd/gallery` — a standalone gallery that renders each reusable UI component in isolation (`make run-gallery`).
 - `internal/svn` — a thin wrapper over the `svn` binary that parses `--xml` output into typed values; always runs `--non-interactive`.
 - `internal/tui` — the domain-agnostic UI foundation: reusable components plus theme, keymap, focus, layout, and messages. It must never import `internal/svn` or `internal/app` (a reusability-guard test enforces this).
+- `internal/config`, `internal/selfupdate`, `internal/sshagent` — self-contained infrastructure for the settings file, release updates, and ssh-agent checks; each is domain-agnostic.
 - `internal/app` — the composition layer that adapts SVN data into components and arranges the lazygit layout. It is the only package that knows both sides.
 
 ### Development
