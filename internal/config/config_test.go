@@ -277,26 +277,26 @@ func TestLoadDiffOutputDir(t *testing.T) {
 func TestDiffDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	const displayRoot = "/home/alice/work/wc"
+	const wcRoot = "/home/alice/work/wc"
 
 	cases := map[string]struct {
 		configured string
 		want       string
 	}{
-		"unset falls back to the display root": {"", displayRoot},
-		"blank falls back to the display root": {"   ", displayRoot},
-		"absolute path is used as written":     {"/tmp/patches", "/tmp/patches"},
-		"relative path is used as written":     {"patches", "patches"},
-		"leading ~ expands to home":            {"~/patches", filepath.Join(home, "patches")},
-		"bare ~ expands to home":               {"~", home},
-		"~ inside a path is literal":           {"/tmp/~/patches", "/tmp/~/patches"},
+		"unset falls back to the working-copy root": {"", wcRoot},
+		"blank falls back to the working-copy root": {"   ", wcRoot},
+		"absolute path is used as written":          {"/tmp/patches", "/tmp/patches"},
+		"relative path is used as written":          {"patches", "patches"},
+		"leading ~ expands to home":                 {"~/patches", filepath.Join(home, "patches")},
+		"bare ~ expands to home":                    {"~", home},
+		"~ inside a path is literal":                {"/tmp/~/patches", "/tmp/~/patches"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			cfg := Default()
 			cfg.DiffOutputDir = tc.configured
-			if got := cfg.DiffDir(displayRoot); got != tc.want {
-				t.Errorf("DiffDir(%q) with diffOutputDir %q = %q, want %q", displayRoot, tc.configured, got, tc.want)
+			if got := cfg.DiffDir(wcRoot); got != tc.want {
+				t.Errorf("DiffDir(%q) with diffOutputDir %q = %q, want %q", wcRoot, tc.configured, got, tc.want)
 			}
 		})
 	}

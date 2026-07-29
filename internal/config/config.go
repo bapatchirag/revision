@@ -83,8 +83,8 @@ type Config struct {
 	// from its root. Any other value is reset to the default when loaded.
 	DisplayFrom string `json:"displayFrom"`
 	// DiffOutputDir is the directory the diffs revision creates are written to.
-	// Empty — the default — means the directory the working copy is displayed
-	// from, per DisplayFrom. A leading ~ is expanded to the user's home directory.
+	// Empty — the default — means the working copy's root, wherever inside it
+	// revision was started. A leading ~ is expanded to the user's home directory.
 	// Resolve it with DiffDir rather than reading it directly.
 	DiffOutputDir string `json:"diffOutputDir"`
 }
@@ -105,14 +105,14 @@ func Default() Config {
 }
 
 // DiffDir returns the directory the diffs revision creates are written to:
-// DiffOutputDir when it names one, otherwise displayRoot — the directory the
-// working copy is displayed from, which the caller resolves from DisplayFrom. A
-// leading ~ is expanded to the user's home directory; if the home directory
-// cannot be determined the configured path is returned as written.
-func (c Config) DiffDir(displayRoot string) string {
+// DiffOutputDir when it names one, otherwise wcRoot — the working copy's root,
+// which the caller resolves. A leading ~ is expanded to the user's home
+// directory; if the home directory cannot be determined the configured path is
+// returned as written.
+func (c Config) DiffDir(wcRoot string) string {
 	dir := strings.TrimSpace(c.DiffOutputDir)
 	if dir == "" {
-		return displayRoot
+		return wcRoot
 	}
 	if dir != "~" && !strings.HasPrefix(dir, "~"+string(filepath.Separator)) {
 		return dir
