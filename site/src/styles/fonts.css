@@ -1,0 +1,51 @@
+/*
+ * Web font faces. All monospace by design — see SITE-PLAN.md "Typography".
+ *
+ * Fantasque Sans Mono is the primary face. Its subset covers Latin-1, General
+ * Punctuation, Box Drawing (U+2500-257F, complete) and Block Elements
+ * (U+2580-259F, complete), so the TUI frames render in one font at one cell
+ * width.
+ *
+ * JetBrains Mono is a narrow fallback for the few glyphs Fantasque lacks:
+ * arrows beyond U+2190-2193, Geometric Shapes (▾ ▸ ◆), and ✓ / ✗. It is NOT
+ * unicode-range-restricted onto box drawing — Fantasque already covers that,
+ * and swapping mid-frame would break vertical rules.
+ *
+ * The two faces have different advance ratios (Fantasque 1060/2048 = .51758em,
+ * JetBrains 600/1000 = .6em). size-adjust: 86.263% rescales JetBrains so a
+ * fallback glyph occupies exactly one Fantasque cell.
+ */
+
+@font-face {
+	font-family: 'Fantasque Sans Mono';
+	src: url('/fonts/FantasqueSansMono-Regular.subset.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Fantasque Sans Mono';
+	src: url('/fonts/FantasqueSansMono-Bold.subset.woff2') format('woff2');
+	font-weight: 700;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Fantasque Sans Mono';
+	src: url('/fonts/FantasqueSansMono-Italic.subset.woff2') format('woff2');
+	font-weight: 400;
+	font-style: italic;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'JetBrains Mono Glyphs';
+	src: url('/fonts/JetBrainsMono-Regular.fallback.woff2') format('woff2');
+	font-weight: 400 700;
+	font-style: normal;
+	font-display: swap;
+	size-adjust: 86.263%;
+	unicode-range: U+2190-21FF, U+25A0-25FF, U+2713, U+2717;
+}

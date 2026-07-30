@@ -1,0 +1,303 @@
+/*
+ * Cipher design system.
+ *
+ * The only file in the site that may contain raw hex. Every other stylesheet,
+ * component and page resolves colour through the --rv-* tokens declared here.
+ * Source of truth: SITE-PLAN.md "Cipher palette", which reconciles the Cipher
+ * Dark VS Code theme with theme.Cipher() in internal/tui/theme/theme.go.
+ */
+
+:root,
+[data-theme='light'],
+[data-theme='dark'] {
+	/* ---- Surfaces ---------------------------------------------------- */
+	--rv-bg-deep: #111927;
+	--rv-bg: #141d2b;
+	--rv-bg-elevated: #1a2332;
+	--rv-bg-selection: #302540;
+	--rv-bg-selection-alt: #3b3957;
+
+	/* ---- Text -------------------------------------------------------- */
+	--rv-text: #e6e9f2;
+	--rv-text-high: #ffffff;
+	--rv-text-secondary: #a4b1cd;
+	--rv-muted: #7a7899;
+	--rv-dim: #6e7b96;
+	--rv-comment: rgb(215 228 255 / 27%);
+
+	/* ---- Lines ------------------------------------------------------- */
+	--rv-border: #313f55;
+	--rv-border-focused: #9fef00;
+
+	/* ---- Accent ------------------------------------------------------ */
+	--rv-accent: #9fef00;
+	--rv-accent-hover: #c5f467;
+	--rv-on-accent: #111927;
+
+	/* ---- Semantic ---------------------------------------------------- */
+	--rv-error: #ff3e3e;
+	--rv-error-bright: #ff8484;
+	--rv-warning: #ffaf00;
+	--rv-warning-bright: #ffcc5c;
+	--rv-info: #4dd2e1;
+	--rv-magenta: #c88dea;
+	--rv-blue: #5cb2ff;
+
+	/*
+	 * Accent and Success are the same lime. Diff additions are separated from
+	 * links by a background tint and weight, never by hue — see DiffBlock.
+	 */
+	--rv-add-bg: rgb(159 239 0 / 10%);
+	--rv-add-gutter: rgb(159 239 0 / 55%);
+	--rv-del-bg: rgb(255 62 62 / 10%);
+	--rv-del-gutter: rgb(255 62 62 / 55%);
+	--rv-hunk-bg: rgb(77 210 225 / 10%);
+
+	/* ---- KeyCap (Cipher keybindingLabel.*) --------------------------- */
+	--rv-keycap-bg: rgb(110 123 150 / 36%);
+	--rv-keycap-border: rgb(110 123 150 / 55%);
+	--rv-keycap-bottom-border: rgb(164 177 205 / 49%);
+	--rv-keycap-text: #a4b1cd;
+
+	/* ---- Type -------------------------------------------------------- */
+	--rv-font-mono-stack: 'Fantasque Sans Mono', 'JetBrains Mono Glyphs', ui-monospace,
+		SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+	--rv-font-prose: var(--rv-font-mono-stack);
+	--rv-font-chrome: var(--rv-font-mono-stack);
+	--rv-font-code: var(--rv-font-mono-stack);
+
+	/* ---- Geometry ---------------------------------------------------- */
+	--rv-radius: 6px;
+	--rv-frame-inset: 4ch; /* how far an inlaid label sits from a corner */
+}
+
+/* --------------------------------------------------------------------- */
+/* Starlight variable mapping. Dark-only: identical under every theme key. */
+/* --------------------------------------------------------------------- */
+
+:root,
+[data-theme='light'],
+[data-theme='dark'] {
+	--sl-color-accent-low: var(--rv-bg-selection);
+	--sl-color-accent: var(--rv-accent);
+	--sl-color-accent-high: var(--rv-accent-hover);
+
+	--sl-color-white: var(--rv-text-high);
+	--sl-color-gray-1: var(--rv-text);
+	--sl-color-gray-2: var(--rv-text-secondary);
+	--sl-color-gray-3: var(--rv-muted);
+	--sl-color-gray-4: var(--rv-dim);
+	--sl-color-gray-5: var(--rv-border);
+	--sl-color-gray-6: var(--rv-bg-elevated);
+	--sl-color-gray-7: var(--rv-bg-selection);
+	--sl-color-black: var(--rv-bg);
+
+	--sl-color-bg: var(--rv-bg);
+	--sl-color-bg-nav: var(--rv-bg-deep);
+	--sl-color-bg-sidebar: var(--rv-bg-elevated);
+	--sl-color-bg-inline-code: var(--rv-bg-elevated);
+	--sl-color-bg-accent: var(--rv-accent);
+	--sl-color-backdrop-overlay: rgb(17 25 39 / 66%);
+
+	--sl-color-hairline-shade: var(--rv-border);
+	--sl-color-hairline: var(--rv-border);
+	--sl-color-hairline-light: var(--rv-border);
+
+	--sl-color-text: var(--rv-text-secondary);
+	--sl-color-text-accent: var(--rv-accent);
+	--sl-color-text-invert: var(--rv-on-accent);
+
+	/* Asides / badges. */
+	--sl-color-green: var(--rv-accent);
+	--sl-color-green-high: var(--rv-accent-hover);
+	--sl-color-green-low: var(--rv-bg-elevated);
+	--sl-color-blue: var(--rv-info);
+	--sl-color-blue-high: var(--rv-info);
+	--sl-color-blue-low: var(--rv-bg-elevated);
+	--sl-color-orange: var(--rv-warning);
+	--sl-color-orange-high: var(--rv-warning-bright);
+	--sl-color-orange-low: var(--rv-bg-elevated);
+	--sl-color-red: var(--rv-error);
+	--sl-color-red-high: var(--rv-error-bright);
+	--sl-color-red-low: var(--rv-bg-elevated);
+	--sl-color-purple: var(--rv-magenta);
+	--sl-color-purple-high: var(--rv-magenta);
+	--sl-color-purple-low: var(--rv-bg-elevated);
+
+	--sl-font: var(--rv-font-prose);
+	--sl-font-mono: var(--rv-font-code);
+
+	/* All-mono readability compensation. */
+	--sl-content-width: 68ch;
+	--sl-line-height: 1.75;
+	--sl-line-height-headings: 1.3;
+}
+
+/* --------------------------------------------------------------------- */
+/* Base                                                                   */
+/* --------------------------------------------------------------------- */
+
+html {
+	color-scheme: dark;
+}
+
+body {
+	font-family: var(--rv-font-prose);
+	font-feature-settings: 'calt' 1;
+	-webkit-font-smoothing: antialiased;
+}
+
+/* Headings sit at the brightest step; prose stays on the softer secondary. */
+:is(h1, h2, h3, h4, h5, h6) {
+	color: var(--rv-text-high);
+	font-family: var(--rv-font-chrome);
+}
+
+.sl-markdown-content :is(h2, h3) {
+	letter-spacing: -0.01em;
+}
+
+/* Links: underlined, so they never rely on the lime alone to read as links. */
+.sl-markdown-content a:not(:where(.not-content *)) {
+	color: var(--rv-accent);
+	text-decoration: underline;
+	text-decoration-color: rgb(159 239 0 / 40%);
+	text-underline-offset: 0.2em;
+}
+
+.sl-markdown-content a:not(:where(.not-content *)):hover {
+	color: var(--rv-accent-hover);
+	text-decoration-color: currentcolor;
+}
+
+:where(a, button, input, summary):focus-visible {
+	outline: 2px solid var(--rv-border-focused);
+	outline-offset: 2px;
+	border-radius: 2px;
+}
+
+code {
+	font-family: var(--rv-font-code);
+}
+
+.sl-markdown-content :not(pre) > code:not(:where(.not-content *)) {
+	border: 1px solid var(--rv-border);
+	border-radius: 4px;
+	color: var(--rv-text);
+	padding: 0.1em 0.35em;
+}
+
+.sl-markdown-content pre:not(:where(.not-content *)) {
+	background-color: var(--rv-bg-deep) !important;
+	border: 1px solid var(--rv-border);
+	border-radius: var(--rv-radius);
+}
+
+.sl-markdown-content blockquote:not(:where(.not-content *)) {
+	border-inline-start-color: var(--rv-accent);
+	color: var(--rv-muted);
+	font-style: italic;
+}
+
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+	border-color: var(--rv-border);
+}
+
+.sl-markdown-content th:not(:where(.not-content *)) {
+	color: var(--rv-text-high);
+}
+
+/* Site header reads as the terminal's own chrome. */
+header.header {
+	border-bottom: 1px solid var(--rv-border);
+}
+
+.site-title {
+	font-weight: 700;
+	color: var(--rv-accent);
+}
+
+/*
+ * Starlight fills the active nav item with a solid --sl-color-text-accent. At
+ * this saturation that reads as a highlighter stripe, so the app's own selected
+ * row treatment is used instead: selection background, accent text, lime rule.
+ */
+.sidebar-content a[aria-current='page'],
+.sidebar-content a[aria-current='page']:hover,
+.sidebar-content a[aria-current='page']:focus {
+	background-color: var(--rv-bg-selection);
+	border-inline-start: 2px solid var(--rv-accent);
+	color: var(--rv-accent);
+}
+
+.mobile-starlight-toc nav a[aria-current='true'],
+.mobile-starlight-toc nav a[aria-current='true']:hover,
+.mobile-starlight-toc nav a[aria-current='true']:focus {
+	background-color: var(--rv-bg-selection);
+	color: var(--rv-accent);
+}
+
+/* --------------------------------------------------------------------- */
+/* Shared TUI surface primitives, used by the .astro components.          */
+/* --------------------------------------------------------------------- */
+
+.rv-frame {
+	--rv-frame-border: var(--rv-border);
+
+	background-color: var(--rv-bg-deep);
+	border: 1px solid var(--rv-frame-border);
+	border-radius: var(--rv-radius);
+	color: var(--rv-text);
+	font-family: var(--rv-font-chrome);
+	font-size: var(--sl-text-code, 0.875rem);
+	line-height: 1.6;
+	position: relative;
+}
+
+.rv-frame[data-focused] {
+	--rv-frame-border: var(--rv-border-focused);
+}
+
+/*
+ * Inlaid label: a chip that straddles the frame edge, painted with the frame's
+ * own background so the border reads as broken by the text — the CSS analogue
+ * of "─ [2] Files ─".
+ */
+.rv-frame__label {
+	background-color: var(--rv-bg-deep);
+	color: var(--rv-text-high);
+	font-size: 0.8125em;
+	line-height: 1;
+	padding: 0 0.5ch;
+	position: absolute;
+	white-space: nowrap;
+}
+
+.rv-frame__label--top {
+	inset-block-start: 0;
+	inset-inline-start: var(--rv-frame-inset);
+	transform: translateY(-50%);
+}
+
+.rv-frame__label--bottom {
+	color: var(--rv-muted);
+	inset-block-end: 0;
+	inset-inline-end: var(--rv-frame-inset);
+	transform: translateY(50%);
+}
+
+.rv-frame__index {
+	color: var(--rv-accent);
+	font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}

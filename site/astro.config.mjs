@@ -11,6 +11,10 @@ export default defineConfig({
 			title: 'revision',
 			description: 'A lazygit-style terminal UI for Subversion (SVN).',
 			favicon: '/favicon.svg',
+			logo: {
+				src: './src/assets/logo-cipher.svg',
+				alt: 'revision',
+			},
 			social: [
 				{
 					icon: 'github',
@@ -21,6 +25,30 @@ export default defineConfig({
 			editLink: {
 				baseUrl: 'https://github.com/bapatchirag/revision/edit/main/site/',
 			},
+			customCss: ['./src/styles/fonts.css', './src/styles/cipher.css'],
+			components: {
+				// Dark-only site: the theme toggle is overridden away.
+				ThemeSelect: './src/components/ThemeSelect.astro',
+			},
+			// Expressive Code is configured in ec.config.mjs.
+			head: [
+				{
+					tag: 'link',
+					attrs: {
+						rel: 'preload',
+						href: '/revision/fonts/FantasqueSansMono-Regular.subset.woff2',
+						as: 'font',
+						type: 'font/woff2',
+						crossorigin: 'anonymous',
+					},
+				},
+			],
 		}),
 	],
+	vite: {
+		server: {
+			// style.astro imports the Go golden file from the repo root with ?raw.
+			fs: { allow: ['..'] },
+		},
+	},
 });

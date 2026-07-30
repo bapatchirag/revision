@@ -30,6 +30,12 @@ jobs:
       - name: Install
         working-directory: site
         run: npm ci
+      - name: Check types
+        working-directory: site
+        run: npm run check
+      - name: Check design tokens
+        working-directory: site
+        run: npm run check:tokens
       - name: Build
         working-directory: site
         run: npm run build

@@ -9,6 +9,7 @@
     "build": "astro build",
     "preview": "astro preview",
     "check": "astro check",
+    "check:tokens": "node scripts/check-tokens.mjs",
     "astro": "astro"
   },
   "dependencies": {

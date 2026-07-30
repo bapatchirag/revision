@@ -1,0 +1,60 @@
+---
+import KeyCap from './KeyCap.astro';
+
+/** The status-bar hint strip: `space stage · n changelist · ? help`. */
+interface Hint {
+	/** Key or key group, e.g. "space", "[ ]". */
+	keys: string;
+	label: string;
+}
+
+interface Props {
+	hints: Hint[];
+	/** Render keys as KeyCap chips instead of bare accent text. */
+	keycaps?: boolean;
+	class?: string;
+}
+
+const { hints, keycaps = false, class: className } = Astro.props;
+---
+
+<div class:list={['rv-hintbar', className]}>
+	{
+		hints.map((hint, i) => (
+			<>
+				{i > 0 && <span class="rv-hintbar__sep" aria-hidden="true">·</span>}
+				<span class="rv-hintbar__hint">
+					{keycaps ? <KeyCap key={hint.keys} /> : <span class="rv-hintbar__keys">{hint.keys}</span>}
+					<span class="rv-hintbar__label">{hint.label}</span>
+				</span>
+			</>
+		))
+	}
+</div>
+
+<style>
+	.rv-hintbar {
+		align-items: center;
+		column-gap: 0.5ch;
+		display: flex;
+		flex-wrap: wrap;
+		font-family: var(--rv-font-chrome);
+		font-size: var(--sl-text-sm);
+		row-gap: 0.35rem;
+	}
+
+	.rv-hintbar__hint {
+		align-items: center;
+		column-gap: 0.5ch;
+		display: inline-flex;
+	}
+
+	.rv-hintbar__keys {
+		color: var(--rv-accent);
+	}
+
+	.rv-hintbar__label,
+	.rv-hintbar__sep {
+		color: var(--rv-muted);
+	}
+</style>
