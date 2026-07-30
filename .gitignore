@@ -19,6 +19,11 @@ extension/node_modules/
 extension/out/
 *.vsix
 
+# Documentation site (Astro)
+site/node_modules/
+site/dist/
+site/.astro/
+
 # Bundled binaries (populated by CI at package time)
 extension/bin/
 
