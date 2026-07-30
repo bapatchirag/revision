@@ -28,6 +28,8 @@ extension/README.md
 # Local-only working docs
 /PLAN.md
 /LOG.md
+/SITE-PLAN.md
+/SITE-LOG.md
 
 # Local-only custom agents
 /.github/agents/
