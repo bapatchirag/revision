@@ -301,6 +301,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	}
 	m.passEditor.SetSecret(true)
 	m.progress.SetHint("")
+	m.menu.SetReadOnly(true)
 	if client != nil {
 		m.launchDir = client.Dir
 	}
@@ -625,8 +626,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case uimsg.ActivatedMsg:
 		// Enter on a changelist row drills into its files; enter on a directory in
-		// the Changes tree or a drilled-in changelist tree collapses/expands it;
-		// enter on the help menu is inert (a read-only keybindings reference).
+		// the Changes tree or a drilled-in changelist tree collapses/expands it.
 		switch msg.ID {
 		case changelistsListID:
 			return m, m.drillChangelist()
@@ -799,13 +799,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.updateMenu.Update(msg)
 		}
 		if m.helping {
-			// Read-only reference: only ? and esc close it; other keys drive the
-			// menu (enter/n are inert, handled above).
+			// Read-only reference: ? and esc close it, every other key is
+			// swallowed.
 			if key.Matches(msg, m.keys.Help) || key.Matches(msg, m.keys.Back) {
 				m.closeHelp()
 				return m, nil
 			}
-			return m, m.menu.Update(msg)
+			return m, nil
 		}
 		m.dismissToast()
 		if cmd, handled := m.handleKey(msg); handled {

@@ -26,17 +26,19 @@ type MenuItem struct {
 func MenuSection(label string) MenuItem { return MenuItem{Label: label, Header: true} }
 
 // Menu is a centered popup listing actions (the "?" menu). While focused it
-// emits ActivatedMsg for the chosen item and DismissMsg on cancel.
+// emits ActivatedMsg for the chosen item and DismissMsg on cancel. A read-only
+// menu is a plain reference: it has no cursor and answers to no key.
 type Menu struct {
-	id      string
-	title   string
-	items   []MenuItem
-	cursor  int
-	width   int
-	columns int
-	focused bool
-	theme   theme.Theme
-	keys    keymap.KeyMap
+	id       string
+	title    string
+	items    []MenuItem
+	cursor   int
+	width    int
+	columns  int
+	focused  bool
+	readOnly bool
+	theme    theme.Theme
+	keys     keymap.KeyMap
 }
 
 var (
@@ -72,7 +74,7 @@ func (mn *Menu) SetIndex(i int) {
 
 // Update handles navigation, activation and dismissal while focused.
 func (mn *Menu) Update(m tea.Msg) tea.Cmd {
-	if !mn.focused {
+	if !mn.focused || mn.readOnly {
 		return nil
 	}
 	km, ok := m.(tea.KeyMsg)
@@ -109,6 +111,10 @@ func (mn *Menu) SetColumns(n int) {
 	}
 	mn.columns = n
 }
+
+// SetReadOnly turns the menu into a static reference: no cursor is drawn and
+// keys are ignored, for a list whose rows are not actions.
+func (mn *Menu) SetReadOnly(ro bool) { mn.readOnly = ro }
 
 // Focus implements tui.Focusable.
 func (mn *Menu) Focus() { mn.focused = true }
@@ -202,7 +208,7 @@ func (mn *Menu) renderItem(it MenuItem, i, width int) string {
 		return lipgloss.NewStyle().Foreground(mn.theme.Accent).Bold(true).Render(fitLine(it.Label, width))
 	}
 	prefix := "  "
-	selected := i == mn.cursor
+	selected := i == mn.cursor && !mn.readOnly
 	if selected && mn.focused {
 		prefix = lipgloss.NewStyle().Foreground(mn.theme.Selection).Bold(true).Render("> ")
 	}
