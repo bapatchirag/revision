@@ -1,24 +1,24 @@
-╭─ [1] Status ──────╭─ Keybindings ────────────────────────╮───────────────────╮
-│Root      /home/ali│> Stage / unstage                space│                   │
-│Source    /home/ali│  Assign changelist                  n│                   │
-│CWD       /home/ali│  Commit staged / changelist         c│                   │
-│Branch    trunk    │  Switch file view               [ / ]│                   │
-│Revision  r42      │  Expand changelist              enter│                   │
-│                   │  Revert / delete file           r / d│                   │
-╰───────────────────│  Open file in editor                e│                   │
-╭─ [2] ─ Changes ───│  Update working copy                u│                   │
-│  ▾ /              │  Update to revision (Log panel) space│                   │
-│>     M modified.go│  Refresh / settings             R / S│                   │
-│                   │  Jump to panel              1 2 3 4 0│                   │
-│                   │  Cycle panels         tab / shift+tab│                   │
-│                   │  Move up / down                 k / j│                   │
-╰────────────────── │  Jump top / bottom              g / G│                   │
-╭─ [3] Log ─────────│  Scroll main up / down          K / J│                   │
-│  Rev Author Messag│  Scroll main left / right       h / l│───────────────────╯
-│                   │  Line start / end          home / end│───────────────────╮
-│                   │  Side-by-side / save diff       s / w│                   │
-│                   │  Toggle dir diff / untracked    D / U│                   │
-│                   │  Toggle command log                 x│                   │
-│                   │  Filter panel                       /│                   │
-╰───────────────────│  Toggle help                        ?│───────────────────╯
-space stage · n chan│  Quit                               q│· [ ] view · ? help 
+╭─ [1] Status ─────────────────╮╭─ [0] Diff ───────────────────────────────────╮
+│Root      /home/alice/work/wc ││Loading diff…                                 │
+│Source ╭─ Keybindings ────────────────────────────────────────────────╮       │
+│CWD    │Changes                         Navigation                    │       │
+│Branch │  Stage / unstage        space    Jump to panel      1 2 3 4 0│       │
+│Revisio│  Assign changelist          n    Cycle panels tab / shift+tab│       │
+│       │  Commit staged / list       c    Move up / down         k / j│       │
+╰───────│  Expand changelist      enter    Jump top / bottom      g / G│       │
+╭─ [2] ─│  Revert / delete file   r / d    Scroll main up / down  K / J│       │
+│  ▾ /  │Working copy                      Scroll main l / r      h / l│       │
+│>     M│  Update working copy        u    Line start / end  home / end│       │
+│       │  Update to rev (Log)    space    Filter panel               /│       │
+│       │  Open file in editor        e  View                          │       │
+│       │  Refresh / settings     R / S    Switch file view       [ / ]│       │
+╰───────│                                  Side-by-side / save    s / w│       │
+╭─ [3] L│                                  Dir diff / untracked   D / U│       │
+│  Rev A│                                  Toggle command log         x│───────╯
+│       │                                General                       │───────╮
+│       │                                  Toggle help                ?│       │
+│       │                                  Quit                       q│       │
+│       ╰──────────────────────────────────────────────────────────────╯       │
+│                              ││                                              │
+╰──────────────────────────────╯╰──────────────────────────────────────────────╯
+space stage · n changelist · c commit · r revert · d delete · [ ] view · ? help 
