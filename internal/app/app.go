@@ -48,6 +48,12 @@ const commitEditorID = "commit"
 // changelistEditorID identifies the changelist-name prompt on emitted messages.
 const changelistEditorID = "changelist"
 
+// diffNameEditorID identifies the save-diff file-name prompt on emitted messages.
+const diffNameEditorID = "diff-name"
+
+// splitDiffID identifies the side-by-side diff overlay on emitted messages.
+const splitDiffID = "split-diff"
+
 // passphraseEditorID identifies the SSH passphrase prompt on emitted messages.
 const passphraseEditorID = "ssh-passphrase"
 
@@ -105,6 +111,7 @@ type Model struct {
 	files       *component.List[fileNode]
 	changelists *component.List[changelistGroup]
 	clFiles     *component.List[fileNode]
+	savedDiffs  *component.List[savedDiff]
 	filesViews  *component.Views
 	log         *component.Table[svn.LogEntry]
 	main        *component.Viewport
@@ -119,6 +126,7 @@ type Model struct {
 	bar        *component.StatusBar
 	editor     *component.TextArea
 	nameEditor *component.Prompt
+	diffEditor *component.Prompt
 	passEditor *component.Prompt
 	modal      *component.Modal
 	progress   *component.Modal
@@ -127,6 +135,7 @@ type Model struct {
 	form       *component.Form
 	toast      *component.Toast
 	searchBar  *component.SearchBar
+	splitDiff  *component.SplitView
 	focus      *focus.Manager
 
 	fileItems        []svn.StatusItem
@@ -138,18 +147,43 @@ type Model struct {
 	wcRevision       string
 	// workDir is the directory revision was launched from (os.Getwd at startup).
 	workDir string
+	// launchDir is the directory the svn client was pointed at on startup — the
+	// -path target, which is the working directory by default. It is the anchor
+	// for the "cwd" display scope, kept so the scope can be switched back after
+	// the client has been re-rooted at the working copy.
+	launchDir string
 
-	source        mainSource
-	diffPath      string
-	diffText      string
+	// savedDiffItems is every patch file found in the configured output
+	// directory, before the Files-panel filter narrows the Diffs view; savedPath
+	// and savedText are the file whose contents Main is showing for that view.
+	savedDiffItems []savedDiff
+	savedDiffsErr  error
+	savedPath      string
+	savedText      string
+	savedErr       bool
+
+	source   mainSource
+	diffPath string
+	diffText string
+	// diffErr records that diffText is a load-failure notice rather than a patch,
+	// so it is never written out as one.
+	diffErr bool
+	// diffSrc is the diff (or the paths to diff) queued while the save prompt
+	// asks for a file name, so a reload landing behind the overlay cannot swap
+	// out what gets written.
+	diffSrc       diffSource
 	dirDiff       bool
 	hideUntracked bool
 	// showCmdLog controls whether the command-log panel below Main is displayed.
 	// It defaults to on and is toggled at runtime; it is not persisted.
-	showCmdLog   bool
-	logErr       error
-	editing      bool
-	naming       bool
+	showCmdLog bool
+	logErr     error
+	editing    bool
+	naming     bool
+	savingDiff bool
+	// splitting is true while the side-by-side view of the on-screen diff is
+	// floated over the layout.
+	splitting    bool
 	filtering    bool
 	filterPanel  int
 	filters      map[int]string
@@ -203,9 +237,11 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	files := component.NewList[fileNode]("files", renderFileNode(th), th, keys)
 	changelists := component.NewList[changelistGroup](changelistsListID, renderChangelistGroup(th), th, keys)
 	clFiles := component.NewList[fileNode](changelistFilesID, renderFileNode(th), th, keys)
+	savedDiffs := component.NewList[savedDiff](savedDiffsListID, renderSavedDiff(th), th, keys)
 	filesViews := component.NewViews(filesViewsID, []component.View{
 		{Name: "Changes", Content: files},
 		{Name: "Changelists", Content: changelists},
+		{Name: savedDiffsViewName, Content: savedDiffs},
 	}, th, keys)
 	logTable := component.NewTable[svn.LogEntry]("log", logColumns(), func(it svn.LogEntry) []string {
 		return renderLogRow(it, m.wcRevision, m.theme)
@@ -231,6 +267,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		files:           files,
 		changelists:     changelists,
 		clFiles:         clFiles,
+		savedDiffs:      savedDiffs,
 		filesViews:      filesViews,
 		log:             logTable,
 		main:            main,
@@ -240,6 +277,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		bar:             component.NewStatusBar(th),
 		editor:          component.NewTextArea(commitEditorID, "Commit message", "Enter a commit message…", th, keys),
 		nameEditor:      component.NewPrompt(changelistEditorID, "Changelist name", "e.g. feature-x", th, keys),
+		diffEditor:      component.NewPrompt(diffNameEditorID, "Save diff as", "e.g. changes.diff", th, keys),
 		passEditor:      component.NewPrompt(passphraseEditorID, "SSH key passphrase", "passphrase for "+cfg.SSHKeyPath, th, keys),
 		modal:           component.NewModal(confirmModalID, "", "", th, keys),
 		progress:        component.NewModal("update-progress", "", "", th, keys),
@@ -248,6 +286,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		form:            component.NewForm(settingsFormID, "Settings", settingsFields(cfg, cfg.DirectoryDiff), th, keys),
 		toast:           component.NewToast(th),
 		searchBar:       component.NewSearchBar(searchBarID, th, keys),
+		splitDiff:       component.NewSplitView(splitDiffID, "Side-by-side diff", th, keys),
 		collapsedDirs:   map[string]bool{},
 		clCollapsedDirs: map[string]bool{},
 		filters:         map[int]string{},
@@ -262,6 +301,11 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	}
 	m.passEditor.SetSecret(true)
 	m.progress.SetHint("")
+	m.menu.SetReadOnly(true)
+	if client != nil {
+		m.launchDir = client.Dir
+	}
+	m.retargetDisplay(cfg.DisplayFrom)
 	// Mirror user-initiated svn actions into the command log, skipping the
 	// read-only queries revision runs automatically. The recorder is set before
 	// Init runs any command, so no action is missed.
@@ -287,6 +331,27 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	return m
 }
 
+// retargetDisplay roots the svn client at the directory the given display scope
+// names — the working copy's root for config.DisplayFromRoot, otherwise the
+// directory revision was launched in — so status, history and diffs all describe
+// the same tree. The client is replaced rather than mutated so any command
+// already in flight keeps running against the directory it started with.
+func (m *Model) retargetDisplay(scope string) {
+	if m.client == nil {
+		return
+	}
+	dir := m.launchDir
+	if scope == config.DisplayFromRoot && m.info != nil && m.info.WorkingCopyRoot != "" {
+		dir = m.info.WorkingCopyRoot
+	}
+	if dir == "" || dir == m.client.Dir {
+		return
+	}
+	next := *m.client
+	next.Dir = dir
+	m.client = &next
+}
+
 // Init loads the initial working-copy status and revision history, and — on a
 // release build — checks GitHub for a newer version in the background. When the
 // working copy is served over svn+ssh, it first ensures the configured SSH key
@@ -299,6 +364,9 @@ func (m *Model) Init() tea.Cmd {
 	} else {
 		cmds = append(cmds, loadStatusCmd(m.client), loadLogCmd(m.client))
 	}
+	// The saved diffs live on local disk, so the Diffs view can be populated
+	// regardless of whether the repository is reachable yet.
+	cmds = append(cmds, loadSavedDiffsCmd(m.diffDir()))
 	if m.build.IsRelease() {
 		cmds = append(cmds, checkUpdateCmd(m.build))
 	}
@@ -323,6 +391,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.naming {
 			m.sizeNameEditor()
+		}
+		if m.savingDiff {
+			m.sizeDiffEditor()
+		}
+		if m.splitting {
+			m.sizeSplitDiff()
 		}
 		if m.confirming {
 			m.sizeModal()
@@ -371,6 +445,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case diffLoadedMsg:
 		m.diffPath = msg.path
+		m.diffErr = msg.err != nil
 		if msg.err != nil {
 			m.diffText = "Unable to load diff: " + msg.err.Error()
 		} else {
@@ -380,6 +455,50 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateMain()
 		}
 		return m, nil
+
+	case diffSavedMsg:
+		if msg.err != nil {
+			m.showToast(failureText("save diff", msg.err), component.LevelError)
+			return m, nil
+		}
+		m.showToast("diff saved to "+msg.path, component.LevelSuccess)
+		// The new file belongs in the Diffs view, so re-scan the store.
+		return m, loadSavedDiffsCmd(m.diffDir())
+
+	case savedDiffsLoadedMsg:
+		m.savedDiffsErr = msg.err
+		m.savedDiffItems = msg.files
+		m.rebuildSavedDiffs()
+		if m.source == sourceFiles && m.filesViewIsDiffs() {
+			m.updateMain()
+			return m, m.savedDiffLoadForSelection()
+		}
+		return m, nil
+
+	case savedDiffReadMsg:
+		m.savedPath = msg.path
+		m.savedErr = msg.err != nil
+		if msg.err != nil {
+			m.savedText = "Unable to read diff: " + msg.err.Error()
+		} else {
+			m.savedText = msg.text
+		}
+		if m.source == sourceFiles {
+			m.updateMain()
+		}
+		return m, nil
+
+	case editedMsg:
+		if msg.err != nil {
+			m.showToast(failureText("open "+msg.name, msg.err), component.LevelError)
+			return m, nil
+		}
+		if msg.detached {
+			return m, nil
+		}
+		// A terminal editor has exited, so the file may have changed: re-read the
+		// working copy (which reloads the diff on screen) and the saved-diff store.
+		return m, tea.Batch(loadStatusCmd(m.client), loadSavedDiffsCmd(m.diffDir()))
 
 	case errMsg:
 		m.loading = false
@@ -507,8 +626,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case uimsg.ActivatedMsg:
 		// Enter on a changelist row drills into its files; enter on a directory in
-		// the Changes tree or a drilled-in changelist tree collapses/expands it;
-		// enter on the help menu is inert (a read-only keybindings reference).
+		// the Changes tree or a drilled-in changelist tree collapses/expands it.
 		switch msg.ID {
 		case changelistsListID:
 			return m, m.drillChangelist()
@@ -525,8 +643,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.ID == filesViewsID {
 			m.updateBar()
 			m.updateMain()
-			if msg.Name == "Changes" {
+			switch msg.Name {
+			case "Changes":
 				return m, m.diffLoadForSelection()
+			case savedDiffsViewName:
+				// Re-scan on entry so diffs saved (or removed) elsewhere show up.
+				return m, tea.Batch(loadSavedDiffsCmd(m.diffDir()), m.savedDiffLoadForSelection())
 			}
 		}
 		return m, nil
@@ -545,6 +667,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.submitCommit(msg.Value)
 		case changelistEditorID:
 			return m, m.submitChangelist(msg.Value)
+		case diffNameEditorID:
+			return m, m.submitDiffName(msg.Value)
 		case settingsFormID:
 			return m, m.submitSettings()
 		case passphraseEditorID:
@@ -585,6 +709,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case changelistEditorID:
 			m.naming = false
 			m.nameEditor.Blur()
+		case diffNameEditorID:
+			m.closeDiffName()
+		case splitDiffID:
+			m.closeSplitDiff()
 		case passphraseEditorID:
 			// The key is required and the user declined to unlock it, so exiting is
 			// the only sensible outcome; proceeding would leave a UI that cannot
@@ -628,6 +756,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.naming {
 			return m, m.nameEditor.Update(msg)
 		}
+		if m.savingDiff {
+			return m, m.diffEditor.Update(msg)
+		}
+		if m.splitting {
+			// The side-by-side view owns the keyboard while open: it scrolls, esc
+			// closes it (as a DismissMsg), and the key that opened it closes it too.
+			if key.Matches(msg, m.keys.SplitDiff) {
+				m.closeSplitDiff()
+				return m, nil
+			}
+			return m, m.splitDiff.Update(msg)
+		}
 		if m.filtering {
 			// The filter input owns the keyboard while open. Every edit re-runs the
 			// filter live so the panel updates as the user types; enter and esc are
@@ -659,13 +799,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.updateMenu.Update(msg)
 		}
 		if m.helping {
-			// Read-only reference: only ? and esc close it; other keys drive the
-			// menu (enter/n are inert, handled above).
+			// Read-only reference: ? and esc close it, every other key is
+			// swallowed.
 			if key.Matches(msg, m.keys.Help) || key.Matches(msg, m.keys.Back) {
 				m.closeHelp()
 				return m, nil
 			}
-			return m, m.menu.Update(msg)
+			return m, nil
 		}
 		m.dismissToast()
 		if cmd, handled := m.handleKey(msg); handled {
@@ -699,6 +839,12 @@ func (m *Model) View() string {
 		view = m.overlayCenter(view, m.editor.View())
 	case m.naming:
 		view = m.overlayCenter(view, m.nameEditor.View())
+	case m.savingDiff:
+		view = m.overlayCenter(view, m.diffEditor.View())
+	case m.splitting:
+		// The side-by-side view all but fills the screen and is read rather than
+		// acted on, so the layout behind it recedes to a single dim color.
+		view = m.overlayCenter(layout.Dim(view, m.theme.Muted), m.splitDiff.View())
 	case m.confirming:
 		view = m.overlayCenter(view, m.modal.View())
 	case m.updating:
@@ -764,7 +910,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		m.dismissToast()
 		m.diffPath, m.diffText = "", ""
 		m.refreshChrome()
-		return tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client)), true
+		return tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client), loadSavedDiffsCmd(m.diffDir())), true
 	case key.Matches(k, m.keys.FocusNext):
 		m.focusNextPanel()
 		return m.afterFocusChange(), true
@@ -777,6 +923,15 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return m.openFilter(), true
 	case key.Matches(k, m.keys.ToggleCmdLog):
 		return m.toggleCmdLog(), true
+	case key.Matches(k, m.keys.SaveDiff):
+		return m.saveDiff(), true
+	case key.Matches(k, m.keys.SplitDiff):
+		if m.focus.Index() == panelFiles {
+			return m.openSplitDiff(), true
+		}
+		return nil, false
+	case key.Matches(k, m.keys.OpenEditor):
+		return m.openInEditor(), true
 	case key.Matches(k, m.keys.Back):
 		// esc clears the focused panel's filter when it has one; otherwise it is
 		// left for the panel (e.g. to pop a changelist drill).
@@ -1010,9 +1165,13 @@ func (m *Model) submitChangelist(name string) tea.Cmd {
 // selectedFile returns the file the current Files-panel view points at: the
 // Changes tree selection (only when the cursor is on a file leaf, not a
 // directory row), or the selection within a drilled-in changelist. At the
-// Changelists overview (a group is selected) or on a directory row there is no
+// Changelists overview (a group is selected), on a directory row, or in the
+// Diffs view (which lists saved patch files, not working-copy files) there is no
 // single file, so ok is false.
 func (m *Model) selectedFile() (svn.StatusItem, bool) {
+	if m.filesViewIsDiffs() {
+		return svn.StatusItem{}, false
+	}
 	if m.filesViewIsChangelists() {
 		if m.inChangelistDrill() {
 			if n, ok := m.clFiles.Selected(); ok && n.Item != nil {
@@ -1098,6 +1257,12 @@ func (m *Model) filesViewIsChangelists() bool {
 	return m.filesViews.ActiveName() == "Changelists"
 }
 
+// filesViewIsDiffs reports whether the Files panel's active view is the Diffs
+// browser, which lists saved patch files rather than working-copy changes.
+func (m *Model) filesViewIsDiffs() bool {
+	return m.filesViews.ActiveName() == savedDiffsViewName
+}
+
 // inChangelistDrill reports whether the Changelists view is drilled into a
 // changelist's file list.
 func (m *Model) inChangelistDrill() bool {
@@ -1109,11 +1274,14 @@ func (m *Model) inChangelistDrill() bool {
 // entries shown, and — when a filter or the hide-untracked toggle hides some —
 // the full unfiltered count in brackets. It counts file leaves in the Changes
 // tree and a drilled-in changelist (ignoring the synthetic root and directory
-// rows) and changelists in the Changelists overview, following whichever view is
-// active.
+// rows), changelists in the Changelists overview, and saved patch files in the
+// Diffs view, following whichever view is active.
 func (m *Model) filesFooter() string {
 	hiding := m.hideUntracked || m.filters[panelFiles] != ""
 	switch {
+	case m.filesViewIsDiffs():
+		shown := len(m.savedDiffs.Items())
+		return countLabel(m.savedDiffs.Index()+1, shown, len(m.savedDiffItems))
 	case m.inChangelistDrill():
 		index, shown := fileLeafStats(m.clFiles.Items(), m.clFiles.Index())
 		full := shown
@@ -1504,7 +1672,7 @@ func (m *Model) closeHelp() {
 // screen, so a background event (like the update check completing) knows not to
 // steal focus.
 func (m *Model) overlayActive() bool {
-	return m.aborting || m.unlocking || m.editing || m.naming || m.confirming || m.helping || m.updating || m.configuring
+	return m.aborting || m.unlocking || m.editing || m.naming || m.savingDiff || m.splitting || m.confirming || m.helping || m.updating || m.configuring
 }
 
 // openUpdate shows the startup update prompt for the given release as a centered
@@ -1561,14 +1729,17 @@ func (m *Model) previewTheme(name string) {
 	m.bar.SetTheme(th)
 	m.editor.SetTheme(th)
 	m.nameEditor.SetTheme(th)
+	m.diffEditor.SetTheme(th)
 	m.modal.SetTheme(th)
 	m.menu.SetTheme(th)
 	m.updateMenu.SetTheme(th)
 	m.form.SetTheme(th)
 	m.toast.SetTheme(th)
+	m.splitDiff.SetTheme(th)
 	m.files.SetRender(renderFileNode(th))
 	m.clFiles.SetRender(renderFileNode(th))
 	m.changelists.SetRender(renderChangelistGroup(th))
+	m.savedDiffs.SetRender(renderSavedDiff(th))
 	m.refreshChrome()
 }
 
@@ -1598,30 +1769,36 @@ func (m *Model) closeSettings() {
 
 // submitSettings reads the edited fields back into the configuration, applies the
 // changes that take effect immediately (the theme palette, the directory-diff
-// default and the hide-untracked toggle), persists the result, and closes the
-// editor. A blank or non-positive log limit is ignored so the previous value
-// survives; a failed save is non-fatal and surfaced as a toast.
+// default, the hide-untracked toggle and the display scope), persists the result,
+// and closes the editor. A blank or non-positive log limit is ignored so the
+// previous value survives; a failed save is non-fatal and surfaced as a toast.
 func (m *Model) submitSettings() tea.Cmd {
 	vals := m.form.Values()
 	// Field order mirrors settingsFields.
 	cfg := m.cfg
-	cfg.DefaultPath = strings.TrimSpace(vals[0])
-	if n, err := strconv.Atoi(strings.TrimSpace(vals[1])); err == nil && n > 0 {
+	if n, err := strconv.Atoi(strings.TrimSpace(vals[0])); err == nil && n > 0 {
 		cfg.LogLimit = n
 	}
-	cfg.Editor = strings.TrimSpace(vals[2])
-	cfg.Theme = strings.TrimSpace(vals[3])
-	cfg.DirectoryDiff = vals[4] == "true"
-	cfg.HideUntracked = vals[5] == "true"
-	cfg.SSHKeyPath = strings.TrimSpace(vals[6])
+	cfg.Editor = strings.TrimSpace(vals[1])
+	if cfg.Editor == "" {
+		cfg.Editor = config.Default().Editor
+	}
+	cfg.Theme = strings.TrimSpace(vals[2])
+	cfg.DirectoryDiff = vals[3] == "true"
+	cfg.HideUntracked = vals[4] == "true"
+	cfg.SSHKeyPath = strings.TrimSpace(vals[5])
 	if cfg.SSHKeyPath == "" {
 		cfg.SSHKeyPath = config.Default().SSHKeyPath
 	}
+	cfg.DisplayFrom = strings.TrimSpace(vals[6])
+	cfg.DiffOutputDir = strings.TrimSpace(vals[7])
 
 	m.closeSettings()
 
 	themeChanged := cfg.Theme != m.cfg.Theme
 	untrackedChanged := cfg.HideUntracked != m.hideUntracked
+	displayChanged := cfg.DisplayFrom != m.cfg.DisplayFrom
+	diffDirChanged := cfg.DiffOutputDir != m.cfg.DiffOutputDir
 	m.cfg = cfg
 	m.dirDiff = cfg.DirectoryDiff
 	m.hideUntracked = cfg.HideUntracked
@@ -1631,11 +1808,30 @@ func (m *Model) submitSettings() tea.Cmd {
 	if untrackedChanged {
 		m.rebuildFilesViews()
 	}
+	// A new display scope re-roots every svn command, so the status and history
+	// on screen no longer describe the tree being shown; load them afresh.
+	var reload tea.Cmd
+	if displayChanged {
+		m.retargetDisplay(cfg.DisplayFrom)
+		m.diffPath, m.diffText = "", ""
+		m.loading = true
+		m.refreshChrome()
+		reload = m.beginInitialLoad()
+	}
+	// A new output directory means a different set of saved diffs to browse; the
+	// display scope changes it too, since a blank setting resolves to the root.
+	if diffDirChanged || displayChanged {
+		m.savedPath, m.savedText, m.savedErr = "", "", false
+		reload = tea.Batch(reload, loadSavedDiffsCmd(m.diffDir()))
+	}
 	if err := config.Save(m.cfg); err != nil {
 		m.showToast("couldn't save settings: "+err.Error(), component.LevelWarning)
-		return nil
+		return reload
 	}
 	m.showToast("settings saved", component.LevelSuccess)
+	if reload != nil {
+		return reload
+	}
 	m.updateMain()
 	if m.source == sourceFiles {
 		return m.diffLoadForSelection()
@@ -1694,33 +1890,19 @@ func failureText(action string, err error) string {
 	return action + " failed: " + err.Error()
 }
 
-// helpMenuItems is the keybindings reference shown by the "?" help menu.
+// helpMenuItems is the keybindings reference shown by the "?" help menu. The
+// table itself lives in keymap.HelpSections, which also feeds the website's
+// keybindings page; this only lays it out as menu rows.
 func helpMenuItems() []component.MenuItem {
-	return []component.MenuItem{
-		{Label: "Stage / unstage", Key: "space"},
-		{Label: "Assign changelist", Key: "n"},
-		{Label: "Commit staged / changelist", Key: "c"},
-		{Label: "Switch file view", Key: "[ / ]"},
-		{Label: "Expand changelist", Key: "enter"},
-		{Label: "Revert file", Key: "r"},
-		{Label: "Delete file", Key: "d"},
-		{Label: "Update working copy", Key: "u"},
-		{Label: "Update to revision (Log panel)", Key: "space"},
-		{Label: "Refresh", Key: "R"},
-		{Label: "Edit settings", Key: "S"},
-		{Label: "Jump to panel", Key: "1 2 3 4 0"},
-		{Label: "Cycle panels", Key: "tab / shift+tab"},
-		{Label: "Move up / down", Key: "k / j"},
-		{Label: "Jump top / bottom", Key: "g / G"},
-		{Label: "Scroll main up / down", Key: "K / J"},
-		{Label: "Scroll main left / right", Key: "h / l"},
-		{Label: "Line start / end", Key: "home / end"},
-		{Label: "Toggle dir diff / untracked", Key: "D / U"},
-		{Label: "Toggle command log", Key: "x"},
-		{Label: "Filter panel", Key: "/"},
-		{Label: "Toggle help", Key: "?"},
-		{Label: "Quit", Key: "q"},
+	sections := keymap.HelpSections()
+	items := make([]component.MenuItem, 0, len(sections))
+	for _, s := range sections {
+		items = append(items, component.MenuSection(s.Title))
+		for _, b := range s.Bindings {
+			items = append(items, component.MenuItem{Label: b.Action, Key: b.KeyHint()})
+		}
 	}
+	return items
 }
 
 // updateMenuItems are the choices shown in the startup update prompt. Their
@@ -1736,7 +1918,7 @@ func updateMenuItems() []component.MenuItem {
 // themeFieldIndex is the position of the Theme field within settingsFields; the
 // settings editor live-previews the palette when the field at this index
 // changes, and submitSettings reads the same position back as the theme.
-const themeFieldIndex = 3
+const themeFieldIndex = 2
 
 // settingsFields builds the settings editor's fields from the configuration, in
 // the field order submitSettings relies on. The directory-diff field is seeded
@@ -1748,13 +1930,14 @@ const themeFieldIndex = 3
 // from the persisted configuration.
 func settingsFields(cfg config.Config, dirDiff bool) []component.Field {
 	return []component.Field{
-		{Label: "Default path", Kind: component.FieldText, Value: cfg.DefaultPath},
 		{Label: "Log limit", Kind: component.FieldInt, Value: strconv.Itoa(cfg.LogLimit)},
-		{Label: "Editor", Kind: component.FieldText, Value: cfg.Editor},
+		{Label: "Editor", Kind: component.FieldChoice, Value: cfg.Editor, Options: config.EditorValues()},
 		{Label: "Theme", Kind: component.FieldChoice, Value: cfg.Theme, Options: theme.Names()},
 		{Label: "Directory diff", Kind: component.FieldBool, Value: strconv.FormatBool(dirDiff)},
 		{Label: "Hide untracked", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.HideUntracked)},
 		{Label: "SSH key", Kind: component.FieldText, Value: cfg.SSHKeyPath},
+		{Label: "Display from", Kind: component.FieldChoice, Value: cfg.DisplayFrom, Options: config.DisplayFromValues()},
+		{Label: "Diff output", Kind: component.FieldText, Value: cfg.DiffOutputDir},
 	}
 }
 
@@ -1784,6 +1967,13 @@ func (m *Model) sizeEditor() {
 func (m *Model) sizeNameEditor() {
 	w := clamp(m.width/2, 30, max(m.width-6, 30))
 	m.nameEditor.SetSize(w, 0)
+}
+
+// sizeDiffEditor sizes the save-diff file-name prompt like the changelist-name
+// prompt.
+func (m *Model) sizeDiffEditor() {
+	w := clamp(m.width/2, 30, max(m.width-6, 30))
+	m.diffEditor.SetSize(w, 0)
 }
 
 // beginInitialLoad kicks off the working-copy status and revision-history loads
@@ -1882,9 +2072,11 @@ func (m *Model) sizeProgress() {
 }
 
 // sizeMenu sizes the help menu to a centered portion of the screen (only its
-// width matters; the height follows the item count).
+// width matters; the height follows the item count). It is laid out in two
+// columns so the grouped keybindings fit a short terminal.
 func (m *Model) sizeMenu() {
-	m.menu.SetSize(clamp(m.width/2, 40, max(m.width-6, 40)), 0)
+	m.menu.SetColumns(2)
+	m.menu.SetSize(clamp(m.width*4/5, 60, max(m.width-6, 60)), 0)
 }
 
 // sizeUpdateMenu sizes the startup update prompt like the help menu (width
@@ -1924,6 +2116,11 @@ func (m *Model) handleSelection(sel uimsg.SelectedMsg) tea.Cmd {
 	case changelistsListID:
 		if m.source == sourceFiles {
 			m.updateMain()
+		}
+	case savedDiffsListID:
+		if m.source == sourceFiles {
+			m.updateMain()
+			return m.savedDiffLoadForSelection()
 		}
 	case "log":
 		if m.source == sourceLog {
@@ -1989,10 +2186,14 @@ func (m *Model) syncMainTitle() {
 }
 
 // diffLoadForSelection returns a command to load the diff that Main should show
-// for the current Files selection when it is not already loaded. A directory row
-// loads the combined diff of every change beneath it (the "/" root covers the
-// whole working copy); a file leaf loads its own diff when it is dirty.
+// for the current Files selection when it is not already loaded. In the Diffs
+// view that is the highlighted saved patch file; otherwise a directory row loads
+// the combined diff of every change beneath it (the "/" root covers the whole
+// working copy) and a file leaf loads its own diff when it is dirty.
 func (m *Model) diffLoadForSelection() tea.Cmd {
+	if m.filesViewIsDiffs() {
+		return m.savedDiffLoadForSelection()
+	}
 	if n, _, ok := m.selectedTreeNode(); ok && n.Item == nil {
 		if !m.dirDiff || m.diffPath == n.Path {
 			return nil
@@ -2066,12 +2267,14 @@ func (m *Model) toggleCmdLog() tea.Cmd {
 }
 
 // rebuildFilesViews re-flattens every Files-panel view — the Changes tree, the
-// Changelists overview and a drilled-in changelist — from the current status
-// items. It is the shared refresh used whenever what those views should show
-// changes without a status reload (a filter edit or the untracked toggle).
+// Changelists overview, a drilled-in changelist and the saved-diffs browser —
+// from the current status items. It is the shared refresh used whenever what
+// those views should show changes without a status reload (a filter edit or the
+// untracked toggle).
 func (m *Model) rebuildFilesViews() {
 	m.rebuildFileTree()
 	m.rebuildChangelists()
+	m.rebuildSavedDiffs()
 	if m.inChangelistDrill() {
 		m.rebuildClTree()
 	}
@@ -2381,25 +2584,6 @@ func (m *Model) headRevision() string {
 	return m.logEntries[0].Revision
 }
 
-// revisionLabel describes where the working copy sits relative to the
-// repository: its current revision and, once history has loaded, whether that is
-// HEAD or how far behind it trails. It is empty only before either is known.
-func (m *Model) revisionLabel() string {
-	wc, head := m.wcRevision, m.headRevision()
-	switch {
-	case wc == "" && head == "":
-		return ""
-	case wc == "":
-		return "HEAD r" + head
-	case head == "":
-		return "r" + wc
-	case head == wc:
-		return "r" + wc + " (HEAD)"
-	default:
-		return "r" + wc + " · HEAD r" + head
-	}
-}
-
 // updateMain fills the Main panel from whichever side panel currently drives it.
 // The Main and Status panels are searched (not filtered): any active search
 // re-highlights against the new content inside the Viewport, so nothing is set
@@ -2418,11 +2602,15 @@ func (m *Model) mainContent() string {
 	if m.source == sourceStatus {
 		return m.statusDetail()
 	}
-	switch {
-	case m.err != nil:
-		return "Error: " + m.err.Error() + "\n\nPress R to retry."
-	case m.loading && len(m.fileItems) == 0:
-		return "Loading working-copy status…"
+	// The Diffs view browses patch files on local disk, so it stays readable
+	// while the working copy is still loading or has failed to load.
+	if m.source != sourceFiles || !m.filesViewIsDiffs() {
+		switch {
+		case m.err != nil:
+			return "Error: " + m.err.Error() + "\n\nPress R to retry."
+		case m.loading && len(m.fileItems) == 0:
+			return "Loading working-copy status…"
+		}
 	}
 	if m.source == sourceLog {
 		return m.logDetail()
@@ -2434,10 +2622,14 @@ func (m *Model) mainContent() string {
 }
 
 // filesMain renders the Main content for the Files panel, which depends on its
-// active view: the Changelists overview shows a changelist summary, a directory
-// row in the Changes tree shows the combined diff beneath it, and everything else
-// (a file in the Changes tree or a drilled-in changelist) shows the selected file.
+// active view: the Diffs browser shows the highlighted saved patch file, the
+// Changelists overview shows a changelist summary, a directory row in the
+// Changes tree shows the combined diff beneath it, and everything else (a file
+// in the Changes tree or a drilled-in changelist) shows the selected file.
 func (m *Model) filesMain() string {
+	if m.filesViewIsDiffs() {
+		return m.savedDiffDetail()
+	}
 	if m.filesViewIsChangelists() && !m.inChangelistDrill() {
 		return m.changelistDetail()
 	}
@@ -2451,8 +2643,12 @@ func (m *Model) filesMain() string {
 // from the Changes tree, or a drilled-in changelist tree — together with the
 // item set that tree was built from (used to stage a directory's files). It
 // reports ok=false at the Changelists overview, where the selection is a
-// changelist group rather than a tree row.
+// changelist group rather than a tree row, and in the Diffs view, where it is a
+// saved patch file.
 func (m *Model) selectedTreeNode() (fileNode, []svn.StatusItem, bool) {
+	if m.filesViewIsDiffs() {
+		return fileNode{}, nil, false
+	}
 	if m.filesViewIsChangelists() {
 		if m.inChangelistDrill() {
 			n, ok := m.clFiles.Selected()
@@ -2477,10 +2673,15 @@ func (m *Model) selectedDirectory() (fileNode, []svn.StatusItem, bool) {
 
 // filesShowDiff reports whether filesMain currently renders a unified diff — the
 // only Main view with a +/-/space gutter to pin. It mirrors the diff branches of
-// directoryDetail and fileDetail: the Files panel is showing files (not the
-// Changelists overview) and the selected directory row, or dirty file leaf, has a
+// savedDiffDetail, directoryDetail and fileDetail: the Files panel is showing a
+// saved patch file that has been read, or working-copy files (not the
+// Changelists overview) whose selected directory row, or dirty file leaf, has a
 // non-empty, freshly-loaded diff.
 func (m *Model) filesShowDiff() bool {
+	if m.filesViewIsDiffs() {
+		d, ok := m.savedDiffs.Selected()
+		return ok && !m.savedErr && m.savedPath == d.Path && strings.TrimSpace(m.savedText) != ""
+	}
 	if m.filesViewIsChangelists() && !m.inChangelistDrill() {
 		return false
 	}
@@ -2588,68 +2789,84 @@ func (m *Model) logDetail() string {
 	return strings.Join(lines, "\n")
 }
 
-// updateBar sets the contextual key hints and right-aligned repo context.
+// updateBar sets the contextual key hints and the right-aligned load state.
 func (m *Model) updateBar() {
-	m.bar.SetLeft(m.barHint())
+	m.bar.SetHints(m.barHints())
 
 	switch {
 	case m.err != nil:
 		m.bar.SetRight("error")
 	case m.loading:
 		m.bar.SetRight("loading…")
-	case m.info != nil:
-		right := m.info.URL
-		if rev := m.revisionLabel(); rev != "" {
-			right += " @ " + rev
-		}
-		m.bar.SetRight(right)
 	default:
 		m.bar.SetRight("")
 	}
 }
 
-// barHint returns the contextual keybinding hint for the current Files-panel
-// view: the Changelists overview and its drill-down each get their own hints,
-// the Changes view (and every other panel) get the file-oriented hint. When the
-// focused panel has an active filter or search (and the input is closed) it is
-// prefixed so the user can see it, jump between search matches, and clear it.
-func (m *Model) barHint() string {
+// barHints returns the key hints for the focused panel — and, for the Files
+// panel, its active view — in the order the bar should drop them when they do
+// not all fit. Only keys that act on that panel are listed; the global ones live
+// in the help menu, so a panel that only scrolls (the command log) gets no hints
+// and leaves the bar empty. When the focused panel has an active filter or
+// search (and the input is closed) it is described first, so the user can see
+// it, jump between search matches, and clear it.
+func (m *Model) barHints() []string {
 	p := m.focus.Index()
+	hints := m.panelHints(p)
+	if len(hints) == 0 {
+		return nil
+	}
+	hints = append(hints, "? help")
 	if q := m.filters[p]; q != "" && !m.filtering {
 		if m.isSearchPanel(p) {
-			return m.searchHint(p, q) + " · " + m.baseHint()
+			return append(m.searchHints(p, q), hints...)
 		}
-		return "filter: " + q + " · esc clear · " + m.baseHint()
+		return append([]string{"filter: " + q, "esc clear"}, hints...)
 	}
-	return m.baseHint()
+	return hints
 }
 
-// searchHint describes the active search on a Viewport panel: the query, the
+// panelHints are the keys panel p responds to, most useful first.
+func (m *Model) panelHints(p int) []string {
+	switch p {
+	case panelStatus, panelMain:
+		return []string{"/ search"}
+	case panelFiles:
+		return m.filesHints()
+	case panelLog:
+		return []string{"space update to rev", "c commit", "/ filter"}
+	}
+	// The command log only scrolls; it has no actions of its own.
+	return nil
+}
+
+// filesHints are the Files panel's keys for its active view: the saved-diff
+// browser, a drilled-in changelist, the Changelists overview, or the Changes
+// tree.
+func (m *Model) filesHints() []string {
+	switch {
+	case m.filesViewIsDiffs():
+		return []string{"e open", "/ filter", "[ ] view"}
+	case m.inChangelistDrill():
+		return []string{"space unstage", "c commit", "esc back", "[ ] view"}
+	case m.filesViewIsChangelists():
+		return []string{"enter expand", "n name", "c commit", "[ ] view"}
+	}
+	return []string{"space stage", "n changelist", "c commit", "r revert", "d delete", "[ ] view"}
+}
+
+// searchHints describe the active search on a Viewport panel: the query, the
 // current match position (or that there are none), and the jump/clear keys.
-func (m *Model) searchHint(p int, q string) string {
+func (m *Model) searchHints(p int, q string) []string {
 	vp := m.searchViewport(p)
 	if vp.MatchCount() == 0 {
-		return "search: " + q + " · no matches · esc clear"
+		return []string{"search: " + q, "no matches", "esc clear"}
 	}
-	pos := vp.CurrentMatch()
-	if pos == 0 {
-		return fmt.Sprintf("search: %s · %d matches · n next · N prev · esc clear", q, vp.MatchCount())
+	where := fmt.Sprintf("%d matches", vp.MatchCount())
+	if pos := vp.CurrentMatch(); pos > 0 {
+		where = fmt.Sprintf("%d/%d", pos, vp.MatchCount())
 	}
-	return fmt.Sprintf("search: %s · %d/%d · n next · N prev · esc clear", q, pos, vp.MatchCount())
-}
-
-// baseHint is the panel-specific key hint without any filter annotation.
-func (m *Model) baseHint() string {
-	if m.focus.Index() == panelFiles && m.filesViewIsChangelists() {
-		if m.inChangelistDrill() {
-			return "space unstage · c commit · esc back · [ ] view · ? help"
-		}
-		return "enter expand · c commit · [ ] view · n name · ? help"
-	}
-	if m.focus.Index() == panelLog {
-		return "space update to rev · c commit · ? help"
-	}
-	return "space stage · n changelist · c commit · r revert · d delete · ? help"
+	return []string{"search: " + q, where, "n next", "N prev", "esc clear"}
 }
 
 func clamp(v, lo, hi int) int {

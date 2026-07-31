@@ -187,9 +187,26 @@ func (f *Form) editActive(km tea.KeyMsg) {
 }
 
 // editText edits a text or integer field inline: ←/→/home/end move the cursor,
-// backspace deletes, enter advances to the next field, and runes are inserted
-// (an integer field ignores non-digits).
+// alt+←/alt+→ move it by a word, backspace and alt+backspace delete a rune or a
+// word, enter advances to the next field, and runes are inserted (an integer
+// field ignores non-digits).
 func (f *Form) editText(fld *Field, km tea.KeyMsg) {
+	switch {
+	case key.Matches(km, f.keys.WordLeft):
+		f.col = wordStart([]rune(fld.Value), f.col)
+		return
+	case key.Matches(km, f.keys.WordRight):
+		f.col = wordEnd([]rune(fld.Value), f.col)
+		return
+	case key.Matches(km, f.keys.DeleteWordLeft):
+		var runes []rune
+		runes, f.col = cutWordLeft([]rune(fld.Value), f.col)
+		fld.Value = string(runes)
+		return
+	case key.Matches(km, f.keys.DeleteWordRight):
+		fld.Value = string(cutWordRight([]rune(fld.Value), f.col))
+		return
+	}
 	switch km.Type {
 	case tea.KeyEnter:
 		f.moveField(1)

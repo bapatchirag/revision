@@ -35,19 +35,50 @@ const (
 	filePerm fs.FileMode = 0o644
 )
 
+// The display scopes accepted by Config.DisplayFrom name the directory revision
+// shows the working copy from.
+const (
+	// DisplayFromCWD limits the views to the directory revision was started in.
+	DisplayFromCWD = "cwd"
+	// DisplayFromRoot widens the views to the working copy (sandbox) root, no
+	// matter which directory inside it revision was started in.
+	DisplayFromRoot = "root"
+)
+
+// DisplayFromValues lists the supported display scopes, in the order a chooser
+// should offer them.
+func DisplayFromValues() []string { return []string{DisplayFromCWD, DisplayFromRoot} }
+
+// The editors accepted by Config.Editor name the program the highlighted file is
+// opened in for editing.
+const (
+	// EditorNative defers to the environment rather than naming a program: the
+	// editor the terminal belongs to, the one $VISUAL/$EDITOR names, or the
+	// desktop's default handler for the file.
+	EditorNative = "native"
+	// EditorVim opens the file in vim (or vi, where that is the one installed).
+	EditorVim = "vim"
+	// EditorNvim opens the file in neovim.
+	EditorNvim = "nvim"
+	// EditorNano opens the file in nano.
+	EditorNano = "nano"
+)
+
+// EditorValues lists the supported editors, in the order a chooser should offer
+// them.
+func EditorValues() []string { return []string{EditorNative, EditorVim, EditorNvim, EditorNano} }
+
 // Config holds revision's persisted user settings. Every field maps to a JSON
 // key; unknown keys in an on-disk file are ignored, and any key omitted from
 // the file falls back to its Default value when loaded.
 type Config struct {
-	// DefaultPath is the working copy revision opens when no -path flag is
-	// given. Empty means the current directory.
-	DefaultPath string `json:"defaultPath"`
 	// LogLimit caps how many revisions the Log panel requests. It must be
 	// positive; non-positive values found on disk are normalized back to the
 	// default when loaded.
 	LogLimit int `json:"logLimit"`
-	// Editor is the external editor invoked for commit messages. Empty means
-	// use the in-app editor.
+	// Editor names the program the highlighted file is opened in for editing. It
+	// must be one of EditorValues — "vi" is accepted as a spelling of vim — and
+	// any other value is reset to the default when loaded.
 	Editor string `json:"editor"`
 	// Theme selects the color palette by name. Empty is normalized to the
 	// built-in default palette.
@@ -66,19 +97,74 @@ type Config struct {
 	// location, ~/.ssh/id_rsa, so the setting always names a concrete key. A
 	// leading ~ is expanded to the user's home directory when the key is used.
 	SSHKeyPath string `json:"sshKeyPath"`
+	// DisplayFrom selects the directory the working copy is displayed from:
+	// DisplayFromCWD (the default) shows only what lies under the directory
+	// revision was started in, while DisplayFromRoot shows the whole working copy
+	// from its root. Any other value is reset to the default when loaded.
+	DisplayFrom string `json:"displayFrom"`
+	// DiffOutputDir is the directory the diffs revision creates are written to.
+	// Empty — the default — means the working copy's root, wherever inside it
+	// revision was started. A leading ~ is expanded to the user's home directory.
+	// Resolve it with DiffDir rather than reading it directly.
+	DiffOutputDir string `json:"diffOutputDir"`
 }
 
 // Default returns the configuration used when no file exists yet or when a
 // field is absent from the on-disk document.
 func Default() Config {
 	return Config{
-		DefaultPath:   "",
 		LogLimit:      100,
-		Editor:        "",
+		Editor:        EditorNative,
 		Theme:         "auto",
 		DirectoryDiff: true,
 		HideUntracked: false,
 		SSHKeyPath:    "~/.ssh/id_rsa",
+		DisplayFrom:   DisplayFromCWD,
+		DiffOutputDir: "",
+	}
+}
+
+// DiffDir returns the directory the diffs revision creates are written to:
+// DiffOutputDir when it names one, otherwise wcRoot — the working copy's root,
+// which the caller resolves. A leading ~ is expanded to the user's home
+// directory; if the home directory cannot be determined the configured path is
+// returned as written.
+func (c Config) DiffDir(wcRoot string) string {
+	dir := strings.TrimSpace(c.DiffOutputDir)
+	if dir == "" {
+		return wcRoot
+	}
+	if dir != "~" && !strings.HasPrefix(dir, "~"+string(filepath.Separator)) {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return dir
+	}
+	return filepath.Join(home, strings.TrimPrefix(dir, "~"))
+}
+
+// validDisplayFrom reports whether v names a display scope the schema defines,
+// ignoring surrounding whitespace.
+func validDisplayFrom(v string) bool {
+	switch strings.TrimSpace(v) {
+	case DisplayFromCWD, DisplayFromRoot:
+		return true
+	}
+	return false
+}
+
+// canonicalEditor resolves v to the editor name the schema stores, ignoring
+// surrounding whitespace and accepting "vi" as a spelling of vim. ok is false
+// when v names no supported editor.
+func canonicalEditor(v string) (string, bool) {
+	switch name := strings.TrimSpace(v); name {
+	case "vi", EditorVim:
+		return EditorVim, true
+	case EditorNative, EditorNvim, EditorNano:
+		return name, true
+	default:
+		return "", false
 	}
 }
 
@@ -251,6 +337,17 @@ func (c *Config) normalize() {
 	if strings.TrimSpace(c.SSHKeyPath) == "" {
 		c.SSHKeyPath = def.SSHKeyPath
 	}
+	if name, ok := canonicalEditor(c.Editor); ok {
+		c.Editor = name
+	} else {
+		c.Editor = def.Editor
+	}
+	c.DisplayFrom = strings.TrimSpace(c.DisplayFrom)
+	if !validDisplayFrom(c.DisplayFrom) {
+		c.DisplayFrom = def.DisplayFrom
+	}
+	// A blank directory is meaningful: it selects the display root.
+	c.DiffOutputDir = strings.TrimSpace(c.DiffOutputDir)
 }
 
 // reconcileValues brings the loaded settings in line with the current schema. It
@@ -269,6 +366,22 @@ func (c *Config) reconcileValues(present map[string]json.RawMessage, validate Va
 	if _, ok := present["logLimit"]; ok && c.LogLimit <= 0 {
 		conflicts = append(conflicts,
 			fmt.Sprintf("logLimit %d is invalid; reset to %d", c.LogLimit, def.LogLimit))
+	}
+
+	// A displayFrom naming a scope the schema doesn't define cannot be honored, so
+	// report which value was dropped before normalize replaces it.
+	if _, ok := present["displayFrom"]; ok && strings.TrimSpace(c.DisplayFrom) != "" && !validDisplayFrom(c.DisplayFrom) {
+		conflicts = append(conflicts,
+			fmt.Sprintf("displayFrom %q is invalid; reset to %q", c.DisplayFrom, def.DisplayFrom))
+	}
+
+	// Likewise for an editor this build cannot launch — including the blank value
+	// older builds wrote, which no longer selects anything.
+	if _, ok := present["editor"]; ok && strings.TrimSpace(c.Editor) != "" {
+		if _, valid := canonicalEditor(c.Editor); !valid {
+			conflicts = append(conflicts,
+				fmt.Sprintf("editor %q is invalid; reset to %q", c.Editor, def.Editor))
+		}
 	}
 
 	c.normalize()

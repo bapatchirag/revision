@@ -1,6 +1,6 @@
 # revision — hero demo tape
 #
-# Generates docs/hero.gif with VHS (https://github.com/charmbracelet/vhs).
+# Generates the demo recordings with VHS (https://github.com/charmbracelet/vhs).
 # Run from the repo root:
 #
 #     vhs docs/demo.tape
@@ -11,7 +11,7 @@
 # XDG_CONFIG_HOME at the same throwaway directory so the settings demo never
 # touches the real ~/.config/revision/config.json.
 
-Output docs/hero.gif
+Output site/public/demos/hero.gif
 
 Set Shell "bash"
 Set FontSize 16

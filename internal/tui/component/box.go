@@ -22,6 +22,7 @@ const (
 	borderBottomRight = "╯"
 	borderHorizontal  = "─"
 	borderVertical    = "│"
+	borderCross       = "┼"
 )
 
 // tabSpaces is the fixed-width expansion for a tab (see fitLine).

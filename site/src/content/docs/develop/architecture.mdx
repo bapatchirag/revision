@@ -1,0 +1,83 @@
+---
+title: Architecture
+description: How the revision codebase is layered, and the rules that keep it that way.
+---
+
+import TerminalWindow from '../../../components/TerminalWindow.astro';
+
+`revision` is a Go module with a layered, lazygit-inspired architecture. The layering is
+not a convention — a test enforces it.
+
+## Packages
+
+| Package | Responsibility |
+|---|---|
+| `cmd/revision` | The CLI entry point: flag parsing, working-copy detection, launching the TUI. |
+| `cmd/gallery` | A standalone gallery that renders each reusable UI component in isolation. |
+| `internal/svn` | A thin wrapper over the `svn` binary that parses `--xml` output into typed values. Always runs `--non-interactive`. |
+| `internal/tui` | The domain-agnostic UI foundation: reusable components plus theme, keymap, focus, layout, and messages. |
+| `internal/config` | The settings file: location, load, reconcile, persist. |
+| `internal/selfupdate` | Release checks and binary replacement. |
+| `internal/sshagent` | `ssh-agent` inspection and key loading. |
+| `internal/app` | The composition layer that adapts SVN data into components and arranges the lazygit layout. |
+
+## The dependency rule
+
+<TerminalWindow title="Dependency direction">
+	<pre>{`                        cmd/revision
+                             │
+                             ▼
+                       internal/app  ── the only layer that knows both sides
+                             │
+        ┌────────────┬───────┼───────────┬──────────────┐
+        ▼            ▼       ▼           ▼              ▼
+ internal/svn  internal/tui  config  selfupdate     sshagent
+   (domain)     (UI only)    └───────  infrastructure  ──────┘`}</pre>
+</TerminalWindow>
+
+`internal/tui` must **never** import `internal/svn` or `internal/app`. A reusability-guard
+test in `internal/tui/guard_test.go` fails the build if it does.
+
+`internal/config`, `internal/selfupdate` and `internal/sshagent` are self-contained
+infrastructure and are domain-agnostic for the same reason: any layer can use them without
+creating an import cycle.
+
+`internal/app` is the only package that knows both sides. If a change needs SVN knowledge
+*and* UI knowledge, it belongs there.
+
+## Where the domain logic lives
+
+Inside `internal/app`, a few files carry most of the domain:
+
+| File | What it owns |
+|---|---|
+| `app.go` | The Bubble Tea model, layout, focus and key dispatch. |
+| `status.go` | Mapping SVN working-copy state onto theme colours. |
+| `filetree.go` | Building the collapsible directory tree from a flat status list. |
+| `changelist.go` | Grouping items into changelists, including the staged bucket. |
+| `diff.go` / `splitdiff.go` | Interpreting diff structure — the only places that parse a patch. |
+| `filter.go` | Parsing `key:value` filter queries and matching rows. |
+| `messages.go` | Every `tea.Cmd` that shells out, and the messages they return. |
+
+## Component contracts
+
+Every reusable component under `internal/tui/component` follows the same three
+conventions:
+
+1. A compile-time interface assertion.
+2. A golden test over `View()`, with the expected output in `testdata/`.
+3. A `teatest` harness driving it as a real Bubble Tea program.
+
+That triple is what lets the [documentation screens](/guides/panels/) on this site be read
+straight out of the golden files: they are the app's own rendered output, not screenshots.
+
+## SVN as a subprocess
+
+`internal/svn` never links a Subversion library. It runs the `svn` binary, asks for
+`--xml` where the subcommand supports it, and parses the result into typed values. Every
+invocation carries `--non-interactive`, so a missing credential is an error rather than a
+hidden prompt — see [Authentication](/operations/authentication/).
+
+Commands that change the working copy are recorded and surfaced in the
+[Command Log](/guides/panels/#command-log) panel; read-only queries are not, so the log
+stays a record of what actually changed.

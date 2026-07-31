@@ -26,6 +26,15 @@ func TestDefault(t *testing.T) {
 	if def.SSHKeyPath != "~/.ssh/id_rsa" {
 		t.Errorf("Default().SSHKeyPath = %q, want %q", def.SSHKeyPath, "~/.ssh/id_rsa")
 	}
+	if def.DisplayFrom != DisplayFromCWD {
+		t.Errorf("Default().DisplayFrom = %q, want %q", def.DisplayFrom, DisplayFromCWD)
+	}
+	if def.DiffOutputDir != "" {
+		t.Errorf("Default().DiffOutputDir = %q, want empty (the display root)", def.DiffOutputDir)
+	}
+	if def.Editor != EditorNative {
+		t.Errorf("Default().Editor = %q, want %q", def.Editor, EditorNative)
+	}
 }
 
 func TestDirUsesXDGConfigHome(t *testing.T) {
@@ -89,11 +98,11 @@ func TestLoadMissingReturnsDefault(t *testing.T) {
 func TestSaveThenLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	want := Config{
-		DefaultPath: "/work/trunk",
 		LogLimit:    50,
 		Editor:      "vim",
 		Theme:       "solarized",
 		SSHKeyPath:  "/home/me/.ssh/id_ed25519",
+		DisplayFrom: DisplayFromRoot,
 	}
 
 	if err := saveTo(path, want); err != nil {
@@ -178,6 +187,69 @@ func TestLoadNormalizesInvalidValues(t *testing.T) {
 	}
 }
 
+func TestLoadDisplayFrom(t *testing.T) {
+	// An unsupported or blank scope falls back to the default; a supported one is
+	// kept, ignoring surrounding whitespace.
+	cases := map[string]struct {
+		json string
+		want string
+	}{
+		"root":    {`{"displayFrom":"root"}`, DisplayFromRoot},
+		"cwd":     {`{"displayFrom":"cwd"}`, DisplayFromCWD},
+		"padded":  {`{"displayFrom":" root "}`, DisplayFromRoot},
+		"unknown": {`{"displayFrom":"sandbox"}`, Default().DisplayFrom},
+		"empty":   {`{"displayFrom":""}`, Default().DisplayFrom},
+		"absent":  {`{}`, Default().DisplayFrom},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(tc.json), 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			got, err := loadFrom(path)
+			if err != nil {
+				t.Fatalf("loadFrom: unexpected error %v", err)
+			}
+			if got.DisplayFrom != tc.want {
+				t.Errorf("DisplayFrom = %q, want %q", got.DisplayFrom, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadEditor(t *testing.T) {
+	// An unsupported or blank editor falls back to the default; a supported one is
+	// kept, with vi accepted as a spelling of vim.
+	cases := map[string]struct {
+		json string
+		want string
+	}{
+		"native":  {`{"editor":"native"}`, EditorNative},
+		"nvim":    {`{"editor":"nvim"}`, EditorNvim},
+		"padded":  {`{"editor":" nano "}`, EditorNano},
+		"vi":      {`{"editor":"vi"}`, EditorVim},
+		"unknown": {`{"editor":"ed"}`, Default().Editor},
+		"empty":   {`{"editor":""}`, Default().Editor},
+		"absent":  {`{}`, Default().Editor},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(tc.json), 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			got, err := loadFrom(path)
+			if err != nil {
+				t.Fatalf("loadFrom: unexpected error %v", err)
+			}
+			if got.Editor != tc.want {
+				t.Errorf("Editor = %q, want %q", got.Editor, tc.want)
+			}
+		})
+	}
+}
+
 func TestLoadDefaultsSSHKeyWhenBlank(t *testing.T) {
 	// An empty or whitespace-only sshKeyPath on disk must resolve to the default
 	// key location, while an explicit key is preserved verbatim.
@@ -202,6 +274,64 @@ func TestLoadDefaultsSSHKeyWhenBlank(t *testing.T) {
 			}
 			if got.SSHKeyPath != tc.want {
 				t.Errorf("SSHKeyPath = %q, want %q", got.SSHKeyPath, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadDiffOutputDir(t *testing.T) {
+	// A blank directory is a valid value meaning "the display root", so it is kept
+	// as-is rather than replaced; an explicit one survives surrounding whitespace.
+	cases := map[string]struct {
+		json string
+		want string
+	}{
+		"explicit":   {`{"diffOutputDir":"/tmp/patches"}`, "/tmp/patches"},
+		"padded":     {`{"diffOutputDir":"  /tmp/patches  "}`, "/tmp/patches"},
+		"whitespace": {`{"diffOutputDir":"   "}`, ""},
+		"empty":      {`{"diffOutputDir":""}`, ""},
+		"absent":     {`{}`, ""},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(tc.json), 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			got, err := loadFrom(path)
+			if err != nil {
+				t.Fatalf("loadFrom: unexpected error %v", err)
+			}
+			if got.DiffOutputDir != tc.want {
+				t.Errorf("DiffOutputDir = %q, want %q", got.DiffOutputDir, tc.want)
+			}
+		})
+	}
+}
+
+func TestDiffDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	const wcRoot = "/home/alice/work/wc"
+
+	cases := map[string]struct {
+		configured string
+		want       string
+	}{
+		"unset falls back to the working-copy root": {"", wcRoot},
+		"blank falls back to the working-copy root": {"   ", wcRoot},
+		"absolute path is used as written":          {"/tmp/patches", "/tmp/patches"},
+		"relative path is used as written":          {"patches", "patches"},
+		"leading ~ expands to home":                 {"~/patches", filepath.Join(home, "patches")},
+		"bare ~ expands to home":                    {"~", home},
+		"~ inside a path is literal":                {"/tmp/~/patches", "/tmp/~/patches"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := Default()
+			cfg.DiffOutputDir = tc.configured
+			if got := cfg.DiffDir(wcRoot); got != tc.want {
+				t.Errorf("DiffDir(%q) with diffOutputDir %q = %q, want %q", wcRoot, tc.configured, got, tc.want)
 			}
 		})
 	}
@@ -326,7 +456,7 @@ func TestReconcileResetsInvalidValueWithConflict(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	// All keys present, but logLimit is non-positive: an explicit invalid value
 	// that conflicts with the schema and must revert to the default.
-	const onDisk = `{"defaultPath":"","logLimit":0,"editor":"","theme":"auto","directoryDiff":true}`
+	const onDisk = `{"logLimit":0,"editor":"","theme":"auto","directoryDiff":true}`
 	if err := os.WriteFile(path, []byte(onDisk), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -358,9 +488,51 @@ func TestReconcileResetsInvalidValueWithConflict(t *testing.T) {
 	}
 }
 
+func TestReconcileResetsUnknownDisplayFrom(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"displayFrom":"sandbox"}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got, rec, err := reconcileAt(path, nil)
+	if err != nil {
+		t.Fatalf("reconcileAt: unexpected error %v", err)
+	}
+	if got.DisplayFrom != Default().DisplayFrom {
+		t.Errorf("DisplayFrom = %q, want default %q", got.DisplayFrom, Default().DisplayFrom)
+	}
+	if len(rec.Conflicts) != 1 || !rec.Updated {
+		t.Fatalf("Reconciliation = %+v, want one conflict and Updated", rec)
+	}
+	if note := rec.Notice(); !strings.Contains(note, "displayFrom") {
+		t.Errorf("Notice() = %q, want a message mentioning displayFrom", note)
+	}
+}
+
+func TestReconcileResetsUnknownEditor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"editor":"ed"}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got, rec, err := reconcileAt(path, nil)
+	if err != nil {
+		t.Fatalf("reconcileAt: unexpected error %v", err)
+	}
+	if got.Editor != Default().Editor {
+		t.Errorf("Editor = %q, want default %q", got.Editor, Default().Editor)
+	}
+	if len(rec.Conflicts) != 1 || !rec.Updated {
+		t.Fatalf("Reconciliation = %+v, want one conflict and Updated", rec)
+	}
+	if note := rec.Notice(); !strings.Contains(note, "editor") {
+		t.Errorf("Notice() = %q, want a message mentioning editor", note)
+	}
+}
+
 func TestReconcileRunsValidatorForDomainConflicts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	const onDisk = `{"defaultPath":"","logLimit":100,"editor":"","theme":"retired","directoryDiff":true}`
+	const onDisk = `{"logLimit":100,"editor":"native","theme":"retired","directoryDiff":true}`
 	if err := os.WriteFile(path, []byte(onDisk), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}

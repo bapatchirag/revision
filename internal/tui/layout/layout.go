@@ -22,6 +22,20 @@ func Center(width, height int, content string) string {
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
 }
 
+// Dim recolors a rendered block in a single color, dropping the styling it
+// already carries. It pushes a background behind a popup that covers most of the
+// screen: the layout stays legible as context but flattens to one recessive
+// color, so the eye goes to the popup. Only escape sequences are removed, so
+// every line keeps its display width and still composites under Overlay.
+func Dim(view string, c lipgloss.Color) string {
+	style := lipgloss.NewStyle().Foreground(c)
+	lines := strings.Split(view, "\n")
+	for i, ln := range lines {
+		lines[i] = style.Render(ansi.Strip(ln))
+	}
+	return strings.Join(lines, "\n")
+}
+
 // Overlay composites fg on top of bg with fg's top-left corner at (x, y). It is
 // ANSI-aware: the background is sliced by visible column (preserving styling
 // outside fg), so it composites correctly over a styled layout. The background

@@ -5,20 +5,20 @@
 │Branch    trunk               ││                                              │
 │Revision  r42                 ││                                              │
 │               ╭─ Settings ───────────────────────────────────╮               │
-╰───────────────│> Default path                                │               │
-╭─ [2] ─ Changes│  Log limit      100                          │               │
-│  ▾ /          │  Editor                                      │               │
-│>     M modifie│  Theme          auto                         │               │
-│               │  Directory diff on                           │               │
+╰───────────────│> Log limit      100                          │               │
+╭─ [2] ─ Changes│  Editor         native                       │               │
+│  ▾ /          │  Theme          auto                         │               │
+│>     M modifie│  Directory diff on                           │               │
 │               │  Hide untracked off                          │               │
 │               │  SSH key        ~/.ssh/id_rsa                │               │
-╰───────────────│                                              │               │
-╭─ [3] Log ─────│ctrl+s save · ↑↓ move · esc cancel            │               │
-│  Rev Author Me╰──────────────────────────────────────────────╯───────────────╯
-│                              │╭─ [4] Command Log ────────────────────────────╮
+│               │  Display from   cwd                          │               │
+╰───────────────│  Diff output                                 │               │
+╭─ [3] Log ─────│                                              │               │
+│  Rev Author Me│ctrl+s save · ↑↓ move · esc cancel            │───────────────╯
+│               ╰──────────────────────────────────────────────╯───────────────╮
 │                              ││No svn commands run yet.                      │
 │                              ││                                              │
 │                              ││                                              │
 │                              ││                                              │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-space stage · n changelist · c commit · r revert · d delete · ? help            
+space stage · n changelist · c commit · r revert · d delete · [ ] view · ? help 

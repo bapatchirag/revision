@@ -6,7 +6,7 @@
 │Revision  r42                         ││                                                          │
 │                                      ││MIT © Chirag Bapat                                        │
 ╰──────────────────────────────────────╯│                                                          │
-╭─ [2] ─ Changes ─── Changelists ──────╮│Report an issue                                           │
+╭─ [2] ─ Changes ─── Changelists ─── Di╮│Report an issue                                           │
 │  ▾ /                                 ││  https://github.com/bapatchirag/revision/issues          │
 │      M modified.go                   ││                                                          │
 │                                      ││Release notes                                             │
@@ -27,4 +27,4 @@
 │                                      ││                                                          │
 │                                      ││                                                          │
 ╰──────────────────────────────────────╯╰──────────────────────────────────────────────────────────╯
-space stage · n changelist · c commit · r revert · d delete · ? help                                
+/ search · ? help                                                                                   

@@ -12,11 +12,26 @@ set -euo pipefail
 DEMO="${1:-/tmp/revision-demo}"
 REPO="$DEMO/repo"
 WC="$DEMO/wc"
+AUTHOR="alice"
 
 rm -rf "$DEMO"
 mkdir -p "$DEMO"
 
 svnadmin create "$REPO"
+
+# Commits against a file:// repository are authored by whoever runs this script,
+# and the recordings made from it are published. A post-commit hook rewrites the
+# author of every revision to a fixed name, including the commits made on camera
+# during a recording. Hooks run with an empty environment, so svnadmin is baked
+# in by absolute path.
+printf '%s' "$AUTHOR" > "$REPO/hooks/author.txt"
+printf '#!/bin/sh\nexit 0\n' > "$REPO/hooks/pre-revprop-change"
+cat > "$REPO/hooks/post-commit" <<EOF
+#!/bin/sh
+exec $(command -v svnadmin) setrevprop "\$1" -r "\$2" svn:author "\$1/hooks/author.txt"
+EOF
+chmod +x "$REPO/hooks/pre-revprop-change" "$REPO/hooks/post-commit"
+
 svn checkout "file://$REPO" "$WC" -q
 cd "$WC"
 
@@ -110,6 +125,23 @@ EOF
 svn add -q internal/config
 svn commit -q -m "Load configuration from YAML"
 svn update -q
+
+# --- r4: committed from a second checkout ---------------------------------
+# $WC deliberately stays at r3. Being behind HEAD is the normal state of a
+# working copy, it gives the Status panel a HEAD to report against, and it gives
+# the update demo somewhere to go. The revision touches only README.md, which has
+# no local modifications, so it merges cleanly in either direction.
+svn checkout "file://$REPO" "$DEMO/upstream" -q
+cat > "$DEMO/upstream/README.md" <<'EOF'
+# orbit
+
+A tiny HTTP service.
+
+## Running
+
+    go run ./cmd
+EOF
+svn commit -q -m "Document how to run the service" "$DEMO/upstream"
 
 # --- uncommitted working-copy changes ------------------------------------
 # Modified: cmd/main.go — graceful shutdown, with one deliberately long line so

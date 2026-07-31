@@ -1,0 +1,132 @@
+---
+title: Working with diffs
+description: Read, compare, and save the diffs revision shows in the Main panel.
+---
+
+import DemoVideo from '../../../components/DemoVideo.astro';
+import DiffBlock from '../../../components/DiffBlock.astro';
+import KeyCap from '../../../components/KeyCap.astro';
+
+The Main panel always shows a diff for whatever is selected in the Files panel. Everything
+on this page acts on *that* diff — the one currently on screen.
+
+## Reading a diff
+
+Additions, deletions, hunk headers and metadata are each tinted, and the `+`/`-` gutter
+stays pinned as the text scrolls sideways:
+
+<DiffBlock
+	file="internal/svn/status.go"
+	diff={`--- a/internal/svn/status.go	(revision 42)
++++ b/internal/svn/status.go	(working copy)
+@@ -12,7 +12,9 @@ func Parse(r io.Reader) ([]Entry, error) {
+ 	dec := xml.NewDecoder(r)
+ 	var doc statusXML
+-	if err := dec.Decode(&doc); err != nil {
+-		return nil, err
++	if err := dec.Decode(&doc); err != nil {
++		return nil, fmt.Errorf("parse status: %w", err)
+ 	}
+ 	return doc.Entries(), nil
+ }`}
+/>
+
+Scroll with <KeyCap key="J" /> / <KeyCap key="K" /> from any panel, or focus Main with
+<KeyCap key="0" /> and use the movement keys. <KeyCap key="←" /> / <KeyCap key="→" />
+scroll a column at a time, and <KeyCap key="^" /> / <KeyCap key="$" /> jump to the start
+and end of the line.
+
+## Directory diffs
+
+Highlight a *directory* row and Main shows the combined diff of every change beneath it.
+The root `/` row gives you the whole working copy as one patch.
+
+This is on by default. Turn it off globally with
+[`directoryDiff`](/reference/configuration/#directorydiff) — a directory row then shows a
+short hint instead — and press <KeyCap key="D" /> to reveal one on demand for the current
+session.
+
+Selecting a group in the [Changelists view](/workflows/changelists/) works the same way:
+Main shows the combined diff of the whole list.
+
+## Reading a diff side by side
+
+<KeyCap key="s" /> reopens the diff Main is showing as a two-pane comparison in a centered
+overlay.
+
+- Each removal sits opposite the addition that replaced it; context lines appear on both
+  sides.
+- Every line is numbered in its own revision — the left pane in the base revision, the
+  right in the working copy — and the pane labels name them.
+- `@@` hunk headers span the full width.
+- Both panes scroll together with the movement keys.
+- A multi-file diff is **paged one file at a time**: <KeyCap key="[" /> and
+  <KeyCap key="]" /> turn between files, and the bottom border names the open one along
+  with the line range and page number.
+- The layout behind dims out of the way while you read.
+
+<KeyCap key="s" /> or <KeyCap key="esc" /> closes the overlay.
+
+<DemoVideo
+	name="split-diff"
+	width={1200}
+	height={700}
+	label="Opening the whole working copy's diff side by side from the root row, scrolling both panes together, and paging between files with the bracket keys"
+/>
+
+If Main has no diff to show — a directory row with directory diffs off, or a failed load —
+a toast says so rather than opening an empty overlay.
+
+## Saving a diff
+
+<KeyCap key="w" /> writes the diff on screen to a file. A prompt asks for the name and
+suggests a default; leaving it blank uses the suggestion.
+
+| Selection | What is saved | Suggested name |
+|---|---|---|
+| A file | That file's diff | `path-to-file.diff` |
+| A directory | The combined diff beneath it | `path-to-dir.diff` |
+| The root `/` row | The whole working copy | `working-copy.diff` |
+| A changelist | The list's combined diff | `feature-x.diff`, `staged.diff`, `unstaged.diff` |
+
+The extension is added for you unless the name already ends in `.diff` or `.patch`, and
+only the base name is used — a path in the prompt cannot write outside the output
+directory.
+
+Files land in [`diffOutputDir`](/reference/configuration/#diffoutputdir), which is created
+if it does not exist. Empty — the default — means the working copy's root, and a leading
+`~` is expanded to your home directory.
+
+<DemoVideo
+	name="save-diff"
+	width={1200}
+	height={700}
+	label="Writing a directory's combined diff to a file with w, accepting the suggested name, and finding the saved patch in the Diffs view"
+/>
+
+## The Diffs view
+
+<KeyCap key="]" /> twice from the Changes view opens **Diffs**: the `.diff` and `.patch`
+files already in `diffOutputDir`, newest first.
+
+Selecting one shows its contents in Main, where <KeyCap key="/" />
+[search](/workflows/filtering-and-searching/) and <KeyCap key="s" /> side-by-side both
+work as usual. <KeyCap key="e" /> opens the patch in [your editor](/workflows/editor/).
+
+The view is read-only — stage, revert and delete do nothing here, and <KeyCap key="w" />
+says the diff is already saved. It rescans on <KeyCap key="R" />, on entering the view,
+after a successful save, and whenever `diffOutputDir` changes.
+
+:::note
+`revision` does not apply patches. Saved diffs are for review, sharing and archiving; use
+`svn patch` to apply one.
+:::
+
+## Searching inside a diff
+
+Focus Main with <KeyCap key="0" />, press <KeyCap key="/" />, and type. Matching lines are
+highlighted in place — nothing is hidden — and <KeyCap key="n" /> / <KeyCap key="N" />
+jump between them. See [Filtering & searching](/workflows/filtering-and-searching/).
+
+<KeyCap key="s" />, <KeyCap key="w" /> and <KeyCap key="D" /> are in the
+[View section](/reference/keybindings/#view) of the keybindings reference.

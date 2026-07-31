@@ -4,7 +4,10 @@ DIST    := dist
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: all build run run-gallery test cover vet fmt lint tidy cross build-darwin build-linux clean
+# Every tape in docs/tapes except the settings-and-setup fragment they all source.
+TAPES   := $(filter-out docs/tapes/common.tape,$(wildcard docs/tapes/*.tape))
+
+.PHONY: all build run run-gallery site-data site-build site-dev demos test cover vet fmt lint tidy cross build-darwin build-linux clean
 
 all: build
 
@@ -19,6 +22,23 @@ run:
 ## run-gallery: run the reusable-component gallery from source
 run-gallery:
 	go run ./cmd/gallery
+
+## site-data: regenerate the website's keybindings table from the Go source
+site-data:
+	go run ./cmd/keymapdump > site/src/data/keybindings.json
+
+## site-build: regenerate the keybindings table, then build the website into site/dist
+site-build: site-data
+	npm --prefix site ci && npm --prefix site run build
+
+## site-dev: serve the website locally with hot reload (Pagefind search needs site-build)
+site-dev:
+	npm --prefix site install && npm --prefix site run dev
+
+## demos: re-record every per-feature demo and derive the poster frames
+demos:
+	@for tape in $(TAPES); do echo "vhs $$tape"; vhs $$tape; done
+	npm --prefix site run demo
 
 ## test: run all unit tests
 test:

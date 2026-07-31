@@ -681,3 +681,128 @@ func TestPromptSecretMasksValue(t *testing.T) {
 		t.Errorf("Value() = %q, want hunter2", p.Value())
 	}
 }
+
+// TestStatusBarDropsHintsThatDoNotFit asserts the bar keeps whole hints and
+// marks the dropped tail with an ellipsis rather than clipping mid-hint.
+func TestStatusBarDropsHintsThatDoNotFit(t *testing.T) {
+	b := component.NewStatusBar(testTheme())
+	b.SetHints([]string{"space stage", "n changelist", "c commit", "r revert"})
+	b.SetSize(30, 1)
+
+	got := strings.TrimRight(b.View(), " ")
+	if want := "space stage · n changelist · …"; got != want {
+		t.Errorf("View() = %q, want %q", got, want)
+	}
+	if w := ansi.StringWidth(b.View()); w != 30 {
+		t.Errorf("rendered width = %d, want 30", w)
+	}
+}
+
+// TestStatusBarWithoutHintsIsBlank asserts a panel with no keys of its own
+// leaves the bar empty instead of advertising another panel's keys.
+func TestStatusBarWithoutHintsIsBlank(t *testing.T) {
+	b := component.NewStatusBar(testTheme())
+	b.SetHints(nil)
+	b.SetSize(20, 1)
+
+	if got := strings.TrimSpace(b.View()); got != "" {
+		t.Errorf("View() = %q, want blank", got)
+	}
+}
+
+func TestSplitViewEmitsDismiss(t *testing.T) {
+	sv := component.NewSplitView("split", "Side-by-side", testTheme(), testKeys())
+	sv.SetPages([]component.SplitPage{{Rows: []component.SplitRow{{Left: "a", Right: "b"}}}})
+	sv.SetSize(20, 6)
+	sv.Focus()
+	m := mustCmd(t, sv.Update(keyEsc()))
+	if got, ok := m.(msg.DismissMsg); !ok || got.ID != "split" {
+		t.Errorf("esc emitted %#v, want a DismissMsg for the split view", m)
+	}
+}
+
+func TestSplitViewScrollsBothPanesTogether(t *testing.T) {
+	sv := component.NewSplitView("split", "Side-by-side", testTheme(), testKeys())
+	sv.SetPages([]component.SplitPage{{Rows: []component.SplitRow{
+		{Left: "one left", Right: "one right"},
+		{Left: "two left", Right: "two right"},
+		{Left: "three left", Right: "three right"},
+		{Left: "four left", Right: "four right"},
+	}}})
+	// 6 rows of frame: border, labels, rule, 2 body rows, border.
+	sv.SetSize(30, 6)
+	sv.Focus()
+	sv.Update(keyDown())
+
+	view := sv.View()
+	if strings.Contains(view, "one left") || strings.Contains(view, "one right") {
+		t.Errorf("both panes should have scrolled past the first row\n---\n%s", view)
+	}
+	for _, want := range []string{"two left", "two right", "three left", "three right"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view missing %q\n---\n%s", want, view)
+		}
+	}
+}
+
+func TestSplitViewIgnoresInputWhenBlurred(t *testing.T) {
+	sv := component.NewSplitView("split", "Side-by-side", testTheme(), testKeys())
+	sv.SetPages([]component.SplitPage{{Rows: []component.SplitRow{{Left: "first", Right: "1"}, {Left: "second", Right: "2"}}}})
+	sv.SetSize(30, 5) // one body row
+	before := sv.View()
+	if cmd := sv.Update(keyDown()); cmd != nil {
+		t.Error("a blurred split view should not act on keys")
+	}
+	if sv.View() != before {
+		t.Error("a blurred split view should not scroll")
+	}
+}
+
+func TestSplitViewTurnsPages(t *testing.T) {
+	sv := component.NewSplitView("split", "Side-by-side", testTheme(), testKeys())
+	sv.SetPages([]component.SplitPage{
+		{Title: "first", Rows: []component.SplitRow{{Left: "a1", Right: "a1"}, {Left: "a2", Right: "a2"}, {Left: "a3", Right: "a3"}}},
+		{Title: "second", Rows: []component.SplitRow{{Left: "b1", Right: "b1"}}},
+	})
+	if got := sv.Pages(); got != 2 {
+		t.Fatalf("Pages() = %d, want 2", got)
+	}
+	sv.SetSize(30, 6) // 2 body rows
+	sv.Focus()
+
+	// Scrolling the first page must not carry over to the next one.
+	sv.Update(keyDown())
+	sv.Update(runes("]"))
+	view := sv.View()
+	if !strings.Contains(view, "b1") || strings.Contains(view, "a1") {
+		t.Errorf("] should turn to the next page\n---\n%s", view)
+	}
+	if !strings.Contains(view, "second (2/2) · 1-1 of 1") {
+		t.Errorf("a turned-to page should open at its top\n---\n%s", view)
+	}
+
+	// Pages wrap at either end.
+	sv.Update(runes("]"))
+	if view := sv.View(); !strings.Contains(view, "first (1/2) · 1-2 of 3") {
+		t.Errorf("] should wrap to the first page\n---\n%s", view)
+	}
+	sv.Update(runes("["))
+	if view := sv.View(); !strings.Contains(view, "second (2/2)") {
+		t.Errorf("[ should wrap to the last page\n---\n%s", view)
+	}
+}
+
+func TestSplitViewOfOnePageOmitsThePosition(t *testing.T) {
+	sv := component.NewSplitView("split", "Side-by-side", testTheme(), testKeys())
+	sv.SetPages([]component.SplitPage{{Title: "only", Rows: []component.SplitRow{{Left: "a", Right: "a"}}}})
+	sv.SetSize(30, 6)
+	sv.Focus()
+	if view := sv.View(); !strings.Contains(view, "only · 1-1 of 1") {
+		t.Errorf("a lone page should be named without a position\n---\n%s", view)
+	}
+	before := sv.View()
+	sv.Update(runes("]"))
+	if sv.View() != before {
+		t.Error("there is no page to turn to")
+	}
+}
