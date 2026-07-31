@@ -72,7 +72,6 @@ export default defineConfig({
 						{ label: 'Configuration', link: '/reference/configuration/' },
 						{ label: 'Themes', link: '/reference/themes/' },
 						{ label: 'CLI flags', link: '/reference/cli/' },
-						{ label: 'VS Code extension', link: '/reference/vscode-extension/' },
 					],
 				},
 				{
