@@ -2,8 +2,8 @@
 /bin/
 /dist/
 /revision
-revision-darwin-arm64
-revision-linux-amd64
+revision-darwin-*
+revision-linux-*
 *.exe
 *.test
 *.out

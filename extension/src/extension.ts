@@ -42,7 +42,7 @@ function resolveBinary(context: vscode.ExtensionContext): string | undefined {
 		return existingFile(override);
 	}
 
-	const exe = process.platform === 'win32' ? 'revision.exe' : 'revision';
+	const exe = 'revision';
 	const bundled = existingFile(path.join(context.extensionPath, 'bin', exe));
 	if (bundled) {
 		ensureExecutable(bundled);
@@ -64,9 +64,6 @@ function existingFile(p: string): string | undefined {
 }
 
 function ensureExecutable(p: string): void {
-	if (process.platform === 'win32') {
-		return;
-	}
 	try {
 		fs.chmodSync(p, 0o755);
 	} catch {

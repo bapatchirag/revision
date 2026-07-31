@@ -37,16 +37,26 @@ make test
 | `make lint` | Run `golangci-lint` (must be installed separately). |
 | `make fmt` | `gofmt` the tree. |
 | `make tidy` | Tidy `go.mod` / `go.sum`. |
-| `make cross` | Build static binaries for both release targets. |
+| `make cross` | Build static binaries for every release target. |
 | `make clean` | Remove build artifacts. |
 
 ## Cross-compiling
 
 ```sh
-make cross      # dist/revision-darwin-arm64 and dist/revision-linux-amd64
+make cross
 ```
 
-These are the two targets the [install script](/guides/installation/) serves. Locally
+That writes one static binary per release target:
+
+```text
+dist/revision-darwin-arm64
+dist/revision-darwin-amd64
+dist/revision-linux-amd64
+dist/revision-linux-arm64
+```
+
+These are the four targets the [install script](/guides/installation/) serves; `make
+build-darwin-arm64` and its three siblings build them one at a time. Locally
 cross-compiled binaries are still development builds — the release channel is stamped in
 by the release pipeline, not by `make cross`.
 

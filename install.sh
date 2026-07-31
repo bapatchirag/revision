@@ -17,6 +17,14 @@ err() {
 	exit 1
 }
 
+# Releases before the four-target matrix carry only darwin-arm64 and linux-amd64, so a
+# pinned older tag can resolve a URL that never existed. Always offer the source build.
+download_failed() {
+	err "download failed: ${url}
+    This release may not include ${asset}. Build from source instead:
+    go install github.com/${REPO}/cmd/${BINARY}@latest"
+}
+
 main() {
 	os=$(uname -s | tr '[:upper:]' '[:lower:]')
 	arch=$(uname -m)
@@ -33,14 +41,6 @@ main() {
 	esac
 
 	target="${os}-${arch}"
-	case "$target" in
-	darwin-arm64 | linux-amd64) ;;
-	*)
-		err "no prebuilt binary for ${target}. Build from source instead:
-    go install github.com/${REPO}/cmd/${BINARY}@latest"
-		;;
-	esac
-
 	asset="${BINARY}-${target}"
 	version="${REVISION_VERSION:-}"
 	if [ -n "$version" ]; then
@@ -54,9 +54,9 @@ main() {
 
 	echo "Downloading ${asset} ..."
 	if command -v curl >/dev/null 2>&1; then
-		curl -fsSL "$url" -o "$tmp/${BINARY}" || err "download failed: $url"
+		curl -fsSL "$url" -o "$tmp/${BINARY}" || download_failed
 	elif command -v wget >/dev/null 2>&1; then
-		wget -qO "$tmp/${BINARY}" "$url" || err "download failed: $url"
+		wget -qO "$tmp/${BINARY}" "$url" || download_failed
 	else
 		err "need curl or wget to download"
 	fi
