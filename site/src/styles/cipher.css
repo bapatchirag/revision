@@ -382,6 +382,96 @@ header.header {
 	white-space: nowrap;
 }
 
+/* --------------------------------------------------------------------- */
+/* Landing page                                                           */
+/* --------------------------------------------------------------------- */
+
+/* Pill buttons read as web chrome; the TUI's corner radius is 6px. */
+.sl-link-button {
+	border-radius: var(--rv-radius);
+	font-family: var(--rv-font-chrome);
+}
+
+.sl-link-button.primary {
+	background-color: var(--rv-accent);
+	border-color: var(--rv-accent);
+	color: var(--rv-on-accent);
+	font-weight: 700;
+}
+
+.sl-link-button.primary:hover {
+	background-color: var(--rv-accent-hover);
+	border-color: var(--rv-accent-hover);
+	color: var(--rv-on-accent);
+}
+
+.sl-link-button.secondary {
+	border-color: var(--rv-border);
+	color: var(--rv-text);
+}
+
+.sl-link-button.secondary:hover {
+	border-color: var(--rv-border-focused);
+	color: var(--rv-accent);
+}
+
+.sl-link-button.minimal {
+	color: var(--rv-text-secondary);
+}
+
+.sl-link-button.minimal:hover {
+	color: var(--rv-accent);
+}
+
+/* Feature cards are panels: same fill, same rule, same focus colour. */
+.card {
+	background-color: var(--rv-bg-deep);
+	border-color: var(--rv-border);
+	border-radius: var(--rv-radius);
+	padding: 1.25rem 1.5rem;
+	transition: border-color 120ms ease;
+}
+
+.card:hover {
+	border-color: var(--rv-border-focused);
+}
+
+.card .title {
+	color: var(--rv-text-high);
+	font-size: var(--sl-text-base);
+}
+
+/* The app marks the selected row with a lime caret. */
+.card .title::before {
+	color: var(--rv-accent);
+	content: '▸\00a0';
+}
+
+.card .body {
+	color: var(--rv-text-secondary);
+	font-size: var(--sl-text-sm);
+}
+
+/*
+ * A row of captures that scrolls sideways. The column is wide enough for the
+ * 80-cell captures at their natural size, so nothing is scaled down to read.
+ */
+.rv-strip {
+	display: grid;
+	gap: 1rem;
+	grid-auto-columns: min(92%, 40rem);
+	grid-auto-flow: column;
+	overflow-x: auto;
+	overscroll-behavior-inline: contain;
+	padding-block-end: 0.5rem;
+	scroll-snap-type: inline mandatory;
+}
+
+.rv-strip > figure.rv-screen {
+	margin-block: 0;
+	scroll-snap-align: start;
+}
+
 @media (prefers-reduced-motion: reduce) {
 	*,
 	*::before,

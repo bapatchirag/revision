@@ -1,0 +1,103 @@
+---
+title: revision
+description: A lazygit-style terminal UI for Subversion (SVN). Review changes, stage with changelists, commit, update and browse history without leaving your terminal.
+template: splash
+editUrl: false
+lastUpdated: false
+hero:
+  tagline: A lazygit-style terminal UI for Subversion
+  # Frontmatter is not Markdown, so these carry the base themselves.
+  actions:
+    - text: Get started
+      link: /revision/guides/quick-start/
+      variant: primary
+    - text: GitHub
+      link: https://github.com/bapatchirag/revision
+      variant: secondary
+    - text: VS Code extension
+      link: /revision/reference/vscode-extension/
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+import AppScreen from '../../components/AppScreen.astro';
+import CopyCommand from '../../components/CopyCommand.astro';
+import DemoVideo from '../../components/DemoVideo.astro';
+
+export const base = import.meta.env.BASE_URL;
+
+<CopyCommand command="curl -fsSL https://raw.githubusercontent.com/bapatchirag/revision/main/install.sh | sh" />
+
+Grabs the latest release build for your platform. You need the [`svn` client](/guides/requirements/)
+on your `PATH` — see [Installation](/guides/installation/) for Homebrew, `go install`, and building
+from source.
+
+<DemoVideo
+	name="hero"
+	width={1240}
+	height={760}
+	label="revision in action: working-copy status, a colour-coded diff, directory staging, named changelists, history, the svn command log, and a commit"
+/>
+
+## What it does
+
+<CardGrid>
+	<Card title="Panels, not commands">
+		Status, Files and Log down the left, a Main detail view beside them and the svn Command Log
+		beneath. Switch with the number keys or <kbd>tab</kbd>. [The panels](/guides/panels/)
+	</Card>
+	<Card title="Staging that SVN understands">
+		<kbd>space</kbd> stages a file or a whole directory subtree into a changelist — a git-index-like
+		workflow, built out of plain `svn changelist`. [Staging & commit](/workflows/staging-and-commit/)
+	</Card>
+	<Card title="Named changelists">
+		Group the staged set into named lists, drill into any of them in a tabbed view, and commit one as
+		a unit. [Changelists](/workflows/changelists/)
+	</Card>
+	<Card title="Diffs you can work in">
+		Additions, deletions and hunk headers each tinted. Search in place, read it side by side with
+		<kbd>s</kbd>, or write it to a file with <kbd>w</kbd>. [Working with diffs](/workflows/diffs/)
+	</Card>
+	<Card title="Filter anything">
+		<kbd>/</kbd> filters the focused panel, with `rev:`, `user:`, `state:` and `cl:` parameters for
+		the ones that support them. [Filtering & searching](/workflows/filtering-and-searching/)
+	</Card>
+	<Card title="Update without surprises">
+		Update to HEAD or to any revision picked out of the Log panel. Conflicts are spelled out before
+		you confirm. [Updating the working copy](/workflows/updating/)
+	</Card>
+	<Card title="Open it in your editor">
+		Hand the selected file to vim, nvim, nano, or VS Code — which opens the real file in the window
+		you are already in. [Opening files in an editor](/workflows/editor/)
+	</Card>
+	<Card title="Themes and settings, in app">
+		Six colour schemes and an in-app settings editor, written back to your config file.
+		[Themes](/reference/themes/) · [Configuration](/reference/configuration/)
+	</Card>
+</CardGrid>
+
+## A closer look
+
+These are the app's own rendered output, read straight from its golden tests — selectable text, not
+screenshots.
+
+{/* A scroll container needs to be focusable, or it is unreachable by keyboard. */}
+<div class="rv-strip not-content" role="group" aria-label="Screens from the app" tabindex="0">
+	<AppScreen golden="TestModelGoldenLayout" caption="The default layout." fit />
+	<AppScreen golden="TestSplitDiffGolden" caption="A diff read side by side." fit />
+	<AppScreen golden="TestChangelistsViewGolden" caption="Named changelists, in a tabbed view." fit />
+	<AppScreen golden="TestCommitEditorGolden" caption="Committing through the inline message editor." fit />
+	<AppScreen golden="TestHelpMenuGolden" caption="Every binding, under ?." fit />
+</div>
+
+## Start here
+
+- [Introduction](/guides/introduction/) — what `revision` is, and what it is not.
+- [Quick start](/guides/quick-start/) — stage and commit your first change.
+- [Keybindings](/reference/keybindings/) — the full key reference.
+- [Troubleshooting](/operations/troubleshooting/) — when `svn` or your keys get in the way.
+
+`revision` is MIT-licensed and built in the open on
+[GitHub](https://github.com/bapatchirag/revision) — [issues](https://github.com/bapatchirag/revision/issues)
+and [releases](https://github.com/bapatchirag/revision/releases).

@@ -1,0 +1,65 @@
+---
+/**
+ * Starlight Hero override — the figlet wordmark stands in for the page title.
+ *
+ * Only the landing page declares `hero` frontmatter, so this replaces
+ * Starlight's image hero rather than sitting alongside it.
+ */
+import { LinkButton } from '@astrojs/starlight/components';
+
+import AsciiLogo from './AsciiLogo.astro';
+
+const { data } = Astro.locals.starlightRoute.entry;
+const { tagline, actions = [] } = data.hero ?? {};
+---
+
+<div class="rv-hero">
+	{/* #_top is Starlight's skip-link and back-to-top target. */}
+	<h1 id="_top" data-page-title class="rv-hero__title">
+		<AsciiLogo />
+	</h1>
+	{tagline && <p class="rv-hero__tagline" set:html={tagline} />}
+	{
+		actions.length > 0 && (
+			<div class="rv-hero__actions">
+				{actions.map(({ attrs = {}, icon, link: href, text, variant }) => (
+					<LinkButton {href} {variant} icon={icon?.name} {...attrs}>
+						{text}
+					</LinkButton>
+				))}
+			</div>
+		)
+	}
+</div>
+
+<style>
+	.rv-hero {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 1.25rem;
+		padding-block: 2rem 1rem;
+		text-align: center;
+	}
+
+	.rv-hero__title {
+		margin: 0;
+		/* The wordmark is 29 cells wide; hold it well inside the column. */
+		width: min(100%, 32rem);
+	}
+
+	.rv-hero__tagline {
+		color: var(--rv-text-secondary);
+		font-size: clamp(1rem, 2.6vw, var(--sl-text-xl));
+		margin: 0;
+		max-width: 46rem;
+		text-wrap: balance;
+	}
+
+	.rv-hero__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		justify-content: center;
+	}
+</style>

@@ -19,8 +19,14 @@ screen-captured by hand.
 ## Recording
 
 ```sh
-vhs docs/demo.tape   # writes docs/hero.gif
+vhs docs/demo.tape       # writes site/public/demos/hero.gif
+npm --prefix site run demo   # derives hero.mp4 and hero-poster.png from it
 ```
+
+The README embeds the GIF. The site plays the mp4, which is about a third of the size and
+keeps the landing page inside its performance budget, with the poster frame standing in
+when the reader has Reduce Motion turned on. Run the second command after every recording,
+or the derived files go stale silently.
 
 `docs/demo.tape` calls `docs/demo-setup.sh`, which creates a disposable SVN repository and
 working copy in a temporary directory, populates it with the files the demo walks through,

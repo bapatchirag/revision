@@ -19,7 +19,7 @@
 A lazygit-style terminal UI for Subversion (SVN). `revision` gives you a fast, keyboard-driven interface over the `svn` command line — review changes, stage with changelists, commit, update, and browse history without leaving your terminal.
 
 <p align="center">
-  <img src="docs/hero.gif" alt="revision in action — working-copy status, colour-coded diffs with in-place search, filtering, directory staging, named changelists, history and update-to-revision, the svn command log, live theming, and committing" width="100%" />
+  <img src="site/public/demos/hero.gif" alt="revision in action — working-copy status, colour-coded diffs with in-place search, filtering, directory staging, named changelists, history and update-to-revision, the svn command log, live theming, and committing" width="100%" />
 </p>
 
 ## Why

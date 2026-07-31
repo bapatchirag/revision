@@ -1,11 +1,22 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import { satteri } from '@astrojs/markdown-satteri';
+
+import { baseLinks } from './plugins/base-links.mjs';
+
+const SITE = 'https://bapatchirag.github.io';
+const BASE = '/revision';
 
 export default defineConfig({
-	site: 'https://bapatchirag.github.io',
-	base: '/revision',
+	site: SITE,
+	base: BASE,
 	trailingSlash: 'always',
+	markdown: {
+		// Astro's default processor, plus the one plugin. Content links are written
+		// site-absolute; this puts the base in front of them.
+		processor: satteri({ hastPlugins: [baseLinks(BASE)] }),
+	},
 	integrations: [
 		starlight({
 			title: 'revision',
@@ -13,7 +24,8 @@ export default defineConfig({
 			favicon: '/favicon.svg',
 			logo: {
 				src: './src/assets/logo-cipher.svg',
-				alt: 'revision',
+				// Decorative: the site title sits right beside it and already says "revision".
+				alt: '',
 			},
 			social: [
 				{
@@ -85,6 +97,8 @@ export default defineConfig({
 			],
 			customCss: ['./src/styles/fonts.css', './src/styles/cipher.css'],
 			components: {
+				// The landing page is the only page with a hero; the wordmark is its title.
+				Hero: './src/components/Hero.astro',
 				// Dark-only site: the theme toggle is overridden away.
 				ThemeSelect: './src/components/ThemeSelect.astro',
 			},
@@ -100,6 +114,19 @@ export default defineConfig({
 						crossorigin: 'anonymous',
 					},
 				},
+				// Starlight emits og:title, og:description and og:url itself.
+				{ tag: 'meta', attrs: { property: 'og:image', content: `${SITE}${BASE}/og.png` } },
+				{ tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
+				{ tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
+				{
+					tag: 'meta',
+					attrs: {
+						property: 'og:image:alt',
+						content: 'revision — a lazygit-style terminal UI for Subversion',
+					},
+				},
+				{ tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
+				{ tag: 'meta', attrs: { name: 'twitter:image', content: `${SITE}${BASE}/og.png` } },
 			],
 		}),
 	],

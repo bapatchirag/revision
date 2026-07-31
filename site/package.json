@@ -10,11 +10,15 @@
     "preview": "astro preview",
     "check": "astro check",
     "check:tokens": "node scripts/check-tokens.mjs",
+    "og": "node scripts/make-og.mjs",
+    "demo": "node scripts/make-demo.mjs",
     "astro": "astro"
   },
   "dependencies": {
+    "@astrojs/markdown-satteri": "^0.3.5",
     "@astrojs/starlight": "^0.41.5",
     "astro": "^7.1.6",
+    "satteri": "^0.9.5",
     "sharp": "^0.35.3"
   },
   "devDependencies": {
