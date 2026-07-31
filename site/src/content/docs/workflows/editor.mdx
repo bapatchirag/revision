@@ -1,0 +1,70 @@
+---
+title: Opening files in an editor
+description: What e does, how the editor setting resolves, and how it behaves over Remote-SSH.
+---
+
+import KeyCap from '../../../components/KeyCap.astro';
+
+Press <KeyCap key="e" /> to open the highlighted file for editing — a file in the Changes
+tree, a file inside an expanded [changelist](/workflows/changelists/), or a saved patch in
+the [Diffs view](/workflows/diffs/#the-diffs-view).
+
+Directory rows and the Changelists overview have no single file to open, so
+<KeyCap key="e" /> says so instead.
+
+## The editor setting
+
+[`editor`](/reference/configuration/#editor) chooses what <KeyCap key="e" /> runs. Change
+it in-app with <KeyCap key="S" />.
+
+| Value | What happens |
+|---|---|
+| `native` (default) | The environment decides — see below. |
+| `vim` | Runs `vim` in this terminal, falling back to `vi` when that is the one installed. |
+| `nvim` | Runs `nvim` in this terminal. |
+| `nano` | Runs `nano` in this terminal. |
+
+A terminal editor takes the whole screen over until you quit it, and `revision` re-reads
+the working copy when it exits — so an edit shows up in the Changes tree and the diff
+immediately.
+
+`native` usually opens the file *beside* `revision` instead, leaving the TUI on screen.
+Refresh with <KeyCap key="R" /> when you are done.
+
+## How `native` resolves
+
+1. **A VS Code integrated terminal** — the file opens as a tab in the window the terminal
+   belongs to. Insiders, VSCodium and Cursor are recognised too.
+2. **`$VISUAL` or `$EDITOR`** — run in this terminal, with any flags they carry
+   (`emacs -nw`, `code --wait`).
+3. **The desktop's default handler** — `open` on macOS, `xdg-open` on Linux.
+
+If none of those is available, <KeyCap key="e" /> says so rather than guessing. Pick a
+terminal editor with <KeyCap key="S" />.
+
+## In VS Code, over a remote connection
+
+When you open a folder with **Remote-SSH** (or a dev container, or WSL) and run `revision`
+in the integrated terminal, `revision` — like the terminal itself — is running *on the
+server*. Both editor modes are built for that.
+
+**`vim` / `nvim` / `nano`** run on the server, in the terminal panel, editing the remote
+file in place. This also works over a plain `ssh` session, `tmux`, or anything else.
+
+**`native`** uses the `code` command VS Code injects into the remote shell. That command
+does not run an editor on the server: it forwards the request over the existing connection
+to the VS Code window on your workstation, which opens the remote file in a tab — exactly
+as if you had clicked it in the Explorer. `revision` keeps running in the terminal panel
+below, and the file is saved back over the same connection.
+
+:::caution[One case to know about]
+If you open a *local* folder and then `ssh` to a server yourself from the integrated
+terminal, VS Code's environment is not carried across — `ssh` does not forward it — so
+there is no window for `native` to talk to on the far side. It falls back to `$EDITOR`,
+and if that is unset the desktop opener fails on a headless server.
+
+Set `editor` to `vim`, `nvim` or `nano` for those sessions.
+:::
+
+See also the [VS Code extension](/reference/vscode-extension/), which launches the TUI in
+an editor terminal for you.

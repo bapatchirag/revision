@@ -1,0 +1,210 @@
+---
+title: Troubleshooting
+description: Common failures, what causes them, and how to fix them.
+---
+
+import KeyCap from '../../../components/KeyCap.astro';
+
+## `svn` was not found on your PATH
+
+```text
+revision: the 'svn' command was not found on your PATH; please install Subversion
+```
+
+`revision` drives the real `svn` binary and refuses to start without it. Confirm:
+
+```sh
+svn --version
+```
+
+If that fails, install Subversion — `brew install subversion` on macOS,
+`apt install subversion`, `dnf install subversion` or the equivalent on Linux.
+
+If `svn --version` works in your shell but `revision` still cannot find it, `revision` is
+running with a different `PATH`. That usually means it was launched from a GUI or an
+editor rather than a login shell — the [VS Code extension](/reference/vscode-extension/)
+inherits the terminal's `PATH`, but a desktop launcher may not.
+
+## The install script says my platform is unsupported
+
+```text
+install.sh: unsupported OS: freebsd
+install.sh: unsupported architecture: armv7l
+install.sh: no prebuilt binary for linux-arm64. Build from source instead:
+    go install github.com/bapatchirag/revision/cmd/revision@latest
+```
+
+Prebuilt binaries exist for `darwin-arm64` and `linux-amd64` only. Everywhere else,
+build from source:
+
+```sh
+go install github.com/bapatchirag/revision/cmd/revision@latest
+```
+
+That covers Intel Macs, ARM Linux, and anything else Go targets. Note that builds produced
+this way never [self-update](/operations/updating-revision/) — re-run `go install` to
+upgrade.
+
+Windows is not supported at all.
+
+## `revision`: command not found after install
+
+The install script printed where it put the binary:
+
+```text
+Installed revision to /Users/you/.local/bin/revision
+Note: /Users/you/.local/bin is not on your PATH; add it to run 'revision'.
+```
+
+Add that directory to your `PATH` in your shell profile and reopen the shell:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Or reinstall to a directory that is already on your `PATH`:
+
+```sh
+REVISION_INSTALL_DIR=/usr/local/bin sh -c "$(curl -fsSL https://raw.githubusercontent.com/bapatchirag/revision/main/install.sh)"
+```
+
+If `command -v revision` finds a *different* copy than you expected, you have two installs
+— see [which method should I use](/operations/updating-revision/#which-method-should-i-use).
+
+## SSH key not added after 3 attempts
+
+```text
+SSH key not added after 3 attempts; it is required for this working copy
+```
+
+`revision` prompted for the passphrase of the key at
+[`sshKeyPath`](/reference/configuration/#sshkeypath) three times and `ssh-add` rejected it
+each time. The working copy is served over `svn+ssh://`, so SVN cannot reach the
+repository without that key.
+
+Work through it outside `revision`:
+
+```sh
+# 1. Is the agent running?
+ssh-add -l
+
+# 2. Does this key load at all?
+ssh-add ~/.ssh/id_rsa
+
+# 3. Is it even the right key for this host?
+ssh -T <host>
+```
+
+Common causes:
+
+- **The wrong key.** `sshKeyPath` defaults to `~/.ssh/id_rsa`, but your repository may use
+  `id_ed25519` or a per-host key. Press <KeyCap key="S" /> and set the **SSH key** field.
+- **No agent.** If `ssh-add -l` reports `Could not open a connection to your
+  authentication agent`, start one: `eval "$(ssh-agent -s)"`.
+- **A `~/.ssh/config` that selects a different key per host.** `revision` only checks the
+  one key it is configured with. Load the right key yourself with `ssh-add` before
+  starting — `revision` uses whatever the agent already holds.
+
+See [Authentication](/operations/authentication/) for the full flow.
+
+## Authentication required — cache SVN credentials
+
+```text
+authentication required — cache SVN credentials, then retry
+```
+
+`revision` runs `svn` with `--non-interactive` so it can never hang on a hidden prompt.
+Prime SVN's own credential cache once, from the same working copy:
+
+```sh
+cd /path/to/working-copy
+svn info
+```
+
+Answer the prompts. Every later `revision` action reuses what SVN stored.
+
+## Conflicts during an update
+
+Before running an update, `revision` warns you when a file in the working copy is already
+conflicted. `svn` leaves those files untouched and updates everything else, so the update
+still succeeds — but the conflicted files stay conflicted.
+
+`revision` has no conflict resolver yet. Resolve them with `svn`:
+
+```sh
+svn status | grep '^C'      # what is conflicted
+svn resolve --accept working path/to/file
+```
+
+Then press <KeyCap key="R" /> in `revision` to re-read status.
+
+Conflicts introduced *by* an update are reported the same way: the file shows up with a
+`C` status code in the Changes tree.
+
+## The editor will not open over a remote connection
+
+<KeyCap key="e" /> with `editor` set to `native` needs something that can open the file.
+Over Remote-SSH, a dev container or WSL, `revision` runs **on the server**, so it relies on
+the `code` command VS Code injects into the remote shell.
+
+That injection is missing in one specific case: you opened a *local* folder and then
+`ssh`'d to the server yourself from the integrated terminal. VS Code's environment is not
+carried across, so there is no window for `native` to talk to. It falls back to
+`$EDITOR`, and on a headless server the desktop opener then fails.
+
+Fix it by choosing a terminal editor for those sessions — press <KeyCap key="S" /> and set
+**Editor** to `vim`, `nvim` or `nano`. They run on the server, in the terminal panel, and
+edit the remote file in place.
+
+Check the injection yourself:
+
+```sh
+command -v code
+```
+
+If that finds nothing inside a Remote-SSH terminal, the environment was not inherited.
+
+See [Opening files in an editor](/workflows/editor/#in-vs-code-over-a-remote-connection).
+
+## Where is my config file?
+
+```text
+$XDG_CONFIG_HOME/revision/config.json
+```
+
+When `XDG_CONFIG_HOME` is unset, that is `~/.config/revision/config.json` on **both**
+macOS and Linux.
+
+:::caution[Not the macOS convention]
+`revision` does not use `~/Library/Application Support` on macOS. If you are looking there,
+you will not find it. One path across both platforms means the same dotfiles work
+everywhere.
+:::
+
+```sh
+echo "${XDG_CONFIG_HOME:-$HOME/.config}/revision/config.json"
+```
+
+The file is created with defaults on first run. If it is missing, `revision` recreates it;
+if it is unreadable, `revision` starts on built-in defaults and prints a line to stderr
+rather than refusing to run. Deleting it is a safe reset.
+
+## A setting reverted on its own
+
+A startup toast like `config: logLimit 0 is invalid; reset to 100` means the value on disk
+was not one this build accepts — a retired [theme](/reference/themes/) name, a
+non-positive `logLimit`, an unknown `editor`. The default is written back in its place.
+
+Unknown keys are ignored rather than deleted, so a config file shared between versions
+does not lose anything.
+
+## Something else
+
+Check the [Command Log](/guides/panels/#command-log) with <KeyCap key="4" />: it lists the
+`svn` invocations `revision` ran on your behalf, newest first, each marked ✓ or ✗. A
+failing action names the exact command, which is usually enough to reproduce it on the
+command line.
+
+If that does not explain it, please
+[open an issue](https://github.com/bapatchirag/revision/issues) with the command from the
+log, the `svn --version` output, and what you expected to happen.

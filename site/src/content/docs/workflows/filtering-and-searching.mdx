@@ -1,0 +1,97 @@
+---
+title: Filtering & searching
+description: Narrow a list panel or highlight matches in a detail panel with /.
+---
+
+import KeyCap from '../../../components/KeyCap.astro';
+
+Press <KeyCap key="/" /> to narrow the **focused** panel. A slim input opens in the status
+bar and the query applies live as you type.
+
+| Key | Effect |
+|---|---|
+| <KeyCap key="enter" /> | Keep the query. The hint bar then shows it, with <KeyCap key="esc" /> to clear. |
+| <KeyCap key="esc" /> | Clear the query. |
+| <KeyCap key="n" /> / <KeyCap key="N" /> | In Main and Status: jump to the next / previous match. |
+
+The query is remembered **per panel**, so the Files panel can stay narrowed to `state:M`
+while you search inside a diff in Main.
+
+## Two behaviours
+
+**List panels filter.** In Files and Log, non-matching rows are hidden. The panel footer
+keeps counting, and appends the full unfiltered count in brackets — `1 of 16 (29)` — so
+you always know how much is out of view.
+
+**Detail panels search.** In Main and Status, nothing is removed. Matching lines are
+highlighted in place: the current match is a reverse-video bar and the rest get a subtle
+highlight. <KeyCap key="n" /> / <KeyCap key="N" /> move between them, wrapping at the
+ends, and the hint bar shows the position — `2/5`. If nothing matches, a toast says so.
+
+## Query syntax
+
+Every query accepts free text. The list panels also accept `key:value` parameters, which
+can be combined in any order with the free text. Keys are case-insensitive, and so is
+matching.
+
+| Panel | Behaviour | Parameters | Free text matches |
+|---|---|---|---|
+| Log | filter | `rev:` (exact revision, with or without the leading `r`), `user:` / `author:`, `path:` (a changed path), `date:` (`YYYY-MM-DD`) | The **full** commit message, not just its first line |
+| Files — Changes, Changelists, Diffs | filter | `state:` (a status code such as `M`, or part of a state name such as `modified`), `cl:` / `changelist:` | The file path |
+| Main / Status | highlight + jump | — | The visible lines |
+
+Anything that is not a recognised `key:value` pair — including an unknown key — is treated
+as free text.
+
+### Files
+
+```text
+state:M app.go
+```
+
+Modified files whose path contains `app.go`.
+
+```text
+cl:staged
+```
+
+Only the staged set. `cl:unstaged` is its counterpart, and `cl:feature-x` narrows to a
+[named changelist](/workflows/changelists/).
+
+The Files filter is shared by all three views — Changes, Changelists and Diffs — so
+switching views with <KeyCap key="[" /> / <KeyCap key="]" /> keeps the same query. In the
+Diffs view only the free text applies, matched against the patch file name.
+
+### Log
+
+```text
+rev:128 user:alice parser
+```
+
+Revision 128, authored by alice, with `parser` anywhere in the commit message.
+
+```text
+date:2026-07 path:internal/svn
+```
+
+July 2026 revisions that touched something under `internal/svn`. `date:` is a substring
+match over `YYYY-MM-DD HH:MM`, so `date:2026-07-14` pins a single day and `date:2026-07`
+covers a month.
+
+`rev:` is exact — `rev:12` does not match revision 128.
+
+### Main and Status
+
+No parameters; the whole query is a case-insensitive substring match over the visible
+lines. This is how you search inside a diff:
+
+1. <KeyCap key="0" /> to focus Main.
+2. <KeyCap key="/" />, type the term, <KeyCap key="enter" />.
+3. <KeyCap key="n" /> / <KeyCap key="N" /> to walk the matches.
+
+## Clearing
+
+<KeyCap key="esc" /> clears the focused panel's query. It only consumes the keypress when
+there was a query to clear, so <KeyCap key="esc" /> still backs out of a
+[drilled-in changelist](/workflows/changelists/#drilling-into-a-list) when no filter is
+active.

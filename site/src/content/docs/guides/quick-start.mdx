@@ -1,0 +1,108 @@
+---
+title: Quick start
+description: From an SVN working copy to a committed change, in a few keystrokes.
+---
+
+import AppScreen from '../../../components/AppScreen.astro';
+import HintBar from '../../../components/HintBar.astro';
+import KeyCap from '../../../components/KeyCap.astro';
+
+This walks the everyday loop: look at what changed, read a diff, stage it, commit it.
+It assumes `revision` is [installed](/guides/installation/) and you are standing in an SVN
+working copy.
+
+## 1. Start it
+
+```sh
+cd /path/to/working-copy
+revision
+```
+
+Or point it at a working copy from anywhere:
+
+```sh
+revision --path /path/to/working-copy
+```
+
+<AppScreen golden="TestModelGoldenLayout" />
+
+The Status panel names the working-copy root, the branch, and the revision you sit at
+against HEAD. The Files panel lists pending changes as a directory tree. The Log panel
+holds history, newest first. Main, on the right, shows detail for whatever is selected.
+
+## 2. Move around
+
+Focus a panel by number — <KeyCap key="1" /> Status, <KeyCap key="2" /> Files,
+<KeyCap key="3" /> Log, <KeyCap key="4" /> Command Log, <KeyCap key="0" /> Main — or cycle
+with <KeyCap key="tab" />. Move the selection with <KeyCap key="↑" /> / <KeyCap key="↓" />
+(or <KeyCap key="k" /> / <KeyCap key="j" />), and page the Main panel with
+<KeyCap key="K" /> / <KeyCap key="J" />.
+
+The hint bar at the bottom always shows what the focused panel can do:
+
+<HintBar
+	hints={[
+		{ keys: 'space', label: 'stage' },
+		{ keys: 'n', label: 'changelist' },
+		{ keys: 'c', label: 'commit' },
+		{ keys: 'r', label: 'revert' },
+		{ keys: 'd', label: 'delete' },
+		{ keys: '[ ]', label: 'view' },
+		{ keys: '?', label: 'help' },
+	]}
+	keycaps
+/>
+
+Press <KeyCap key="?" /> at any time for the full [keybindings](/reference/keybindings/)
+menu, and <KeyCap key="q" /> to quit.
+
+## 3. Read a change
+
+Focus the Files panel with <KeyCap key="2" /> and move onto a modified file. Main follows
+the selection and shows its diff — additions, deletions, hunk headers and metadata each
+tinted, with the `+`/`-` gutter pinned as you scroll.
+
+Highlight a *directory* row instead and Main shows the combined diff of everything beneath
+it. Press <KeyCap key="enter" /> on a directory to collapse or expand it.
+
+For a longer look, <KeyCap key="s" /> reopens the same diff
+[side by side](/workflows/diffs/#reading-a-diff-side-by-side), and <KeyCap key="w" />
+[saves it to a file](/workflows/diffs/#saving-a-diff).
+
+## 4. Stage it
+
+Press <KeyCap key="space" /> on a file to stage it. On a directory row,
+<KeyCap key="space" /> stages every change beneath it; press it again to unstage them.
+An untracked file is `svn add`ed first.
+
+Staged files move into the `(staged)` group. There is no SVN staging index — `revision`
+emulates one with a reserved changelist. See
+[Staging & commit](/workflows/staging-and-commit/) for what that means in practice.
+
+## 5. Commit it
+
+Press <KeyCap key="c" />. An inline editor opens for the message:
+
+<AppScreen golden="TestCommitEditorGolden" />
+
+<KeyCap key="ctrl+s" /> submits, <KeyCap key="esc" /> cancels. The commit covers the
+staged set — or, if you are in the Changelists view with a list highlighted, that list
+alone.
+
+## 6. Stay current
+
+<KeyCap key="u" /> updates the working copy to HEAD. To move to a specific revision,
+focus the Log panel with <KeyCap key="3" />, select the revision, and press
+<KeyCap key="space" />. Both confirm first and keep your uncommitted changes — see
+[Updating the working copy](/workflows/updating/).
+
+Press <KeyCap key="R" /> to re-read status and history at any time, and <KeyCap key="4" />
+to see the `svn` commands `revision` ran on your behalf.
+
+## Where to go next
+
+- [The panels](/guides/panels/) — what each panel shows and how it behaves.
+- [Filtering & searching](/workflows/filtering-and-searching/) — <KeyCap key="/" /> in any
+  panel.
+- [Configuration](/reference/configuration/) — settings, editable in-app with
+  <KeyCap key="S" />.

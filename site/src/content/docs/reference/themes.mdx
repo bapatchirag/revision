@@ -1,0 +1,67 @@
+---
+title: Themes
+description: The six built-in colour schemes and how to switch between them.
+---
+
+import KeyCap from '../../../components/KeyCap.astro';
+
+Six palettes ship built in.
+
+| Name | Source |
+|---|---|
+| `auto` (default) | Your terminal's own 16-colour palette |
+| `everforest` | [Everforest](https://github.com/sainnhe/everforest) |
+| `dracula` | [Dracula](https://draculatheme.com) |
+| `nord` | [Nord](https://www.nordtheme.com) |
+| `gruvbox` | [Gruvbox](https://github.com/morhetz/gruvbox) |
+| `cipher` | Cipher — the palette this documentation site uses |
+
+## Switching
+
+Press <KeyCap key="S" />, move to the **Theme** field, and cycle it with
+<KeyCap key="←" /> / <KeyCap key="→" />. Each scheme is applied live, so you can preview
+it in place. <KeyCap key="ctrl+s" /> keeps it; <KeyCap key="esc" /> reverts to what you
+had.
+
+Or set it directly:
+
+```json title="~/.config/revision/config.json"
+{
+  "theme": "cipher"
+}
+```
+
+## auto versus the named themes
+
+`auto` adapts to your terminal's own colours. It uses the standard 16 ANSI slots, so
+`revision` inherits whatever scheme your terminal is configured with and changes when that
+does. This is the right choice if you already have a colour scheme you like.
+
+The named themes are **true-colour**. `revision` pins the colour profile when one is
+selected, so they render identically in every terminal — including over SSH, and including
+terminals that under-report their capabilities. The trade-off is that they ignore your
+terminal's palette entirely.
+
+## What the colours mean
+
+Whichever palette is active, the roles are the same:
+
+| Role | Where it appears |
+|---|---|
+| Accent | The focused panel's border, panel numbers, key hints |
+| Success | Added files, `+` diff lines, staged markers, ✓ in the Command Log |
+| Error | Deleted and missing files, `-` diff lines, ✗ in the Command Log, error toasts |
+| Warning | Modified files, warning toasts |
+| Info | Hunk headers, named-changelist markers |
+| Muted | Diff metadata, hint labels, line numbers, disabled rows |
+| Selection | The highlighted row, and search matches other than the current one |
+
+In the Cipher palette, accent and success are the same lime. That is intentional and the
+app separates them by position and weight rather than hue — the same rule this site
+follows for links versus diff additions.
+
+## A retired theme
+
+If a future release removes a palette, a config file naming it is reset to the default on
+startup and a toast reports the change. Your file is rewritten with the valid value; no
+manual cleanup is needed.

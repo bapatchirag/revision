@@ -2,9 +2,7 @@
 import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
 import { Aside, Code } from '@astrojs/starlight/components';
 
-// Read straight from the Go golden file so the specimen can never drift.
-import goldenSource from '../../../internal/app/testdata/TestModelGoldenLayout.golden?raw';
-
+import AppScreen from '../components/AppScreen.astro';
 import AsciiLogo from '../components/AsciiLogo.astro';
 import DiffBlock from '../components/DiffBlock.astro';
 import HintBar from '../components/HintBar.astro';
@@ -15,8 +13,6 @@ import TerminalWindow from '../components/TerminalWindow.astro';
  * Unlisted kitchen-sink harness for the Cipher design system. Permanent: it is
  * how every token and component state is inspected after a change.
  */
-
-const goldenLayout = goldenSource.replace(/\n$/, '');
 
 const swatchGroups: { heading: string; tokens: string[] }[] = [
 	{
@@ -252,9 +248,7 @@ Loading diff…`}</pre>
 		the primary face and the fallback would show.
 	</p>
 
-	<div class="rv-golden not-content">
-		<pre>{goldenLayout}</pre>
-	</div>
+	<AppScreen golden="TestModelGoldenLayout" />
 
 	<h2 id="asides">Asides &amp; prose</h2>
 
@@ -366,20 +360,4 @@ Loading diff…`}</pre>
 		gap: 0.5rem;
 	}
 
-	.rv-golden pre {
-		background-color: var(--rv-bg-deep);
-		border: 1px solid var(--rv-border);
-		border-radius: var(--rv-radius);
-		color: var(--rv-text);
-		font-family: var(--rv-font-code);
-		margin-block: 1.5rem;
-		overflow-x: auto;
-		padding: 1rem;
-		white-space: pre;
-		/* Terminal cell metrics: one advance wide, joined box rules. */
-		font-variant-ligatures: none;
-		font-size: 0.8125rem;
-		line-height: 1.25;
-		tab-size: 4;
-	}
 </style>

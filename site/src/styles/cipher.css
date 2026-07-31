@@ -127,10 +127,36 @@
 	--sl-font: var(--rv-font-prose);
 	--sl-font-mono: var(--rv-font-code);
 
+	/*
+	 * Layout density. Starlight's defaults assume a proportional prose face;
+	 * Fantasque's advance is 0.518em, so a column sized in ch comes out far
+	 * narrower than the shell reserves for it. Sizes are in rem instead, and the
+	 * table of contents is given only the width its links need.
+	 */
+	--sl-content-width: 56rem;
+	--rv-toc-width: 14rem;
+	--sl-sidebar-width: 17rem;
+
 	/* All-mono readability compensation. */
-	--sl-content-width: 68ch;
-	--sl-line-height: 1.75;
+	--sl-text-body: 1.0625rem;
+	--sl-text-code: 0.9375rem;
+	--sl-text-code-sm: 0.875rem;
+	--sl-line-height: 1.7;
 	--sl-line-height-headings: 1.3;
+}
+
+/*
+ * Keep the compact heading scale at every width. Starlight steps h1–h4 up a
+ * size above 50rem, which in a mono face reads oversized and pushes the first
+ * paragraph of every page below the fold.
+ */
+@media (min-width: 50rem) {
+	:root {
+		--sl-text-h1: var(--sl-text-4xl);
+		--sl-text-h2: var(--sl-text-3xl);
+		--sl-text-h3: var(--sl-text-2xl);
+		--sl-text-h4: var(--sl-text-xl);
+	}
 }
 
 /* --------------------------------------------------------------------- */
@@ -145,6 +171,11 @@ body {
 	font-family: var(--rv-font-prose);
 	font-feature-settings: 'calt' 1;
 	-webkit-font-smoothing: antialiased;
+}
+
+/* Starlight leaves prose at the browser default; a mono face needs a touch more. */
+.sl-markdown-content {
+	font-size: var(--sl-text-body);
 }
 
 /* Headings sit at the brightest step; prose stays on the softer secondary. */
@@ -238,6 +269,44 @@ header.header {
 }
 
 /* --------------------------------------------------------------------- */
+/* Layout                                                                 */
+/* --------------------------------------------------------------------- */
+
+/*
+ * Starlight splits whatever width is left after the content column evenly
+ * between the content pane and the table-of-contents column, which leaves two
+ * wide empty strips. The table of contents is pinned to its own width and the
+ * remainder goes to the content pane, which centres the column inside it.
+ */
+@media (min-width: 72rem) {
+	.right-sidebar-container {
+		width: var(--rv-toc-width);
+	}
+
+	.right-sidebar-panel > .sl-container {
+		max-width: none;
+		width: calc(var(--rv-toc-width) - 2 * var(--sl-sidebar-pad-x));
+	}
+
+	[data-has-sidebar][data-has-toc] .main-pane {
+		width: calc(100% - var(--rv-toc-width));
+	}
+
+	.content-panel > .sl-container {
+		margin-inline: auto;
+	}
+}
+
+/* The header aligns its search box against the table of contents. */
+:root[data-has-toc] {
+	--__toc-width: var(--rv-toc-width);
+}
+
+.content-panel {
+	padding-block: 1.25rem;
+}
+
+/* --------------------------------------------------------------------- */
 /* Shared TUI surface primitives, used by the .astro components.          */
 /* --------------------------------------------------------------------- */
 
@@ -289,6 +358,28 @@ header.header {
 .rv-frame__index {
 	color: var(--rv-accent);
 	font-weight: 700;
+}
+
+/*
+ * Keycap, from Cipher's keybindingLabel.*. Declared here rather than scoped to
+ * KeyCap.astro so a bare <kbd> written in Markdown prose renders identically.
+ */
+.rv-keycap,
+.sl-markdown-content kbd:not(:where(.not-content *)) {
+	background-color: var(--rv-keycap-bg);
+	border: 1px solid var(--rv-keycap-border);
+	border-block-end-width: 2px;
+	border-block-end-color: var(--rv-keycap-bottom-border);
+	border-radius: 4px;
+	color: var(--rv-keycap-text);
+	display: inline-block;
+	font-family: var(--rv-font-chrome);
+	font-size: 0.8125em;
+	line-height: 1.3;
+	/* Negative block margins stop an inline cap from stretching its line box. */
+	margin-block: -0.2em -0.1em;
+	padding: 0.1em 0.45em;
+	white-space: nowrap;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,0 +1,64 @@
+---
+/**
+ * A verbatim screen capture, read straight from the Go golden files in
+ * `internal/app/testdata/`. Sourcing them here means a documented screen can
+ * never drift from what the app actually renders.
+ */
+interface Props {
+	/** Golden file base name, e.g. "TestModelGoldenLayout". */
+	golden: string;
+	/** Optional caption rendered beneath the capture. */
+	caption?: string;
+}
+
+const screens = import.meta.glob<string>('../../../internal/app/testdata/*.golden', {
+	query: '?raw',
+	import: 'default',
+	eager: true,
+});
+
+const { golden, caption } = Astro.props;
+
+const path = `../../../internal/app/testdata/${golden}.golden`;
+const source = screens[path];
+if (source === undefined) {
+	throw new Error(`AppScreen: no golden file named ${golden}.golden`);
+}
+
+const screen = source.replace(/\n$/, '');
+---
+
+<figure class="rv-screen not-content">
+	<pre>{screen}</pre>
+	{caption && <figcaption>{caption}</figcaption>}
+</figure>
+
+<style>
+	.rv-screen {
+		margin-block: 1.5rem;
+		margin-inline: 0;
+	}
+
+	.rv-screen pre {
+		background-color: var(--rv-bg-deep);
+		border: 1px solid var(--rv-border);
+		border-radius: var(--rv-radius);
+		color: var(--rv-text);
+		font-family: var(--rv-font-code);
+		margin: 0;
+		overflow-x: auto;
+		padding: 1rem;
+		white-space: pre;
+		/* Terminal cell metrics: one advance wide, joined box rules. */
+		font-variant-ligatures: none;
+		font-size: 0.875rem;
+		line-height: 1.25;
+		tab-size: 4;
+	}
+
+	.rv-screen figcaption {
+		color: var(--rv-muted);
+		font-size: var(--sl-text-sm);
+		margin-block-start: 0.5rem;
+	}
+</style>

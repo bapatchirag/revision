@@ -1,0 +1,136 @@
+---
+title: Configuration
+description: Where revision keeps its settings, what each one does, and how to edit them.
+---
+
+import AppScreen from '../../../components/AppScreen.astro';
+import KeyCap from '../../../components/KeyCap.astro';
+
+## Where the file lives
+
+`revision` keeps its settings in a single JSON document:
+
+```text
+$XDG_CONFIG_HOME/revision/config.json
+```
+
+When `XDG_CONFIG_HOME` is unset, that resolves to `~/.config/revision/config.json` on
+**both** macOS and Linux. `revision` deliberately does not use the platform convention on
+macOS (`~/Library/Application Support`), so the same path works everywhere — including
+inside a container or over SSH.
+
+The file is created with defaults on first run. Every setting falls back to its built-in
+default when the file, or an individual key, is absent, so a partial file is perfectly
+valid.
+
+## Editing in-app
+
+Press <KeyCap key="S" />:
+
+<AppScreen golden="TestSettingsFormGolden" />
+
+| Key | Action |
+|---|---|
+| <KeyCap key="↑" /> <KeyCap key="↓" /> | Move between fields |
+| <KeyCap key="←" /> <KeyCap key="→" /> | Cycle the theme and editor, and toggle switches |
+| <KeyCap key="ctrl+s" /> | Save |
+| <KeyCap key="esc" /> | Cancel |
+
+Cycling the theme applies it live so you can preview each scheme in place;
+<KeyCap key="esc" /> reverts the preview and <KeyCap key="ctrl+s" /> keeps it. Saving
+writes the same `config.json`, and the theme, directory-diff, hide-untracked and
+display-scope changes take effect immediately.
+
+## Settings
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `theme` | string | `auto` | Colour scheme — see [Themes](/reference/themes/). |
+| `directoryDiff` | bool | `true` | Show the combined diff of every change beneath a directory when its row is highlighted. |
+| `hideUntracked` | bool | `false` | Hide untracked (unversioned) files from the Changes and diff panels. |
+| `displayFrom` | string | `cwd` | Where the working copy is displayed from: `cwd` or `root`. |
+| `sshKeyPath` | string | `~/.ssh/id_rsa` | The SSH private key to load for `svn+ssh://` working copies. |
+| `diffOutputDir` | string | `""` | Where diffs saved with <KeyCap key="w" /> are written. |
+| `logLimit` | int | `100` | How many revisions the Log panel loads. |
+| `editor` | string | `native` | Which editor <KeyCap key="e" /> opens the highlighted file in. |
+
+### theme
+
+One of `auto`, `everforest`, `dracula`, `nord`, `gruvbox`, or `cipher`. See
+[Themes](/reference/themes/).
+
+### directoryDiff
+
+With `directoryDiff` set to `false`, highlighting a directory shows a short hint instead
+of its diff. Pressing <KeyCap key="D" /> toggles the directory diff for the current
+session, so you can inspect one without changing the file.
+
+Useful on large working copies, where a combined diff of a deep directory is expensive to
+generate.
+
+### hideUntracked
+
+With `hideUntracked` set to `true`, untracked files are left out of the Changes tree, the
+Changelists view and the diff panel. Pressing <KeyCap key="U" /> toggles them back into
+view for the current session, so you can inspect or add one without changing the file.
+
+### displayFrom
+
+| Value | Effect |
+|---|---|
+| `cwd` (default) | Every panel is scoped to the directory `revision` was started in. |
+| `root` | Status, history and diffs are all rooted at the working copy's root, no matter which directory inside it you started in. |
+
+The Status panel's `Source` line names whichever one is in effect.
+
+### sshKeyPath
+
+The private key loaded into `ssh-agent` for `svn+ssh://` working copies. A leading `~` is
+expanded to your home directory. See [Authentication](/operations/authentication/).
+
+### diffOutputDir
+
+Where <KeyCap key="w" /> writes [saved diffs](/workflows/diffs/#saving-a-diff), and where
+the Files panel's Diffs view reads them from. The directory is created if it does not
+exist, and a leading `~` is expanded.
+
+Empty — the default — means the working copy's **root**, regardless of which directory
+inside it you started `revision` in and regardless of `displayFrom`.
+
+### logLimit
+
+:::caution[Not applied yet]
+`logLimit` is stored and editable today, but the Log panel currently loads a fixed 50
+revisions. Wiring it up is on the [roadmap](https://github.com/bapatchirag/revision#roadmap).
+:::
+
+### editor
+
+One of `native`, `vim` (`vi` is accepted as a spelling of it), `nvim`, or `nano`. See
+[Opening files in an editor](/workflows/editor/).
+
+## Example
+
+```json title="~/.config/revision/config.json"
+{
+  "theme": "cipher",
+  "directoryDiff": false,
+  "hideUntracked": true,
+  "displayFrom": "root",
+  "diffOutputDir": "~/patches"
+}
+```
+
+## Upgrades and invalid values
+
+After an upgrade the file is brought up to date automatically:
+
+- Settings added by a newer version are merged in silently.
+- A value the running build no longer supports — a retired theme, say — is reset to its
+  default and reported in a startup toast.
+- A structurally invalid value, such as a non-positive `logLimit`, is normalised back to
+  the default the same way.
+- Unknown keys are ignored, not deleted.
+
+If the file cannot be read at all, `revision` starts on built-in defaults and prints a
+line to stderr rather than refusing to run.

@@ -9,20 +9,3 @@ const { key } = Astro.props;
 ---
 
 <kbd class="rv-keycap">{key ?? <slot />}</kbd>
-
-<style>
-	.rv-keycap {
-		background-color: var(--rv-keycap-bg);
-		border: 1px solid var(--rv-keycap-border);
-		border-block-end-width: 2px;
-		border-block-end-color: var(--rv-keycap-bottom-border);
-		border-radius: 4px;
-		color: var(--rv-keycap-text);
-		display: inline-block;
-		font-family: var(--rv-font-chrome);
-		font-size: 0.8125em;
-		line-height: 1.4;
-		padding: 0.1em 0.45em;
-		white-space: nowrap;
-	}
-</style>

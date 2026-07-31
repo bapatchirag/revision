@@ -1,0 +1,94 @@
+---
+title: Staging & commit
+description: How revision emulates a staging index on top of SVN, and how to commit.
+---
+
+import AppScreen from '../../../components/AppScreen.astro';
+import KeyCap from '../../../components/KeyCap.astro';
+
+## How staging works
+
+SVN has no local staging index. `revision` emulates one with an SVN **changelist** named
+`revision:staged`:
+
+- <KeyCap key="space" /> on a file adds it to that changelist — it is now *staged*.
+- <KeyCap key="space" /> again removes it — *unstaged*.
+- <KeyCap key="c" /> commits the staged set as a unit.
+
+That maps a git-like stage-then-commit flow onto native SVN without inventing any state
+of its own. Nothing is hidden: run `svn changelist --list` in the same working copy and
+you will see exactly what `revision` sees.
+
+:::note
+Because staging is a changelist, a file belongs to at most one changelist at a time.
+Unstage a file before moving it into a [named changelist](/workflows/changelists/), or use
+<KeyCap key="n" />, which moves the whole staged set at once.
+:::
+
+An untracked (unversioned) file is `svn add`ed first, then staged, so a new file takes the
+same single keystroke as a modified one.
+
+## Staging a directory
+
+<KeyCap key="space" /> on a *directory* row acts on everything beneath it, and it toggles:
+
+1. If anything under the directory can still be staged, stage all of it.
+2. Otherwise, if anything under it is in a changelist, remove all of it.
+3. Otherwise, a toast says there is nothing to stage or unstage there.
+
+Files that are ignored or clean are skipped. The root `/` row covers the whole tree, so
+<KeyCap key="space" /> there stages every pending change in one keystroke.
+
+Step 2 removes files from *any* changelist, not just the staged bucket — the same as
+pressing <KeyCap key="space" /> on a single file.
+
+## Reviewing before you commit
+
+Staged files carry a green `●` in the Changes tree. Switch to the Changelists view with
+<KeyCap key="]" /> to see the staged set on its own, and select the `(staged)` row for the
+combined diff of everything in it.
+
+<AppScreen golden="TestChangelistsViewGolden" />
+
+Other ways to check your work before committing:
+
+- <KeyCap key="s" /> — read the diff [side by side](/workflows/diffs/#reading-a-diff-side-by-side).
+- <KeyCap key="w" /> — [save the diff](/workflows/diffs/#saving-a-diff) to a file.
+- <KeyCap key="/" /> — [filter](/workflows/filtering-and-searching/) to `state:M`, or
+  search within the diff.
+- <KeyCap key="e" /> — open the highlighted file in [your editor](/workflows/editor/).
+
+## Committing
+
+Press <KeyCap key="c" />. An inline message editor opens:
+
+<AppScreen golden="TestCommitEditorGolden" />
+
+<KeyCap key="ctrl+s" /> submits, <KeyCap key="esc" /> cancels. What gets committed depends
+on where you are:
+
+| Where | What is committed |
+|---|---|
+| Changes view | The staged set. |
+| Changelists view, on a list | That changelist. |
+| Drilled into a changelist | That changelist. |
+
+An empty message is rejected — SVN requires one. The result appears as a toast, and the
+`svn commit` invocation is recorded in the [Command Log](/guides/panels/#command-log).
+Status and history reload automatically, so the committed files leave the tree and the new
+revision appears at the top of the Log panel.
+
+## Undoing
+
+| Key | Action |
+|---|---|
+| <KeyCap key="r" /> | Revert the selected file, or every change under the selected directory. |
+| <KeyCap key="d" /> | Delete the selected file, or every file under the selected directory. |
+
+Both are destructive, so both confirm first:
+
+<AppScreen golden="TestModalConfirmGolden" />
+
+<KeyCap key="enter" /> or <KeyCap key="y" /> confirms; <KeyCap key="esc" /> or
+<KeyCap key="n" /> cancels. Reverting discards uncommitted work and cannot be undone —
+save the diff with <KeyCap key="w" /> first if you might want it back.

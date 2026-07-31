@@ -1,0 +1,56 @@
+---
+title: Updating the working copy
+description: Move the working copy to HEAD, or to any revision in the Log panel.
+---
+
+import AppScreen from '../../../components/AppScreen.astro';
+import KeyCap from '../../../components/KeyCap.astro';
+
+## To the latest revision
+
+Press <KeyCap key="u" /> anywhere. `revision` confirms first, then runs `svn update` and
+shows a progress dialog naming where the working copy is coming from and going to.
+
+## To a specific revision
+
+Focus the Log panel with <KeyCap key="3" />, select a revision, and press
+<KeyCap key="space" />. This works in both directions: forwards to catch up, or backwards
+to put the working copy at an older revision.
+
+The asterisk in the Log panel marks where the working copy currently sits, so you can see
+what you are moving from.
+
+## What happens to your changes
+
+Both paths keep uncommitted work. SVN merges the incoming revision into your modified
+files rather than discarding them, exactly as `svn update` does on the command line.
+
+If any file is **already conflicted**, a second prompt says so before anything runs: SVN
+leaves conflicted files untouched and updates the rest. Resolve them with `svn resolve` —
+`revision` does not have a conflict resolver yet.
+
+## After it finishes
+
+- The Status panel's `Revision` line moves to the new revision.
+- The Log panel's asterisk moves with it.
+- Status and history reload, so the Files panel reflects any merged changes.
+- The `svn update` invocation is recorded in the
+  [Command Log](/guides/panels/#command-log), marked ✓ or ✗.
+
+Press <KeyCap key="R" /> at any time to re-read status and history without updating.
+
+## Authentication
+
+`svn update` is the operation most likely to need credentials. `revision` always runs
+`svn` with `--non-interactive`, so instead of hanging on a hidden prompt it fails fast
+with an actionable hint. See [Authentication](/operations/authentication/).
+
+## Updating revision itself
+
+<KeyCap key="u" /> updates the *working copy*. To update the `revision` binary, see
+[Updating revision](/operations/updating-revision/).
+
+<AppScreen
+	golden="TestUpdatePromptGolden"
+	caption="The self-update prompt — the binary, not the working copy."
+/>

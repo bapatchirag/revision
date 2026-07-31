@@ -1,0 +1,94 @@
+---
+title: Introduction
+description: What revision is, why it exists, and what it does.
+---
+
+import AppScreen from '../../../components/AppScreen.astro';
+import HintBar from '../../../components/HintBar.astro';
+
+`revision` is a lazygit-style terminal UI for Subversion. It gives you a fast,
+keyboard-driven interface over the `svn` command line — review changes, stage with
+changelists, commit, update, and browse history without leaving your terminal.
+
+<AppScreen
+	golden="TestModelGoldenLayout"
+	caption="The default layout: Status, Files and Log down the left, the Main detail view and Command Log on the right."
+/>
+
+## Why
+
+SVN's command line is powerful but verbose for day-to-day work. `revision` wraps it in a
+focused TUI — inspired by [lazygit](https://github.com/jesseduffield/lazygit) — so common
+tasks are a keystroke away.
+
+It is a front end, not a reimplementation. Every action shells out to the `svn` binary
+already on your `PATH`, so it respects your working copy, your cached credentials, and
+your existing SVN configuration. Nothing is cached behind your back, and anything
+`revision` runs on your behalf is listed in the [Command Log](/guides/panels/) panel.
+
+## What it does
+
+**Layout and navigation**
+
+- A left column of Status, Files and Log panels beside a Main detail view, with a Command
+  Log beneath it. Switch panels with the number keys or <kbd>Tab</kbd>, and scroll any
+  panel on both axes.
+- Changed files as a collapsible directory tree, each change grouped under its folder.
+- A contextual hint bar at the bottom, plus a full <kbd>?</kbd> help menu.
+
+<HintBar
+	hints={[
+		{ keys: 'space', label: 'stage' },
+		{ keys: 'n', label: 'changelist' },
+		{ keys: 'c', label: 'commit' },
+		{ keys: 'r', label: 'revert' },
+		{ keys: 'd', label: 'delete' },
+		{ keys: '[ ]', label: 'view' },
+		{ keys: '?', label: 'help' },
+	]}
+	keycaps
+/>
+
+**Reviewing changes**
+
+- A colour-coded diff viewer that follows your selection, with the `+`/`-` gutter pinned
+  as you scroll. Highlight a directory for the combined diff of everything beneath it.
+- [Side-by-side reading](/workflows/diffs/#reading-a-diff-side-by-side) with <kbd>s</kbd>
+  — each removal opposite the addition that replaced it, every line numbered in its own
+  revision.
+- [Save any diff](/workflows/diffs/#saving-a-diff) on screen to a file with <kbd>w</kbd>,
+  then browse the saved patches from the Files panel's Diffs view.
+
+**Making changes**
+
+- [Staging](/workflows/staging-and-commit/) through an SVN changelist, so a git-like
+  stage-then-commit flow maps onto native SVN. Stage one file or a whole directory
+  subtree with a single keystroke.
+- [Named changelists](/workflows/changelists/) — group the staged set in a tabbed view,
+  drill into any list, and commit it as a unit.
+- Commit through an inline message editor; add, revert and delete with confirmation
+  prompts before anything destructive.
+- [Update](/workflows/updating/) to HEAD, or to any revision picked in the Log panel.
+
+**Finding things**
+
+- A read-only log viewer with per-revision detail and an asterisk marking where the
+  working copy sits.
+- [Filter or search any panel](/workflows/filtering-and-searching/) with <kbd>/</kbd> —
+  the list panels filter, the detail panels highlight matches in place.
+
+**Living with it**
+
+- Six [colour schemes](/reference/themes/) and every
+  [setting](/reference/configuration/) editable in-app with <kbd>S</kbd>, previewed live.
+- [svn+ssh support](/operations/authentication/): `revision` checks your agent for the
+  configured key and prompts once for its passphrase.
+- [Self-update](/operations/updating-revision/) on release builds, and
+  [an editor integration](/workflows/editor/) that works even over Remote-SSH.
+
+## Where to go next
+
+- [Requirements](/guides/requirements/) — what needs to be installed first.
+- [Installation](/guides/installation/) — one command on Linux and macOS.
+- [Quick start](/guides/quick-start/) — stage and commit your first change.
+- [Keybindings](/reference/keybindings/) — the full key reference.
