@@ -1,11 +1,12 @@
 ---
 title: Keybindings
-description: The full key reference, matching the in-app help menu.
+description: The full key reference, generated from the same table the in-app help menu renders.
 ---
 
 import AppScreen from '../../../components/AppScreen.astro';
 import HintBar from '../../../components/HintBar.astro';
 import KeyCap from '../../../components/KeyCap.astro';
+import KeybindingSearch from '../../../components/KeybindingSearch.astro';
 
 The hint bar shows the most common actions for the focused panel, and <KeyCap key="?" />
 opens the full menu at any time.
@@ -23,53 +24,15 @@ opens the full menu at any time.
 	keycaps
 />
 
-## Navigation
+The table below is generated from the same Go table the <KeyCap key="?" /> overlay renders,
+so the two can never disagree. Filter it by action, key or description, or narrow it to a
+single section — press <KeyCap key="/" /> to jump to the filter.
 
-| Key | Action |
-|-----|--------|
-| <KeyCap key="1" /> <KeyCap key="2" /> <KeyCap key="3" /> <KeyCap key="4" /> <KeyCap key="0" /> | Focus the Status / Files / Log / Command Log / Main [panel](/guides/panels/) |
-| <KeyCap key="tab" /> <KeyCap key="shift+tab" /> | Cycle focus between panels |
-| <KeyCap key="↑" /> <KeyCap key="k" /> · <KeyCap key="↓" /> <KeyCap key="j" /> | Move the selection up / down |
-| <KeyCap key="g" /> · <KeyCap key="G" /> | Jump to the top / bottom of a list |
-| <KeyCap key="K" /> · <KeyCap key="J" /> | Scroll the Main panel up / down a page |
-| <KeyCap key="←" /> <KeyCap key="h" /> · <KeyCap key="→" /> <KeyCap key="l" /> | Scroll the focused panel left / right, one column |
-| <KeyCap key="Home" /> <KeyCap key="^" /> · <KeyCap key="End" /> <KeyCap key="$" /> | Jump to the start / end of the line in the focused panel |
-| <KeyCap key="[" /> · <KeyCap key="]" /> | Turn the Files panel between the Changes, Changelists and Diffs views |
-| <KeyCap key="enter" /> | Expand / collapse the selected directory, or drill into a changelist |
-
-## Changes
-
-| Key | Action |
-|-----|--------|
-| <KeyCap key="space" /> | **Files:** [stage / unstage](/workflows/staging-and-commit/) the selected file — or every change under the selected directory. An untracked file is `svn add`ed first. **Log:** [update](/workflows/updating/) the working copy to the selected revision |
-| <KeyCap key="n" /> · <KeyCap key="N" /> | **Files:** <KeyCap key="n" /> assigns the staged set — or just the selected file when nothing is staged — to a [named changelist](/workflows/changelists/). **Main / Status with an active search:** jump to the next / previous match |
-| <KeyCap key="c" /> | [Commit](/workflows/staging-and-commit/#committing) the staged files, or the selected changelist |
-| <KeyCap key="r" /> | Revert the selected file, or every change under the selected directory (with confirmation) |
-| <KeyCap key="d" /> | Delete the selected file, or every file under the selected directory (with confirmation) |
-| <KeyCap key="u" /> | [Update](/workflows/updating/) the working copy to the latest revision |
-| <KeyCap key="R" /> | Refresh status and history |
-
-## Diffs
-
-| Key | Action |
-|-----|--------|
-| <KeyCap key="s" /> | Open the diff Main is showing [side by side](/workflows/diffs/#reading-a-diff-side-by-side) in a centered overlay. Both panes scroll together, a multi-file diff gets a page per file (<KeyCap key="[" /> / <KeyCap key="]" /> turn between them), and <KeyCap key="s" /> or <KeyCap key="esc" /> closes it |
-| <KeyCap key="w" /> | [Save the diff](/workflows/diffs/#saving-a-diff) on screen to a file in [`diffOutputDir`](/reference/configuration/#diffoutputdir). A prompt asks for the name; leaving it blank uses the suggested default |
-| <KeyCap key="D" /> | Toggle the [directory-level diff](/workflows/diffs/#directory-diffs) for the highlighted directory |
-| <KeyCap key="e" /> | Open the highlighted file [in your editor](/workflows/editor/) |
-
-## View
-
-| Key | Action |
-|-----|--------|
-| <KeyCap key="/" /> | [Filter](/workflows/filtering-and-searching/) (Files / Log) or search (Main / Status) the focused panel |
-| <KeyCap key="U" /> | Toggle hiding [untracked files](/reference/configuration/#hideuntracked) in the Changes and diff panels |
-| <KeyCap key="x" /> | Show / hide the [Command Log](/guides/panels/#command-log) panel |
-| <KeyCap key="S" /> | Edit [application settings](/reference/configuration/) |
-| <KeyCap key="?" /> | Toggle the keybindings help |
-| <KeyCap key="q" /> <KeyCap key="ctrl+c" /> | Quit |
+<KeybindingSearch />
 
 ## Inside prompts and overlays
+
+Modal contexts, which the menu above does not cover.
 
 | Context | Keys |
 |---|---|
@@ -78,6 +41,7 @@ opens the full menu at any time.
 | Confirmation dialog | <KeyCap key="enter" /> or <KeyCap key="y" /> confirms, <KeyCap key="esc" /> or <KeyCap key="n" /> cancels |
 | Side-by-side overlay | <KeyCap key="[" /> / <KeyCap key="]" /> turn between files, <KeyCap key="s" /> or <KeyCap key="esc" /> closes |
 | Filter input | <KeyCap key="enter" /> keeps the query, <KeyCap key="esc" /> clears it |
+| Main / Status with an active search | <KeyCap key="n" /> / <KeyCap key="N" /> walk to the next / previous [match](/workflows/filtering-and-searching/#main-and-status) |
 
 ## The in-app menu
 

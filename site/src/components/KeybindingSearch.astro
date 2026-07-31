@@ -1,0 +1,412 @@
+---
+/**
+ * The keybindings reference, generated from `src/data/keybindings.json` — the
+ * committed output of `cmd/keymapdump`, which reads the same `keymap.HelpSections()`
+ * the in-app `?` overlay renders. The page cannot drift from the app.
+ *
+ * The whole table is server-rendered, so it is complete and readable with
+ * JavaScript disabled. The toolbar is hidden until its handlers attach, and
+ * layers filtering on top.
+ */
+import bindings from '../data/keybindings.json';
+import KeyCap from './KeyCap.astro';
+
+interface Binding {
+	section: string;
+	action: string;
+	keys: string[];
+	context: string;
+	description: string;
+}
+
+const all: Binding[] = bindings;
+
+const slug = (title: string) => title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+/**
+ * The overlay's action column is 30 cells wide, so it carries its own context in
+ * parentheses — `Update to rev (Log)`. Next to a Where column that is a duplicate.
+ */
+const label = (action: string) => action.replace(/\s*\([^)]*\)$/, '');
+
+/** Descriptions are inline Markdown, and only ever use code spans. */
+const segments = (description: string) =>
+	description.split('`').map((text, i) => ({ text, code: i % 2 === 1 }));
+
+const search = (b: Binding) =>
+	[b.section, label(b.action), b.keys.join(' '), b.context, b.description]
+		.join(' ')
+		.toLowerCase();
+
+const sections = [...new Set(all.map((b) => b.section))].map((title) => ({
+	title,
+	id: slug(title),
+	bindings: all.filter((b) => b.section === title),
+}));
+---
+
+<div class="rv-keys not-content" data-keys data-total={all.length}>
+	<div class="rv-keys__toolbar" hidden>
+		<div class="rv-keys__field">
+			<label class="rv-keys__label" for="rv-keys-query">Filter keybindings</label>
+			<input
+				id="rv-keys-query"
+				type="search"
+				autocomplete="off"
+				spellcheck="false"
+				placeholder="action, key or description"
+			/>
+			<kbd class="rv-keycap rv-keys__shortcut" aria-hidden="true">/</kbd>
+		</div>
+
+		<div class="rv-keys__chips" role="group" aria-label="Filter by section">
+			{
+				sections.map((section) => (
+					<button type="button" class="rv-keys__chip" aria-pressed="false" data-chip={section.title}>
+						{section.title}
+					</button>
+				))
+			}
+		</div>
+
+		<p class="rv-keys__count" role="status">{all.length} of {all.length}</p>
+	</div>
+
+	{
+		sections.map((section) => (
+			<section class="rv-keys__section" data-section={section.title}>
+				<h2 id={section.id}>{section.title}</h2>
+				<table>
+					<thead>
+						<tr>
+							<th scope="col">Action</th>
+							<th scope="col">Keys</th>
+							<th scope="col">Where</th>
+							<th scope="col">What it does</th>
+						</tr>
+					</thead>
+					<tbody>
+						{section.bindings.map((binding) => (
+							<tr data-search={search(binding)}>
+								<th scope="row">{label(binding.action)}</th>
+								<td class="rv-keys__caps">
+									{binding.keys.map((key) => (
+										<KeyCap key={key} />
+									))}
+								</td>
+								<td class="rv-keys__where">{binding.context}</td>
+								<td>
+									{segments(binding.description).map((segment) =>
+										segment.code ? <code>{segment.text}</code> : segment.text
+									)}
+								</td>
+							</tr>
+						))}
+					</tbody>
+				</table>
+			</section>
+		))
+	}
+
+	<p class="rv-keys__empty" hidden>
+		Nothing matches that filter. Clear it to see all {all.length} keybindings.
+	</p>
+</div>
+
+<style>
+	/* Rows and sections are hidden by the `hidden` attribute, which the stacked
+	   layout's `display: grid` would otherwise outrank. */
+	.rv-keys [hidden] {
+		display: none !important;
+	}
+
+	/* ---- Toolbar ------------------------------------------------------ */
+
+	.rv-keys__toolbar {
+		align-items: center;
+		column-gap: 1rem;
+		display: flex;
+		flex-wrap: wrap;
+		margin-block: 1.5rem;
+		row-gap: 0.75rem;
+	}
+
+	.rv-keys__field {
+		align-items: center;
+		background-color: var(--rv-bg-deep);
+		border: 1px solid var(--rv-border);
+		border-radius: var(--rv-radius);
+		display: flex;
+		flex: 1 1 18rem;
+		gap: 0.5rem;
+		padding: 0.35rem 0.6rem;
+	}
+
+	.rv-keys__field:focus-within {
+		border-color: var(--rv-border-focused);
+	}
+
+	.rv-keys__label {
+		clip-path: inset(50%);
+		height: 1px;
+		overflow: hidden;
+		position: absolute;
+		white-space: nowrap;
+		width: 1px;
+	}
+
+	.rv-keys__field input {
+		background: none;
+		border: 0;
+		color: var(--rv-text);
+		flex: 1;
+		font-family: var(--rv-font-chrome);
+		font-size: var(--sl-text-sm);
+		min-width: 0;
+		outline: none;
+		padding: 0.1rem 0;
+	}
+
+	.rv-keys__field input::placeholder {
+		color: var(--rv-muted);
+	}
+
+	/* The search input's own clear affordance; ours is Esc. */
+	.rv-keys__field input::-webkit-search-cancel-button {
+		display: none;
+	}
+
+	.rv-keys__shortcut {
+		flex-shrink: 0;
+	}
+
+	.rv-keys__chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+	}
+
+	.rv-keys__chip {
+		background: none;
+		border: 1px solid var(--rv-border);
+		border-radius: var(--rv-radius);
+		color: var(--rv-text-secondary);
+		cursor: pointer;
+		font-family: var(--rv-font-chrome);
+		font-size: var(--sl-text-xs);
+		padding: 0.25rem 0.7rem;
+	}
+
+	.rv-keys__chip:hover {
+		border-color: var(--rv-border-focused);
+		color: var(--rv-accent);
+	}
+
+	/* The app marks the active row with the selection fill, not a solid accent. */
+	.rv-keys__chip[aria-pressed='true'] {
+		background-color: var(--rv-bg-selection);
+		border-color: var(--rv-accent);
+		color: var(--rv-accent);
+	}
+
+	/* Inlaid footer count, as on a panel's bottom border. */
+	.rv-keys__count {
+		color: var(--rv-muted);
+		font-family: var(--rv-font-chrome);
+		font-size: var(--sl-text-xs);
+		margin: 0;
+		margin-inline-start: auto;
+	}
+
+	/* ---- Table -------------------------------------------------------- */
+
+	.rv-keys__section h2 {
+		font-size: var(--sl-text-h3);
+		margin-block: 2rem 0.75rem;
+	}
+
+	.rv-keys table {
+		border-collapse: collapse;
+		font-size: var(--sl-text-sm);
+		width: 100%;
+	}
+
+	.rv-keys :is(th, td) {
+		border-block-end: 1px solid var(--rv-border);
+		padding: 0.5rem 0.75rem 0.5rem 0;
+		text-align: start;
+		vertical-align: baseline;
+	}
+
+	/* Fixed widths, so every section's columns line up rather than each table sizing itself. */
+	@media (min-width: 40rem) {
+		.rv-keys table {
+			table-layout: fixed;
+		}
+
+		.rv-keys :is(th, td):nth-child(1) {
+			width: 20%;
+		}
+
+		.rv-keys :is(th, td):nth-child(2) {
+			width: 14%;
+		}
+
+		.rv-keys :is(th, td):nth-child(3) {
+			width: 12%;
+		}
+	}
+
+	.rv-keys thead th {
+		color: var(--rv-muted);
+		font-size: var(--sl-text-xs);
+		font-weight: 400;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
+	.rv-keys tbody th {
+		color: var(--rv-text-high);
+		font-weight: 400;
+	}
+
+	.rv-keys tbody tr:hover {
+		background-color: var(--rv-bg-selection);
+	}
+
+	.rv-keys__caps {
+		line-height: 2;
+	}
+
+	.rv-keys__where {
+		color: var(--rv-muted);
+		white-space: nowrap;
+	}
+
+	.rv-keys td code {
+		border: 1px solid var(--rv-border);
+		border-radius: 4px;
+		color: var(--rv-text);
+		font-family: var(--rv-font-code);
+		padding: 0.1em 0.35em;
+	}
+
+	.rv-keys__empty {
+		border: 1px dashed var(--rv-border);
+		border-radius: var(--rv-radius);
+		color: var(--rv-muted);
+		margin-block: 1.5rem;
+		padding: 1.5rem;
+		text-align: center;
+	}
+
+	/* Below the content breakpoint the four columns stop fitting; stack them. */
+	@media (max-width: 39.999rem) {
+		.rv-keys thead {
+			clip-path: inset(50%);
+			position: absolute;
+		}
+
+		.rv-keys tbody tr {
+			border-block-end: 1px solid var(--rv-border);
+			display: grid;
+			gap: 0.2rem 0.75rem;
+			grid-template-columns: 1fr auto;
+			padding-block: 0.75rem;
+		}
+
+		.rv-keys tbody :is(th, td) {
+			border: 0;
+			padding: 0;
+		}
+
+		/* Action and keys share the first line; where and description follow. */
+		.rv-keys tbody th {
+			grid-area: 1 / 1;
+		}
+
+		.rv-keys__caps {
+			grid-area: 1 / 2;
+			justify-self: end;
+			line-height: 1.4;
+		}
+
+		.rv-keys__where,
+		.rv-keys tbody td:last-child {
+			grid-column: 1 / -1;
+		}
+	}
+</style>
+
+<script>
+	const root = document.querySelector<HTMLElement>('[data-keys]');
+	const toolbar = root?.querySelector<HTMLElement>('.rv-keys__toolbar');
+	const input = root?.querySelector<HTMLInputElement>('#rv-keys-query');
+	const count = root?.querySelector<HTMLElement>('.rv-keys__count');
+	const empty = root?.querySelector<HTMLElement>('.rv-keys__empty');
+
+	if (root && toolbar && input && count && empty) {
+		const chips = [...root.querySelectorAll<HTMLButtonElement>('[data-chip]')];
+		const sections = [...root.querySelectorAll<HTMLElement>('[data-section]')];
+		const total = Number(root.dataset.total);
+
+		let section: string | null = null;
+
+		function apply() {
+			const query = input!.value.trim().toLowerCase();
+			let visible = 0;
+
+			for (const el of sections) {
+				const inSection = section === null || el.dataset.section === section;
+				let shown = 0;
+
+				for (const row of el.querySelectorAll<HTMLTableRowElement>('tbody tr')) {
+					const match = inSection && (query === '' || (row.dataset.search ?? '').includes(query));
+					row.hidden = !match;
+					if (match) shown++;
+				}
+
+				el.hidden = shown === 0;
+				visible += shown;
+			}
+
+			count!.textContent = `${visible} of ${total}`;
+			empty!.hidden = visible > 0;
+		}
+
+		for (const chip of chips) {
+			chip.addEventListener('click', () => {
+				section = section === chip.dataset.chip ? null : (chip.dataset.chip ?? null);
+				for (const other of chips) {
+					other.setAttribute('aria-pressed', String(other.dataset.chip === section));
+				}
+				apply();
+			});
+		}
+
+		input.addEventListener('input', apply);
+
+		input.addEventListener('keydown', (event) => {
+			if (event.key !== 'Escape') return;
+			input.value = '';
+			apply();
+		});
+
+		document.addEventListener('keydown', (event) => {
+			if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey) return;
+			// Not always an element — the target is the document when nothing has focus.
+			const target = event.target;
+			if (target instanceof HTMLElement) {
+				if (target.isContentEditable || target.closest('input, textarea, select')) return;
+			}
+			event.preventDefault();
+			input.focus();
+			input.select();
+		});
+
+		// Revealed only now, so it is never a dead control.
+		toolbar.hidden = false;
+		apply();
+	}
+</script>
