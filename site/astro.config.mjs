@@ -99,6 +99,8 @@ export default defineConfig({
 			components: {
 				// The landing page is the only page with a hero; the wordmark is its title.
 				Hero: './src/components/Hero.astro',
+				// The default social links, plus the GitHub repository actions.
+				SocialIcons: './src/components/SocialIcons.astro',
 				// Dark-only site: the theme toggle is overridden away.
 				ThemeSelect: './src/components/ThemeSelect.astro',
 			},
