@@ -45,3 +45,10 @@ release:
 
 changelog:
   use: github
+  abbrev: -1
+  format: "{{ .Message }}{{ with .Author.Username }} (@{{ . }}){{ end }}"
+  filters:
+    exclude:
+      - '^[Mm]erge branch '
+      - '^[Mm]erge pull request '
+      - '^[Mm]erge remote-tracking branch '
