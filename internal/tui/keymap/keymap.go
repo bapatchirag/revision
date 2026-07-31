@@ -3,7 +3,11 @@
 // such as focus switching and refresh.
 package keymap
 
-import "github.com/charmbracelet/bubbles/key"
+import (
+	"strings"
+
+	"github.com/charmbracelet/bubbles/key"
+)
 
 // KeyMap is the full set of bindings the UI understands.
 type KeyMap struct {
@@ -93,5 +97,143 @@ func Default() KeyMap {
 		Settings:        key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "settings")),
 		Help:            key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:            key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+	}
+}
+
+// Section is a titled group of bindings in the help reference.
+type Section struct {
+	Title    string
+	Bindings []Binding
+}
+
+// Binding is one row of the help reference: the keys that trigger an action,
+// where they apply, and prose describing what they do.
+type Binding struct {
+	Action      string
+	Keys        []string
+	Context     string
+	Description string
+
+	// sep joins Keys in the overlay's key column; empty means " / ".
+	sep string
+}
+
+// KeyHint renders the binding's keys as the "?" overlay's key column shows them.
+func (b Binding) KeyHint() string {
+	sep := b.sep
+	if sep == "" {
+		sep = " / "
+	}
+	return strings.Join(b.Keys, sep)
+}
+
+// HelpSections is the keybindings reference. It is the single table behind both
+// the in-app "?" overlay and the website's keybindings page, so the two cannot
+// diverge. Action and Keys drive the overlay; Context and Description are for
+// the website, which has room for a sentence.
+func HelpSections() []Section {
+	return []Section{
+		{Title: "Changes", Bindings: []Binding{
+			{
+				Action: "Stage / unstage", Keys: []string{"space"}, Context: "Files",
+				Description: "Stage or unstage the selected file, or every change under the selected directory. An untracked file is `svn add`ed first.",
+			},
+			{
+				Action: "Assign changelist", Keys: []string{"n"}, Context: "Files",
+				Description: "Assign the staged set — or just the selected file when nothing is staged — to a named changelist.",
+			},
+			{
+				Action: "Commit staged / list", Keys: []string{"c"}, Context: "Files",
+				Description: "Commit the staged files, or the selected changelist.",
+			},
+			{
+				Action: "Expand changelist", Keys: []string{"enter"}, Context: "Files",
+				Description: "Expand or collapse the selected directory, or drill into a changelist.",
+			},
+			{
+				Action: "Revert / delete file", Keys: []string{"r", "d"}, Context: "Files",
+				Description: "Revert or delete the selected file, or everything under the selected directory. Both ask for confirmation.",
+			},
+		}},
+		{Title: "Working copy", Bindings: []Binding{
+			{
+				Action: "Update working copy", Keys: []string{"u"}, Context: "Global",
+				Description: "Update the working copy to the latest revision.",
+			},
+			{
+				Action: "Update to rev (Log)", Keys: []string{"space"}, Context: "Log",
+				Description: "Update the working copy to the selected revision.",
+			},
+			{
+				Action: "Open file in editor", Keys: []string{"e"}, Context: "Files",
+				Description: "Open the highlighted file in the configured editor.",
+			},
+			{
+				Action: "Refresh / settings", Keys: []string{"R", "S"}, Context: "Global",
+				Description: "Refresh status and history, or open the settings editor.",
+			},
+		}},
+		{Title: "Navigation", Bindings: []Binding{
+			{
+				Action: "Jump to panel", Keys: []string{"1", "2", "3", "4", "0"}, sep: " ", Context: "Global",
+				Description: "Focus the Status, Files, Log, Command Log or Main panel.",
+			},
+			{
+				Action: "Cycle panels", Keys: []string{"tab", "shift+tab"}, Context: "Global",
+				Description: "Move focus to the next or previous panel.",
+			},
+			{
+				Action: "Move up / down", Keys: []string{"k", "j"}, Context: "Any panel",
+				Description: "Move the selection up or down. ↑ and ↓ work too.",
+			},
+			{
+				Action: "Jump top / bottom", Keys: []string{"g", "G"}, Context: "Any panel",
+				Description: "Jump to the first or last row.",
+			},
+			{
+				Action: "Scroll main up / down", Keys: []string{"K", "J"}, Context: "Main",
+				Description: "Scroll the Main panel up or down a page.",
+			},
+			{
+				Action: "Scroll main l / r", Keys: []string{"h", "l"}, Context: "Main",
+				Description: "Scroll the focused panel one column left or right. ← and → work too.",
+			},
+			{
+				Action: "Line start / end", Keys: []string{"home", "end"}, Context: "Any panel",
+				Description: "Jump to the start or end of the line. ^ and $ work too.",
+			},
+			{
+				Action: "Filter panel", Keys: []string{"/"}, Context: "Any panel",
+				Description: "Filter the Files or Log panel, or search within Main or Status.",
+			},
+		}},
+		{Title: "View", Bindings: []Binding{
+			{
+				Action: "Switch file view", Keys: []string{"[", "]"}, Context: "Files",
+				Description: "Turn the Files panel between the Changes, Changelists and Diffs views.",
+			},
+			{
+				Action: "Side-by-side / save", Keys: []string{"s", "w"}, Context: "Main",
+				Description: "Open the diff on screen side by side in an overlay, or save it to a file in `diffOutputDir`.",
+			},
+			{
+				Action: "Dir diff / untracked", Keys: []string{"D", "U"}, Context: "Files",
+				Description: "Toggle the directory-level diff for the highlighted directory, or toggle hiding untracked files.",
+			},
+			{
+				Action: "Toggle command log", Keys: []string{"x"}, Context: "Global",
+				Description: "Show or hide the Command Log panel.",
+			},
+		}},
+		{Title: "General", Bindings: []Binding{
+			{
+				Action: "Toggle help", Keys: []string{"?"}, Context: "Global",
+				Description: "Open or close this keybindings reference.",
+			},
+			{
+				Action: "Quit", Keys: []string{"q"}, Context: "Global",
+				Description: "Quit revision. ctrl+c works too.",
+			},
+		}},
 	}
 }

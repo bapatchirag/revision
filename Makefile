@@ -4,7 +4,7 @@ DIST    := dist
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: all build run run-gallery test cover vet fmt lint tidy cross build-darwin build-linux clean
+.PHONY: all build run run-gallery site-data test cover vet fmt lint tidy cross build-darwin build-linux clean
 
 all: build
 
@@ -19,6 +19,10 @@ run:
 ## run-gallery: run the reusable-component gallery from source
 run-gallery:
 	go run ./cmd/gallery
+
+## site-data: regenerate the website's keybindings table from the Go source
+site-data:
+	go run ./cmd/keymapdump > site/src/data/keybindings.json
 
 ## test: run all unit tests
 test:

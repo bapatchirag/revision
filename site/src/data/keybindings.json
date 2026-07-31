@@ -1,0 +1,224 @@
+[
+  {
+    "section": "Changes",
+    "action": "Stage / unstage",
+    "keys": [
+      "space"
+    ],
+    "context": "Files",
+    "description": "Stage or unstage the selected file, or every change under the selected directory. An untracked file is `svn add`ed first."
+  },
+  {
+    "section": "Changes",
+    "action": "Assign changelist",
+    "keys": [
+      "n"
+    ],
+    "context": "Files",
+    "description": "Assign the staged set — or just the selected file when nothing is staged — to a named changelist."
+  },
+  {
+    "section": "Changes",
+    "action": "Commit staged / list",
+    "keys": [
+      "c"
+    ],
+    "context": "Files",
+    "description": "Commit the staged files, or the selected changelist."
+  },
+  {
+    "section": "Changes",
+    "action": "Expand changelist",
+    "keys": [
+      "enter"
+    ],
+    "context": "Files",
+    "description": "Expand or collapse the selected directory, or drill into a changelist."
+  },
+  {
+    "section": "Changes",
+    "action": "Revert / delete file",
+    "keys": [
+      "r",
+      "d"
+    ],
+    "context": "Files",
+    "description": "Revert or delete the selected file, or everything under the selected directory. Both ask for confirmation."
+  },
+  {
+    "section": "Working copy",
+    "action": "Update working copy",
+    "keys": [
+      "u"
+    ],
+    "context": "Global",
+    "description": "Update the working copy to the latest revision."
+  },
+  {
+    "section": "Working copy",
+    "action": "Update to rev (Log)",
+    "keys": [
+      "space"
+    ],
+    "context": "Log",
+    "description": "Update the working copy to the selected revision."
+  },
+  {
+    "section": "Working copy",
+    "action": "Open file in editor",
+    "keys": [
+      "e"
+    ],
+    "context": "Files",
+    "description": "Open the highlighted file in the configured editor."
+  },
+  {
+    "section": "Working copy",
+    "action": "Refresh / settings",
+    "keys": [
+      "R",
+      "S"
+    ],
+    "context": "Global",
+    "description": "Refresh status and history, or open the settings editor."
+  },
+  {
+    "section": "Navigation",
+    "action": "Jump to panel",
+    "keys": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "0"
+    ],
+    "context": "Global",
+    "description": "Focus the Status, Files, Log, Command Log or Main panel."
+  },
+  {
+    "section": "Navigation",
+    "action": "Cycle panels",
+    "keys": [
+      "tab",
+      "shift+tab"
+    ],
+    "context": "Global",
+    "description": "Move focus to the next or previous panel."
+  },
+  {
+    "section": "Navigation",
+    "action": "Move up / down",
+    "keys": [
+      "k",
+      "j"
+    ],
+    "context": "Any panel",
+    "description": "Move the selection up or down. ↑ and ↓ work too."
+  },
+  {
+    "section": "Navigation",
+    "action": "Jump top / bottom",
+    "keys": [
+      "g",
+      "G"
+    ],
+    "context": "Any panel",
+    "description": "Jump to the first or last row."
+  },
+  {
+    "section": "Navigation",
+    "action": "Scroll main up / down",
+    "keys": [
+      "K",
+      "J"
+    ],
+    "context": "Main",
+    "description": "Scroll the Main panel up or down a page."
+  },
+  {
+    "section": "Navigation",
+    "action": "Scroll main l / r",
+    "keys": [
+      "h",
+      "l"
+    ],
+    "context": "Main",
+    "description": "Scroll the focused panel one column left or right. ← and → work too."
+  },
+  {
+    "section": "Navigation",
+    "action": "Line start / end",
+    "keys": [
+      "home",
+      "end"
+    ],
+    "context": "Any panel",
+    "description": "Jump to the start or end of the line. ^ and $ work too."
+  },
+  {
+    "section": "Navigation",
+    "action": "Filter panel",
+    "keys": [
+      "/"
+    ],
+    "context": "Any panel",
+    "description": "Filter the Files or Log panel, or search within Main or Status."
+  },
+  {
+    "section": "View",
+    "action": "Switch file view",
+    "keys": [
+      "[",
+      "]"
+    ],
+    "context": "Files",
+    "description": "Turn the Files panel between the Changes, Changelists and Diffs views."
+  },
+  {
+    "section": "View",
+    "action": "Side-by-side / save",
+    "keys": [
+      "s",
+      "w"
+    ],
+    "context": "Main",
+    "description": "Open the diff on screen side by side in an overlay, or save it to a file in `diffOutputDir`."
+  },
+  {
+    "section": "View",
+    "action": "Dir diff / untracked",
+    "keys": [
+      "D",
+      "U"
+    ],
+    "context": "Files",
+    "description": "Toggle the directory-level diff for the highlighted directory, or toggle hiding untracked files."
+  },
+  {
+    "section": "View",
+    "action": "Toggle command log",
+    "keys": [
+      "x"
+    ],
+    "context": "Global",
+    "description": "Show or hide the Command Log panel."
+  },
+  {
+    "section": "General",
+    "action": "Toggle help",
+    "keys": [
+      "?"
+    ],
+    "context": "Global",
+    "description": "Open or close this keybindings reference."
+  },
+  {
+    "section": "General",
+    "action": "Quit",
+    "keys": [
+      "q"
+    ],
+    "context": "Global",
+    "description": "Quit revision. ctrl+c works too."
+  }
+]
