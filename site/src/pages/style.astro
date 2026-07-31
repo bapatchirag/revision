@@ -1,0 +1,363 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import { Aside, Code } from '@astrojs/starlight/components';
+
+import AppScreen from '../components/AppScreen.astro';
+import AsciiLogo from '../components/AsciiLogo.astro';
+import DiffBlock from '../components/DiffBlock.astro';
+import HintBar from '../components/HintBar.astro';
+import KeyCap from '../components/KeyCap.astro';
+import TerminalWindow from '../components/TerminalWindow.astro';
+
+/*
+ * Unlisted kitchen-sink harness for the Cipher design system. Permanent: it is
+ * how every token and component state is inspected after a change.
+ */
+
+const swatchGroups: { heading: string; tokens: string[] }[] = [
+	{
+		heading: 'Surfaces',
+		tokens: ['--rv-bg-deep', '--rv-bg', '--rv-bg-elevated', '--rv-bg-selection', '--rv-bg-selection-alt'],
+	},
+	{
+		heading: 'Text',
+		tokens: ['--rv-text', '--rv-text-high', '--rv-text-secondary', '--rv-muted', '--rv-dim', '--rv-comment'],
+	},
+	{ heading: 'Lines', tokens: ['--rv-border', '--rv-border-focused'] },
+	{ heading: 'Accent', tokens: ['--rv-accent', '--rv-accent-hover', '--rv-on-accent'] },
+	{
+		heading: 'Semantic',
+		tokens: [
+			'--rv-error',
+			'--rv-error-bright',
+			'--rv-warning',
+			'--rv-warning-bright',
+			'--rv-info',
+			'--rv-magenta',
+			'--rv-blue',
+		],
+	},
+	{
+		heading: 'Diff tints',
+		tokens: ['--rv-add-bg', '--rv-add-gutter', '--rv-del-bg', '--rv-del-gutter', '--rv-hunk-bg'],
+	},
+	{
+		heading: 'KeyCap',
+		tokens: ['--rv-keycap-bg', '--rv-keycap-border', '--rv-keycap-bottom-border', '--rv-keycap-text'],
+	},
+];
+
+const typeScale = [
+	['--sl-text-h1', 'h1'],
+	['--sl-text-h2', 'h2'],
+	['--sl-text-h3', 'h3'],
+	['--sl-text-h4', 'h4'],
+	['--sl-text-body', 'body'],
+	['--sl-text-sm', 'sm'],
+	['--sl-text-xs', 'xs'],
+] as const;
+
+const sampleDiff = `--- a/internal/svn/status.go
++++ b/internal/svn/status.go
+@@ -12,7 +12,9 @@ func Parse(r io.Reader) ([]Entry, error) {
+ 	dec := xml.NewDecoder(r)
+ 	var doc statusXML
+-	if err := dec.Decode(&doc); err != nil {
+-		return nil, err
++	if err := dec.Decode(&doc); err != nil {
++		return nil, fmt.Errorf("parse status: %w", err)
+ 	}
+ 	return doc.Entries(), nil
+ }`;
+
+const hints = [
+	{ keys: 'space', label: 'stage' },
+	{ keys: 'n', label: 'changelist' },
+	{ keys: 'c', label: 'commit' },
+	{ keys: 'r', label: 'revert' },
+	{ keys: '[ ]', label: 'view' },
+	{ keys: '?', label: 'help' },
+];
+
+const glyphRows = [
+	['Box drawing', '╭ ╮ ╰ ╯ ─ │ ┼ ┃ ├ ┤ ┬ ┴'],
+	['Blocks', '█ ▉ ▊ ▋ ▌ ▍ ▎ ▏ ▀ ▄ ░ ▒ ▓'],
+	['Fallback (JetBrains)', '▾ ▸ ◆ ✓ ✗ ← → ↔'],
+	['Fantasque arrows', '↑ ↓'],
+	['Punctuation', '· • … — © @@ > *'],
+];
+
+const sampleGo = `// Cipher is modeled on the "Cipher Dark" VS Code theme.
+func Cipher() Theme {
+	return Theme{
+		Text:          lipgloss.Color("#e6e9f2"),
+		Accent:        lipgloss.Color("#9fef00"),
+		BorderFocused: lipgloss.Color("#9fef00"),
+	}
+}`;
+
+const sampleSh = `# Install the latest release.
+curl -fsSL https://raw.githubusercontent.com/bapatchirag/revision/main/install.sh | sh
+revision --version`;
+---
+
+<StarlightPage
+	frontmatter={{
+		title: 'Style guide',
+		description: 'Cipher design-system harness: every token, every component state.',
+		tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 2 },
+		pagefind: false,
+	}}
+>
+	<p>
+		Unlisted harness for the Cipher design system. Swatch values are read back from the live
+		computed style, so a label can never disagree with what is rendered.
+	</p>
+
+	<h2 id="colour-tokens">Colour tokens</h2>
+
+	{
+		swatchGroups.map((group) => (
+			<>
+				<h3>{group.heading}</h3>
+				<ul class="rv-swatches not-content">
+					{group.tokens.map((token) => (
+						<li class="rv-swatch">
+						<span class="rv-swatch__chip">
+							<span class="rv-swatch__fill" style={`background-color: var(${token})`} />
+						</span>
+							<span class="rv-swatch__meta">
+								<code class="rv-swatch__name">{token}</code>
+								<output class="rv-swatch__value" data-token={token}>
+									…
+								</output>
+							</span>
+						</li>
+					))}
+				</ul>
+			</>
+		))
+	}
+
+	<h2 id="typography">Typography</h2>
+
+	<p>
+		Everything is monospace. Fantasque Sans Mono is primary; JetBrains Mono covers only the glyphs
+		Fantasque lacks, rescaled with <code>size-adjust</code> so a fallback glyph still occupies one cell.
+	</p>
+
+	<ul class="rv-typescale not-content">
+		{
+			typeScale.map(([token, label]) => (
+				<li style={`font-size: var(${token})`}>
+					<span class="rv-typescale__label">{label}</span> Sphinx of black quartz, judge my vow — 0123456789
+				</li>
+			))
+		}
+	</ul>
+
+	<p>Ligature and feature check (<code>calt</code> on): <code>=&gt; != &gt;= &lt;= --&gt; ::= ... ###</code></p>
+
+	<table>
+		<thead>
+			<tr><th>Range</th><th>Specimen</th></tr>
+		</thead>
+		<tbody>
+			{glyphRows.map(([label, glyphs]) => (
+				<tr><td>{label}</td><td><code>{glyphs}</code></td></tr>
+			))}
+		</tbody>
+	</table>
+
+	<h2 id="ascii-logo">AsciiLogo</h2>
+
+	<AsciiLogo />
+
+	<h2 id="terminalwindow">TerminalWindow</h2>
+
+	<p>Unfocused, with an inlaid title and footer count:</p>
+
+	<TerminalWindow index="2" title="Changes" count="1 of 3">
+		<pre>{`  ▾ /
+>   ● A added.txt
+      M modified.go
+      D gone.txt`}</pre>
+	</TerminalWindow>
+
+	<p>Focused — the border switches to <code>--rv-border-focused</code>:</p>
+
+	<TerminalWindow index="0" title="Diff" focused>
+		<pre>{`changelist: (staged)
+
+Loading diff…`}</pre>
+	</TerminalWindow>
+
+	<p>Title only, no index and no count:</p>
+
+	<TerminalWindow title="Install">
+		<pre>{`$ curl -fsSL https://example.invalid/install.sh | sh`}</pre>
+	</TerminalWindow>
+
+	<p>Bare frame, no label at all:</p>
+
+	<TerminalWindow>
+		<pre>{`No svn commands run yet.`}</pre>
+	</TerminalWindow>
+
+	<h2 id="keycap">KeyCap</h2>
+
+	<p class="rv-keycap-row not-content">
+		<KeyCap key="space" />
+		<KeyCap key="c" />
+		<KeyCap key="?" />
+		<KeyCap key="[" />
+		<KeyCap key="]" />
+		<KeyCap key="ctrl+r" />
+		<KeyCap key="esc" />
+		<KeyCap>shift+tab</KeyCap>
+	</p>
+
+	<h2 id="hintbar">HintBar</h2>
+
+	<p>Bare text, matching the in-app status bar:</p>
+	<HintBar hints={hints} />
+
+	<p>With key caps, for docs prose:</p>
+	<HintBar hints={hints} keycaps />
+
+	<h2 id="diffblock">DiffBlock</h2>
+
+	<p>
+		Additions read by background tint and weight, not hue — the same lime as body links, which are
+		underlined. Compare the <code>+</code> rows below with <a href="#diffblock">this link</a>.
+	</p>
+
+	<DiffBlock file="internal/svn/status.go" diff={sampleDiff} />
+
+	<h2 id="code-blocks">Code blocks</h2>
+
+	<Code code={sampleGo} lang="go" title="internal/tui/theme/theme.go" />
+	<Code code={sampleSh} lang="sh" frame="terminal" />
+	<Code code={sampleDiff} lang="diff" />
+
+	<h2 id="golden-layout">Golden layout</h2>
+
+	<p>
+		Rendered verbatim from <code>internal/app/testdata/TestModelGoldenLayout.golden</code>. Vertical
+		rules must be unbroken in Safari, Chrome and Firefox — this is where a cell-width mismatch between
+		the primary face and the fallback would show.
+	</p>
+
+	<AppScreen golden="TestModelGoldenLayout" />
+
+	<h2 id="asides">Asides &amp; prose</h2>
+
+	<Aside type="note">A note aside, mapped onto <code>--rv-info</code>.</Aside>
+	<Aside type="tip">A tip aside, mapped onto <code>--rv-accent</code>.</Aside>
+	<Aside type="caution">A caution aside, mapped onto <code>--rv-warning</code>.</Aside>
+	<Aside type="danger">A danger aside, mapped onto <code>--rv-error</code>.</Aside>
+
+	<blockquote>
+		A block quote in <code>--rv-muted</code>, italic.
+	</blockquote>
+</StarlightPage>
+
+<script>
+	// Print the resolved value beside each swatch so labels cannot drift.
+	const styles = getComputedStyle(document.documentElement);
+	for (const el of document.querySelectorAll<HTMLElement>('.rv-swatch__value')) {
+		const token = el.dataset.token;
+		el.textContent = token ? styles.getPropertyValue(token).trim() || '(unset)' : '(unset)';
+	}
+</script>
+
+<style>
+	.rv-swatches {
+		display: grid;
+		gap: 0.75rem;
+		grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+		list-style: none;
+		margin: 1rem 0;
+		padding: 0;
+	}
+
+	.rv-swatch {
+		align-items: center;
+		background-color: var(--rv-bg-elevated);
+		border: 1px solid var(--rv-border);
+		border-radius: var(--rv-radius);
+		display: flex;
+		gap: 0.75rem;
+		padding: 0.5rem;
+	}
+
+	.rv-swatch__chip {
+		/* Checkerboard behind the fill so alpha tokens read honestly. */
+		background-image: linear-gradient(
+				45deg,
+				var(--rv-border) 25%,
+				transparent 25% 75%,
+				var(--rv-border) 75%
+			),
+			linear-gradient(45deg, var(--rv-border) 25%, transparent 25% 75%, var(--rv-border) 75%);
+		background-position:
+			0 0,
+			4px 4px;
+		background-size: 8px 8px;
+		border: 1px solid var(--rv-border);
+		border-radius: 4px;
+		block-size: 2.5rem;
+		flex: none;
+		inline-size: 2.5rem;
+		overflow: hidden;
+	}
+
+	.rv-swatch__fill {
+		display: block;
+		block-size: 100%;
+		inline-size: 100%;
+	}
+
+	.rv-swatch__meta {
+		display: flex;
+		flex-direction: column;
+		min-inline-size: 0;
+	}
+
+	.rv-swatch__name {
+		color: var(--rv-text);
+		font-size: 0.8125rem;
+		overflow-wrap: anywhere;
+	}
+
+	.rv-swatch__value {
+		color: var(--rv-muted);
+		font-size: 0.75rem;
+	}
+
+	.rv-typescale {
+		list-style: none;
+		margin: 1rem 0;
+		padding: 0;
+	}
+
+	.rv-typescale li {
+		border-block-end: 1px solid var(--rv-border);
+		color: var(--rv-text);
+		overflow-wrap: anywhere;
+		padding-block: 0.4rem;
+	}
+
+	.rv-typescale__label {
+		color: var(--rv-muted);
+		font-size: 0.75rem;
+		margin-inline-end: 0.75ch;
+	}
+
+	.rv-keycap-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+</style>

@@ -1,0 +1,48 @@
+---
+title: Keybindings
+description: The full key reference, generated from the same table the in-app help menu renders.
+---
+
+import AppScreen from '../../../components/AppScreen.astro';
+import HintBar from '../../../components/HintBar.astro';
+import KeyCap from '../../../components/KeyCap.astro';
+import KeybindingSearch from '../../../components/KeybindingSearch.astro';
+
+The hint bar shows the most common actions for the focused panel, and <KeyCap key="?" />
+opens the full menu at any time.
+
+<HintBar
+	hints={[
+		{ keys: 'space', label: 'stage' },
+		{ keys: 'n', label: 'changelist' },
+		{ keys: 'c', label: 'commit' },
+		{ keys: 'r', label: 'revert' },
+		{ keys: 'd', label: 'delete' },
+		{ keys: '[ ]', label: 'view' },
+		{ keys: '?', label: 'help' },
+	]}
+	keycaps
+/>
+
+The table below is generated from the same Go table the <KeyCap key="?" /> overlay renders,
+so the two can never disagree. Filter it by action, key or description, or narrow it to a
+single section — press <KeyCap key="/" /> to jump to the filter.
+
+<KeybindingSearch />
+
+## Inside prompts and overlays
+
+Modal contexts, which the menu above does not cover.
+
+| Context | Keys |
+|---|---|
+| Commit editor, settings form | <KeyCap key="ctrl+s" /> submits, <KeyCap key="esc" /> cancels |
+| Changelist-name prompt | <KeyCap key="tab" /> toggles between typing a new name and picking an existing changelist |
+| Confirmation dialog | <KeyCap key="enter" /> or <KeyCap key="y" /> confirms, <KeyCap key="esc" /> or <KeyCap key="n" /> cancels |
+| Side-by-side overlay | <KeyCap key="[" /> / <KeyCap key="]" /> turn between files, <KeyCap key="s" /> or <KeyCap key="esc" /> closes |
+| Filter input | <KeyCap key="enter" /> keeps the query, <KeyCap key="esc" /> clears it |
+| Main / Status with an active search | <KeyCap key="n" /> / <KeyCap key="N" /> walk to the next / previous [match](/workflows/filtering-and-searching/#main-and-status) |
+
+## The in-app menu
+
+<AppScreen golden="TestHelpMenuGolden" caption="The ? overlay, rendered by the app itself." />

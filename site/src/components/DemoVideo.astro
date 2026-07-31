@@ -1,0 +1,77 @@
+---
+/**
+ * The recorded demo.
+ *
+ * A 69-second screen capture is a video, not a GIF: the same recording as an
+ * animated GIF is 2.7 MB and becomes the page's largest contentful paint. The
+ * poster carries the first paint and the video is fetched only once it is close
+ * to being seen.
+ *
+ * It reads as an embedded animation rather than a player: no controls, so there
+ * is no volume bar, no fullscreen button and nothing to focus. It plays on its
+ * own unless the reader asked for reduced motion, in which case the poster is
+ * all that is ever shown or fetched.
+ */
+interface Props {
+	/** Base name under public/demos, e.g. "hero". */
+	name: string;
+	/** Accessible description of what the recording shows. */
+	label: string;
+	width: number;
+	height: number;
+}
+
+const { name, label, width, height } = Astro.props;
+const base = import.meta.env.BASE_URL;
+---
+
+<video
+	class="rv-demo"
+	poster={`${base}demos/${name}-poster.png`}
+	{width}
+	{height}
+	aria-label={label}
+	preload="none"
+	muted
+	loop
+	playsinline
+	disablepictureinpicture
+>
+	<source src={`${base}demos/${name}.mp4`} type="video/mp4" />
+</video>
+
+<style>
+	.rv-demo {
+		border: 1px solid var(--rv-border);
+		border-radius: var(--rv-radius);
+		display: block;
+		height: auto;
+		margin-block: 1.5rem;
+		/* Nothing to click: it is an animation, not a player. */
+		pointer-events: none;
+		width: 100%;
+	}
+</style>
+
+<script>
+	// Autoplay is opted into here rather than in the markup, so `prefers-reduced-motion`
+	// leaves the poster frame showing and nothing is downloaded.
+	if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+		const observer = new IntersectionObserver(
+			(entries, self) => {
+				for (const entry of entries) {
+					if (!entry.isIntersecting) continue;
+					const video = entry.target as HTMLVideoElement;
+					self.unobserve(video);
+					video.preload = 'auto';
+					video.autoplay = true;
+					// A browser that refuses to autoplay leaves the poster showing.
+					video.play().catch(() => {});
+				}
+			},
+			{ rootMargin: '200px' }
+		);
+
+		document.querySelectorAll('.rv-demo').forEach((video) => observer.observe(video));
+	}
+</script>

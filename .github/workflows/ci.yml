@@ -49,3 +49,63 @@ jobs:
         run: |
           npm install
           npm run compile
+
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      # Node 22, not 20: Starlight 0.41 needs Astro 7, which requires >= 22.12.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      # The website's keybindings reference is generated from internal/tui/keymap.
+      # A stale committed table would build green and ship wrong, so fail on any drift.
+      - name: Keybindings drift gate
+        run: |
+          go run ./cmd/keymapdump > "$RUNNER_TEMP/keybindings.json"
+          diff -u site/src/data/keybindings.json "$RUNNER_TEMP/keybindings.json"
+
+      - name: Install
+        working-directory: site
+        run: npm ci
+      - name: Check types
+        working-directory: site
+        run: npm run check
+      - name: Check design tokens
+        working-directory: site
+        run: npm run check:tokens
+      - name: Build
+        working-directory: site
+        run: npm run build
+
+      # Links in the build are absolute under /revision, so lychee needs a root
+      # whose layout matches the deployed one.
+      - name: Stage the build under its base path
+        run: |
+          mkdir -p "$RUNNER_TEMP/site/revision"
+          cp -R site/dist/. "$RUNNER_TEMP/site/revision/"
+
+      # --remap resolves the README's documentation links against this build rather
+      # than the deployed site, so a new page's link is checkable before it ships.
+      - name: Check links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          fail: true
+          args: >-
+            --root-dir ${{ runner.temp }}/site
+            --remap 'https://bapatchirag\.github\.io/revision/(.*) file://${{ runner.temp }}/site/revision/$1'
+            --index-files index.html
+            --fallback-extensions html
+            --include-fragments
+            --max-retries 3
+            --accept '200..=204,429'
+            --no-progress
+            README.md
+            '${{ runner.temp }}/site/revision/**/*.html'

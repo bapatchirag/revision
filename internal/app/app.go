@@ -1890,41 +1890,19 @@ func failureText(action string, err error) string {
 	return action + " failed: " + err.Error()
 }
 
-// helpMenuItems is the keybindings reference shown by the "?" help menu.
+// helpMenuItems is the keybindings reference shown by the "?" help menu. The
+// table itself lives in keymap.HelpSections, which also feeds the website's
+// keybindings page; this only lays it out as menu rows.
 func helpMenuItems() []component.MenuItem {
-	return []component.MenuItem{
-		component.MenuSection("Changes"),
-		{Label: "Stage / unstage", Key: "space"},
-		{Label: "Assign changelist", Key: "n"},
-		{Label: "Commit staged / list", Key: "c"},
-		{Label: "Expand changelist", Key: "enter"},
-		{Label: "Revert / delete file", Key: "r / d"},
-
-		component.MenuSection("Working copy"),
-		{Label: "Update working copy", Key: "u"},
-		{Label: "Update to rev (Log)", Key: "space"},
-		{Label: "Open file in editor", Key: "e"},
-		{Label: "Refresh / settings", Key: "R / S"},
-
-		component.MenuSection("Navigation"),
-		{Label: "Jump to panel", Key: "1 2 3 4 0"},
-		{Label: "Cycle panels", Key: "tab / shift+tab"},
-		{Label: "Move up / down", Key: "k / j"},
-		{Label: "Jump top / bottom", Key: "g / G"},
-		{Label: "Scroll main up / down", Key: "K / J"}, {Label: "Scroll main l / r", Key: "h / l"},
-		{Label: "Line start / end", Key: "home / end"},
-		{Label: "Filter panel", Key: "/"},
-
-		component.MenuSection("View"),
-		{Label: "Switch file view", Key: "[ / ]"},
-		{Label: "Side-by-side / save", Key: "s / w"},
-		{Label: "Dir diff / untracked", Key: "D / U"},
-		{Label: "Toggle command log", Key: "x"},
-
-		component.MenuSection("General"),
-		{Label: "Toggle help", Key: "?"},
-		{Label: "Quit", Key: "q"},
+	sections := keymap.HelpSections()
+	items := make([]component.MenuItem, 0, len(sections))
+	for _, s := range sections {
+		items = append(items, component.MenuSection(s.Title))
+		for _, b := range s.Bindings {
+			items = append(items, component.MenuItem{Label: b.Action, Key: b.KeyHint()})
+		}
 	}
+	return items
 }
 
 // updateMenuItems are the choices shown in the startup update prompt. Their

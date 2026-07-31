@@ -1,0 +1,91 @@
+---
+title: Authentication
+description: How revision handles SVN credentials, and the svn+ssh key flow.
+---
+
+import KeyCap from '../../../components/KeyCap.astro';
+
+## Never blocked on a prompt
+
+`revision` always runs `svn` with `--non-interactive`. A TUI owns the terminal, so a
+hidden credential prompt would not be visible and the app would appear to hang. Instead,
+any command that needs credentials it does not have fails fast with a short, actionable
+hint:
+
+```text
+authentication required — cache SVN credentials, then retry
+```
+
+## Caching credentials
+
+Run an `svn` command yourself in the working copy, once:
+
+```sh
+cd /path/to/working-copy
+svn info
+```
+
+Answer the prompts. SVN stores the credentials in its own auth cache, and `revision` uses
+them on every subsequent action. `svn update` works equally well as the priming command.
+
+This is deliberately SVN's job, not `revision`'s: nothing is stored by `revision`, so
+there is no second credential store to keep in sync or to leak.
+
+## svn+ssh working copies
+
+When the repository URL starts with `svn+ssh://`, SVN opens an SSH connection for every
+operation, and that connection needs a key.
+
+At startup, `revision`:
+
+1. Reads the key at [`sshKeyPath`](/reference/configuration/#sshkeypath) — default
+   `~/.ssh/id_rsa` — and derives its fingerprint with `ssh-keygen`.
+2. Asks `ssh-agent` which keys it already holds, and matches on that fingerprint. A key
+   that is already loaded is **never** asked about.
+3. If the key is not loaded, prompts once for its passphrase and adds it with `ssh-add`
+   before loading anything else.
+
+The rest of the session then runs without further prompts.
+
+### How the passphrase is handled
+
+The passphrase never touches the terminal `revision` owns and is never written to disk. It
+is passed to `ssh-add` through an `SSH_ASKPASS` helper — `revision` re-invoking itself as
+a tiny single-purpose subprocess — and travels only on that child's environment, so it
+lives no longer than the `ssh-add` call.
+
+The helper answers exactly once. `ssh-add` normally retries after a wrong passphrase; the
+second call finds nothing to answer with, so `ssh-add` gives up instead of spinning.
+
+### When it fails
+
+| Situation | What happens |
+|---|---|
+| Wrong passphrase | A toast reports `wrong passphrase (1/3) — try again` and the prompt reopens. |
+| Wrong three times | `revision` stops: the key is required for this working copy. |
+| No `ssh-agent` running | `revision` says the agent is unreachable and stops — SVN cannot reach the repository without the key. |
+| Key file missing | Reported as an error from `ssh-add`. |
+
+The three-attempt limit is on `revision`'s prompt, not on SSH. Start `ssh-agent` (or
+re-run under `ssh-agent bash`) and try again, or load the key yourself with `ssh-add`
+before starting.
+
+### Loading the key yourself
+
+If you would rather `revision` never prompt, add the key before starting it:
+
+```sh
+ssh-add ~/.ssh/id_rsa
+revision
+```
+
+`revision` finds it in the agent and moves on.
+
+## Which key?
+
+Point [`sshKeyPath`](/reference/configuration/#sshkeypath) at the private key your
+repository host expects — press <KeyCap key="S" /> and edit the **SSH key** field. A
+leading `~` is expanded to your home directory.
+
+Only that one key is checked. If your `~/.ssh/config` selects a different key per host,
+load it into the agent yourself and `revision` will use whatever the agent holds.

@@ -1,0 +1,11 @@
+---
+/** A keyboard key, styled from Cipher's `keybindingLabel.*` colours. */
+interface Props {
+	/** Key label, e.g. "space", "ctrl+c". Falls back to the default slot. */
+	key?: string;
+}
+
+const { key } = Astro.props;
+---
+
+<kbd class="rv-keycap">{key ?? <slot />}</kbd>

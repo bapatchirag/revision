@@ -1,0 +1,123 @@
+---
+/**
+ * A shell command in a terminal frame, with a copy button.
+ *
+ * The button is hidden until its handler is attached, so without JavaScript the
+ * command is still there to select and copy by hand.
+ */
+import TerminalWindow from './TerminalWindow.astro';
+
+interface Props {
+	/** Copied verbatim; the prompt sign is not part of it. */
+	command: string;
+	title?: string;
+	/** Accessible name for the button, e.g. "Copy the install command". */
+	label?: string;
+}
+
+const { command, title = 'Install', label = 'Copy the command' } = Astro.props;
+---
+
+<TerminalWindow {title} class="rv-copy not-content">
+	<div class="rv-copy__row">
+		<code class="rv-copy__command"><span aria-hidden="true">$&nbsp;</span>{command}</code>
+		<button class="rv-copy__button" type="button" aria-label={label} data-command={command} hidden>
+			Copy
+		</button>
+	</div>
+	<p class="rv-copy__status" role="status"></p>
+</TerminalWindow>
+
+<style>
+	.rv-copy__row {
+		align-items: start;
+		display: flex;
+		gap: 1rem;
+		justify-content: space-between;
+	}
+
+	.rv-copy__command {
+		color: var(--rv-text);
+		font-family: var(--rv-font-code);
+		font-size: var(--sl-text-code);
+		/* Wraps rather than scrolls: the button must stay reachable on a phone. */
+		overflow-wrap: anywhere;
+		white-space: pre-wrap;
+	}
+
+	.rv-copy__command span {
+		color: var(--rv-accent);
+	}
+
+	.rv-copy__button {
+		background-color: transparent;
+		border: 1px solid var(--rv-border);
+		border-radius: 4px;
+		color: var(--rv-text-secondary);
+		cursor: pointer;
+		flex-shrink: 0;
+		font-family: var(--rv-font-chrome);
+		font-size: var(--sl-text-xs);
+		padding: 0.25rem 0.75rem;
+	}
+
+	.rv-copy__button:hover {
+		border-color: var(--rv-border-focused);
+		color: var(--rv-accent);
+	}
+
+	.rv-copy__button[data-state='copied'] {
+		border-color: var(--rv-border-focused);
+		color: var(--rv-accent);
+	}
+
+	.rv-copy__button[data-state='failed'] {
+		border-color: var(--rv-error);
+		color: var(--rv-error-bright);
+	}
+
+	.rv-copy__status {
+		clip-path: inset(50%);
+		height: 1px;
+		margin: 0;
+		overflow: hidden;
+		position: absolute;
+		white-space: nowrap;
+		width: 1px;
+	}
+</style>
+
+<script>
+	document.querySelectorAll<HTMLButtonElement>('.rv-copy__button').forEach((button) => {
+		const status = button.closest('.rv-copy')?.querySelector('.rv-copy__status');
+		let reset: ReturnType<typeof setTimeout>;
+
+		// Revealed only now, so it is never a dead control.
+		button.hidden = false;
+
+		button.addEventListener('click', async () => {
+			const command = button.dataset.command;
+			if (!command) return;
+
+			let message: string;
+			try {
+				await navigator.clipboard.writeText(command);
+				button.dataset.state = 'copied';
+				button.textContent = 'Copied';
+				message = 'Command copied to the clipboard.';
+			} catch {
+				button.dataset.state = 'failed';
+				button.textContent = 'Failed';
+				message = 'Could not copy. Select the command and copy it by hand.';
+			}
+			if (status) status.textContent = message;
+
+			clearTimeout(reset);
+			reset = setTimeout(() => {
+				delete button.dataset.state;
+				button.textContent = 'Copy';
+				if (status) status.textContent = '';
+			}, 3000);
+		});
+	});
+</script>

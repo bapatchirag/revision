@@ -1,0 +1,40 @@
+---
+/**
+ * The figlet "small" wordmark, kept byte-identical to `revisionLogo` in
+ * internal/app/about.go.
+ */
+interface Props {
+	class?: string;
+}
+
+const { class: className } = Astro.props;
+
+const wordmark = String.raw`             _    _
+ _ _ _____ _(_)__(_)___ _ _
+| '_/ -_) V / (_-< / _ \ ' \
+|_| \___|\_/|_/__/_\___/_||_|`;
+---
+
+<div class:list={['rv-ascii-logo', className]} role="img" aria-label="revision">
+	<pre aria-hidden="true">{wordmark}</pre>
+</div>
+
+<style>
+	.rv-ascii-logo {
+		container-type: inline-size;
+	}
+
+	.rv-ascii-logo pre {
+		background: none;
+		border: 0;
+		color: var(--rv-accent);
+		font-family: var(--rv-font-chrome);
+		font-weight: 700;
+		line-height: 1.15;
+		margin: 0;
+		padding: 0;
+		white-space: pre;
+		/* The wordmark is 29 cells wide; 6.2cqi keeps it inside its container. */
+		font-size: min(1.5rem, 6.2cqi);
+	}
+</style>

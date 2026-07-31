@@ -1,0 +1,90 @@
+---
+title: Changelists
+description: Group work into named SVN changelists and commit them as a unit.
+---
+
+import AppScreen from '../../../components/AppScreen.astro';
+import DemoVideo from '../../../components/DemoVideo.astro';
+import KeyCap from '../../../components/KeyCap.astro';
+
+A changelist is a native SVN feature: a name attached to a set of paths in the working
+copy. `revision` uses one changelist to emulate
+[staging](/workflows/staging-and-commit/), and exposes the rest as first-class groups you
+can review and commit independently.
+
+## Naming a changelist
+
+Press <KeyCap key="n" /> in the Files panel. A prompt asks for the name, then:
+
+- If anything is **staged**, the whole staged set moves into that changelist.
+- If nothing is staged, the **selected file** moves on its own.
+
+<KeyCap key="tab" /> in the prompt switches between typing a new name and picking an
+existing changelist from a list. <KeyCap key="enter" /> confirms, <KeyCap key="esc" />
+cancels.
+
+:::caution
+A file belongs to at most one changelist at a time. If the selected file is already in a
+named list, <KeyCap key="n" /> says so rather than silently moving it — press
+<KeyCap key="space" /> to take it out first.
+:::
+
+## The Changelists view
+
+<KeyCap key="]" /> turns the Files panel to the Changelists view (and <KeyCap key="[" />
+turns back). Groups are ordered named lists first, alphabetically, then the staged bucket,
+then everything not in a changelist:
+
+<AppScreen golden="TestChangelistsViewGolden" />
+
+| Row | Meaning |
+|---|---|
+| `feature-x (1)` | A named changelist, with its file count. |
+| `(staged)` | The staged set — the `revision:staged` changelist. |
+| `(unstaged)` | Everything else with pending changes. |
+
+Selecting a group shows the combined diff of its members in Main, so you can read a whole
+changelist as one patch. The panel footer counts the groups.
+
+## Drilling into a list
+
+<KeyCap key="enter" /> opens a changelist as its own file tree. The panel border takes the
+list's name, and the hint bar changes to match.
+
+Inside a drilled-in list you can move around, read each file's diff, unstage with
+<KeyCap key="space" />, and commit with <KeyCap key="c" />. <KeyCap key="esc" /> goes back
+to the overview.
+
+<DemoVideo
+	name="changelists"
+	width={1200}
+	height={700}
+	label="Staging a directory, naming the staged set feature-health, turning the Files panel to the Changelists view, and drilling into the list and back out"
+/>
+
+## Committing a changelist
+
+With a list selected in the overview — or while drilled into it — press
+<KeyCap key="c" />. The [message editor](/workflows/staging-and-commit/#committing) opens
+and the commit covers that changelist alone, leaving every other pending change untouched.
+
+This is the useful part of the workflow: split a large working copy into several
+changelists, then land them as separate revisions without stashing anything.
+
+## Saving a changelist's diff
+
+<KeyCap key="w" /> in the Changelists view saves the combined diff of the highlighted
+group. The suggested file name is the group's label — `feature-x.diff`, `staged.diff`,
+`unstaged.diff`. See [Saving a diff](/workflows/diffs/#saving-a-diff).
+
+If nothing in the group has textual changes, a toast says so instead of writing an empty
+file.
+
+## Filtering
+
+The Files [filter](/workflows/filtering-and-searching/) applies to all three Files views.
+`cl:feature-x` narrows to one changelist, and `cl:staged` / `cl:unstaged` work on the two
+synthetic groups.
+
+<KeyCap key="n" />, <KeyCap key="c" /> and <KeyCap key="enter" /> are in the
+[Changes section](/reference/keybindings/#changes) of the keybindings reference.

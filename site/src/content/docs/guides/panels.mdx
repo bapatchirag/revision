@@ -1,0 +1,128 @@
+---
+title: The panels
+description: What each panel shows, how it behaves, and how to move between them.
+---
+
+import AppScreen from '../../../components/AppScreen.astro';
+import KeyCap from '../../../components/KeyCap.astro';
+
+The screen is a left column of Status, Files and Log, beside a Main detail view with a
+Command Log beneath it.
+
+<AppScreen golden="TestModelGoldenLayout" />
+
+Each panel carries its number in the top border — `[2] Files` — and the focused one is
+drawn in the accent colour. The frame also carries a position and count in the bottom
+border (`1 of 3`) where a count makes sense.
+
+| Panel | Key | What it shows |
+|-------|-----|---------------|
+| Status | <KeyCap key="1" /> | The working-copy root, the source path `revision` is operating on, the current directory, the branch, and the checked-out revision against HEAD. |
+| Files | <KeyCap key="2" /> | Pending changes, as a directory tree, grouped by changelist, or as saved patches. |
+| Log | <KeyCap key="3" /> | Revision history, newest first. An asterisk marks the revision the working copy sits at. |
+| Command Log | <KeyCap key="4" /> | The `svn` actions `revision` has run on your behalf, newest first, each marked ✓ or ✗. |
+| Main | <KeyCap key="0" /> | Detail for whatever is selected: a diff for a file or directory, metadata and changed paths for a revision. |
+
+## Moving between panels
+
+- <KeyCap key="1" /> … <KeyCap key="4" />, <KeyCap key="0" /> — focus a panel directly.
+- <KeyCap key="tab" /> / <KeyCap key="shift+tab" /> — cycle forwards and backwards.
+- <KeyCap key="x" /> — show or hide the Command Log.
+
+## Moving inside a panel
+
+Every panel scrolls on both axes, with scrollbars that show how much is off-screen.
+
+| Keys | Action |
+|---|---|
+| <KeyCap key="↑" /> <KeyCap key="k" /> · <KeyCap key="↓" /> <KeyCap key="j" /> | Move the selection up / down |
+| <KeyCap key="g" /> · <KeyCap key="G" /> | Jump to the top / bottom of a list |
+| <KeyCap key="K" /> · <KeyCap key="J" /> | Scroll the Main panel up / down a page |
+| <KeyCap key="←" /> <KeyCap key="h" /> · <KeyCap key="→" /> <KeyCap key="l" /> | Scroll the focused panel one column left / right |
+| <KeyCap key="Home" /> <KeyCap key="^" /> · <KeyCap key="End" /> <KeyCap key="$" /> | Jump to the start / end of the line |
+
+## Status
+
+Six rows, any of which is omitted when it has no value:
+
+| Row | Meaning |
+|---|---|
+| `Root` | The working copy's root directory. |
+| `Source` | The directory the views are scoped to — the same as `Root` when [`displayFrom`](/reference/configuration/#displayfrom) is `root`. |
+| `CWD` | The directory `revision` was started in. |
+| `Branch` | Derived from the repository URL: `trunk`, `branches/<name>` or `tags/<name>`. Blank when the repository does not follow that layout. |
+| `Revision` | The revision the working copy sits at. |
+| `HEAD` | The repository's latest revision, when it differs from `Revision`. |
+
+Focusing the Status panel puts project links and version information in Main:
+
+<AppScreen golden="TestStatusPanelAboutGolden" />
+
+## Files
+
+The Files panel has three views. <KeyCap key="[" /> and <KeyCap key="]" /> turn between
+them, and the active one is named in the top border.
+
+### Changes
+
+Pending changes as a collapsible directory tree, each change grouped under its folder.
+<KeyCap key="enter" /> expands or collapses a directory. Each row is a marker, the SVN
+status code (`A`, `M`, `D`, `?` …) and the file name. A green `●` marks a staged file and
+a cyan `●` a file in a [named changelist](/workflows/changelists/); an unstaged file has no
+marker.
+
+The footer counts the position and the number of files in view. When a
+[filter](/workflows/filtering-and-searching/) or
+[`hideUntracked`](/reference/configuration/#hideuntracked) hides some, the full count
+follows in brackets — `1 of 16 (29)`.
+
+### Changelists
+
+The same changes bucketed by [changelist](/workflows/changelists/): named lists first,
+then `(staged)`, then `(unstaged)`.
+
+<AppScreen golden="TestChangelistsViewGolden" />
+
+<KeyCap key="enter" /> drills into a list, which then owns the panel — the border names
+it and <KeyCap key="esc" /> goes back.
+
+### Diffs
+
+Patches you have [saved with `w`](/workflows/diffs/#saving-a-diff), newest first, read
+from [`diffOutputDir`](/reference/configuration/#diffoutputdir). Selecting one shows it in
+Main; <KeyCap key="e" /> opens it in your [editor](/workflows/editor/).
+
+This view is read-only: stage, revert and delete do nothing here.
+
+## Log
+
+Revision history, newest first, capped at the 50 most recent revisions. Each row carries
+the full revision number, the author, and the first line of the message. An asterisk marks
+where the working copy sits.
+
+Selecting a revision shows its date, full message and changed paths in Main.
+<KeyCap key="space" /> [updates the working copy](/workflows/updating/) to the selected
+revision.
+
+## Command Log
+
+Every `svn` command `revision` ran on your behalf, newest first, each marked ✓ or ✗.
+Read-only queries — the status and log refreshes that happen constantly — are left out, so
+the list stays a record of what actually changed.
+
+Toggle the panel with <KeyCap key="x" />.
+
+## Main
+
+Detail for the current selection, and the target of the
+[search](/workflows/filtering-and-searching/), [side-by-side](/workflows/diffs/) and
+[save-diff](/workflows/diffs/#saving-a-diff) actions.
+
+| Selection | Main shows |
+|---|---|
+| A file | Its diff, colour-coded. |
+| A directory | The combined diff of every change beneath it, when [`directoryDiff`](/reference/configuration/#directorydiff) is on. |
+| A changelist | The combined diff of its members. |
+| A saved patch | The patch file's contents. |
+| A revision | Date, author, full message, and changed paths. |
+| The Status panel | Project links and version information. |

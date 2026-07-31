@@ -1,0 +1,68 @@
+---
+/**
+ * A rounded TUI panel frame: `╭─ [2] Files ─ … ─ 1 of 3 ─╯`.
+ *
+ * The title is inlaid in the top border and the optional count in the bottom
+ * border, both offset from the corner by --rv-frame-inset.
+ */
+interface Props {
+	title?: string;
+	/** Panel number shown as `[n]`, matching the in-app focus indices. */
+	index?: string | number;
+	/** Footer count inlaid in the bottom border, e.g. "1 of 3". */
+	count?: string;
+	/** Render the border in --rv-border-focused. */
+	focused?: boolean;
+	class?: string;
+}
+
+const { title, index, count, focused = false, class: className } = Astro.props;
+---
+
+<div
+	class:list={['rv-frame', 'rv-terminal', className]}
+	data-focused={focused ? '' : undefined}
+>
+	{
+		(title || index !== undefined) && (
+			<span class="rv-frame__label rv-frame__label--top">
+				{index !== undefined && <span class="rv-frame__index">[{index}]</span>}
+				{index !== undefined && title && ' '}
+				{title}
+			</span>
+		)
+	}
+	<div class="rv-terminal__body">
+		<slot />
+	</div>
+	{count && <span class="rv-frame__label rv-frame__label--bottom">{count}</span>}
+</div>
+
+<style>
+	.rv-terminal {
+		margin-block: 1.5rem;
+		/*
+		 * Deliberately not overflow:hidden — the inlaid labels straddle the
+		 * border and would be cut in half.
+		 */
+	}
+
+	.rv-terminal__body {
+		border-radius: inherit;
+		overflow-x: auto;
+		padding: 1rem 1.25rem;
+	}
+
+	.rv-terminal__body :global(pre) {
+		background: none;
+		border: 0;
+		color: inherit;
+		font-family: inherit;
+		/* Terminal cell metrics, so box-drawing rules join vertically. */
+		line-height: 1.25;
+		margin: 0;
+		padding: 0;
+		/* Box-drawing frames must never soft-wrap. */
+		white-space: pre;
+	}
+</style>

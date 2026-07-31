@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" role="img" aria-label="revision">
+  <rect width="128" height="128" rx="28" fill="#141d2b"/>
+  <rect x="1.5" y="1.5" width="125" height="125" rx="26.5" fill="none" stroke="#313f55" stroke-width="3"/>
+  <polygon points="24,64 46,40 104,40 104,88 46,88" fill="#9fef00"/>
+  <circle cx="54" cy="64" r="6" fill="#141d2b"/>
+  <g fill="none" stroke="#141d2b" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke-width="11">
+      <path d="M62,50 L62,82"/>
+      <path d="M62,62 C63,52 70,50 77,55"/>
+    </g>
+    <g stroke-width="6.5">
+      <line x1="85" y1="50" x2="94" y2="50"/>
+      <line x1="100" y1="56" x2="100" y2="64"/>
+      <line x1="100" y1="68" x2="100" y2="76"/>
+    </g>
+  </g>
+</svg>

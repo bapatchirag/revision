@@ -1,0 +1,10 @@
+{
+  "logLimit": 100,
+  "editor": "native",
+  "theme": "cipher",
+  "directoryDiff": true,
+  "hideUntracked": false,
+  "sshKeyPath": "~/.ssh/id_rsa",
+  "displayFrom": "cwd",
+  "diffOutputDir": ""
+}

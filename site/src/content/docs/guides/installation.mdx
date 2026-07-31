@@ -1,0 +1,100 @@
+---
+title: Installation
+description: Install the revision binary on Linux or macOS.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+`revision` is a single self-contained binary with no runtime dependencies beyond the
+[`svn` client](/guides/requirements/) it drives.
+
+## Quick install
+
+<Tabs>
+<TabItem label="curl">
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/bapatchirag/revision/main/install.sh | sh
+```
+
+</TabItem>
+<TabItem label="wget">
+
+```sh
+wget -qO- https://raw.githubusercontent.com/bapatchirag/revision/main/install.sh | sh
+```
+
+</TabItem>
+</Tabs>
+
+The script detects your OS and architecture, downloads the matching binary from the
+latest release, and installs it without `sudo`.
+
+:::caution[Read before you pipe]
+Piping a remote script into a shell runs whatever that URL serves. Fetch
+[`install.sh`](https://github.com/bapatchirag/revision/blob/main/install.sh) and read it
+first if that matters to you — it is about 80 lines.
+:::
+
+### Where it installs
+
+The script picks the first of these that applies:
+
+1. `$REVISION_INSTALL_DIR`, if you set it.
+2. `/usr/local/bin`, if it is writable without `sudo`.
+3. `~/.local/bin`, created if needed.
+
+If the chosen directory is not on your `PATH`, the script says so at the end. Add it to
+your shell profile and reopen the shell.
+
+### Environment variables
+
+| Variable | Effect |
+|---|---|
+| `REVISION_VERSION` | Install a specific release tag instead of the latest, e.g. `REVISION_VERSION=v1.4.0`. |
+| `REVISION_INSTALL_DIR` | Install to this directory instead of the default search order. |
+
+```sh
+REVISION_INSTALL_DIR="$HOME/bin" REVISION_VERSION=v1.4.0 \
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/bapatchirag/revision/main/install.sh)"
+```
+
+## With Go
+
+```sh
+go install github.com/bapatchirag/revision/cmd/revision@latest
+```
+
+This is the fallback for any platform without a prebuilt binary. Builds produced this way
+are development builds: they never check for or apply
+[self-updates](/operations/updating-revision/).
+
+## Prebuilt binaries
+
+Download the binary for your platform from the
+[Releases](https://github.com/bapatchirag/revision/releases) page, make it executable, and
+put it on your `PATH`:
+
+```sh
+chmod +x revision-darwin-arm64
+mv revision-darwin-arm64 /usr/local/bin/revision
+```
+
+Releases are published for `darwin-arm64` and `linux-amd64`.
+
+## From source
+
+See [Building from source](/develop/building/) if you want to compile the tree yourself.
+
+## Verify
+
+```sh
+revision --version
+```
+
+If the shell cannot find the command, the install directory is not on your `PATH` — see
+[Troubleshooting](/operations/troubleshooting/#revision-command-not-found-after-install).
+
+## Next
+
+Run it inside a working copy: [Quick start](/guides/quick-start/).

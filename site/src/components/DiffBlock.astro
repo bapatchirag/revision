@@ -1,0 +1,95 @@
+---
+/**
+ * A unified-diff excerpt: `+` / `-` / `@@` rows with tinted backgrounds.
+ *
+ * Added rows deliberately keep --rv-text for their content and carry the lime
+ * only in the gutter marker and left rule. Links use the same #9fef00 as body
+ * text, so additions must read by tint and weight, never by hue alone.
+ */
+interface Props {
+	/** Raw unified diff text. */
+	diff: string;
+	/** Optional path shown as a header row. */
+	file?: string;
+}
+
+const { diff, file } = Astro.props;
+
+type Kind = 'add' | 'del' | 'hunk' | 'meta' | 'context';
+
+const kindOf = (line: string): Kind => {
+	if (line.startsWith('@@')) return 'hunk';
+	if (line.startsWith('+++') || line.startsWith('---')) return 'meta';
+	if (line.startsWith('+')) return 'add';
+	if (line.startsWith('-')) return 'del';
+	return 'context';
+};
+
+const rows = diff
+	.replace(/\n$/, '')
+	.split('\n')
+	// The trailing newline lives in the text so the block copy-pastes correctly.
+	.map((line) => ({ text: (line || ' ') + '\n', kind: kindOf(line) }));
+---
+
+<div class="rv-frame rv-diff">
+	{file && <span class="rv-frame__label rv-frame__label--top">{file}</span>}
+	<div class="rv-diff__clip"><pre><code>{rows.map((row) => (<span class="rv-diff__row" data-kind={row.kind}>{row.text}</span>))}</code></pre></div>
+</div>
+
+<style>
+	.rv-diff {
+		margin-block: 1.5rem;
+	}
+
+	/* Row tints run edge to edge, so they need clipping the frame cannot do. */
+	.rv-diff__clip {
+		border-radius: calc(var(--rv-radius) - 1px);
+		overflow: hidden;
+	}
+
+	.rv-diff pre {
+		margin: 0;
+		overflow-x: auto;
+		padding: 0.75rem 0;
+	}
+
+	.rv-diff code {
+		display: block;
+		font-family: var(--rv-font-code);
+		line-height: 1.6;
+		min-width: max-content;
+	}
+
+	.rv-diff__row {
+		border-inline-start: 3px solid transparent;
+		color: var(--rv-text);
+		display: block;
+		padding-inline: calc(1.25rem - 3px) 1.25rem;
+		white-space: pre;
+	}
+
+	.rv-diff__row[data-kind='add'] {
+		background-color: var(--rv-add-bg);
+		border-inline-start-color: var(--rv-add-gutter);
+		font-weight: 700;
+	}
+
+	.rv-diff__row[data-kind='del'] {
+		background-color: var(--rv-del-bg);
+		border-inline-start-color: var(--rv-del-gutter);
+	}
+
+	.rv-diff__row[data-kind='hunk'] {
+		background-color: var(--rv-hunk-bg);
+		color: var(--rv-info);
+	}
+
+	.rv-diff__row[data-kind='meta'] {
+		color: var(--rv-muted);
+	}
+
+	.rv-diff__row[data-kind='context'] {
+		color: var(--rv-text-secondary);
+	}
+</style>
