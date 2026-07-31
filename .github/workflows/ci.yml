@@ -21,10 +21,12 @@ jobs:
         run: go vet ./...
       - name: Test
         run: go test ./...
-      - name: Cross-compile both targets
+      - name: Cross-compile every release target
         run: |
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null ./cmd/revision
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./cmd/revision
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./cmd/revision
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null ./cmd/revision
 
   lint:
     runs-on: ubuntu-latest
