@@ -4,6 +4,7 @@ description: Group work into named SVN changelists and commit them as a unit.
 ---
 
 import AppScreen from '../../../components/AppScreen.astro';
+import DemoVideo from '../../../components/DemoVideo.astro';
 import KeyCap from '../../../components/KeyCap.astro';
 
 A changelist is a native SVN feature: a name attached to a set of paths in the working
@@ -48,13 +49,18 @@ changelist as one patch. The panel footer counts the groups.
 ## Drilling into a list
 
 <KeyCap key="enter" /> opens a changelist as its own file tree. The panel border takes the
-list's name, and the hint bar changes to match:
-
-<AppScreen golden="TestChangelistDrillHeaderGolden" />
+list's name, and the hint bar changes to match.
 
 Inside a drilled-in list you can move around, read each file's diff, unstage with
 <KeyCap key="space" />, and commit with <KeyCap key="c" />. <KeyCap key="esc" /> goes back
 to the overview.
+
+<DemoVideo
+	name="changelists"
+	width={1200}
+	height={700}
+	label="Staging a directory, naming the staged set feature-health, turning the Files panel to the Changelists view, and drilling into the list and back out"
+/>
 
 ## Committing a changelist
 

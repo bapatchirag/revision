@@ -4,6 +4,7 @@ description: How revision emulates a staging index on top of SVN, and how to com
 ---
 
 import AppScreen from '../../../components/AppScreen.astro';
+import DemoVideo from '../../../components/DemoVideo.astro';
 import KeyCap from '../../../components/KeyCap.astro';
 
 ## How staging works
@@ -42,6 +43,13 @@ Files that are ignored or clean are skipped. The root `/` row covers the whole t
 Step 2 removes files from *any* changelist, not just the staged bucket — the same as
 pressing <KeyCap key="space" /> on a single file.
 
+<DemoVideo
+	name="staging"
+	width={1200}
+	height={700}
+	label="Staging a single file with space and unstaging it again, then staging a whole directory subtree, then the root row staging every pending change including the untracked files"
+/>
+
 ## Reviewing before you commit
 
 Staged files carry a green `●` in the Changes tree. Switch to the Changelists view with
@@ -60,12 +68,8 @@ Other ways to check your work before committing:
 
 ## Committing
 
-Press <KeyCap key="c" />. An inline message editor opens:
-
-<AppScreen golden="TestCommitEditorGolden" />
-
-<KeyCap key="ctrl+s" /> submits, <KeyCap key="esc" /> cancels. What gets committed depends
-on where you are:
+Press <KeyCap key="c" />. An inline message editor opens. <KeyCap key="ctrl+s" /> submits,
+<KeyCap key="esc" /> cancels. What gets committed depends on where you are:
 
 | Where | What is committed |
 |---|---|
@@ -77,6 +81,13 @@ An empty message is rejected — SVN requires one. The result appears as a toast
 `svn commit` invocation is recorded in the [Command Log](/guides/panels/#command-log).
 Status and history reload automatically, so the committed files leave the tree and the new
 revision appears at the top of the Log panel.
+
+<DemoVideo
+	name="commit"
+	width={1200}
+	height={700}
+	label="Staging a directory, writing a commit message in the inline editor, submitting with ctrl+s, and the new revision appearing in the Log panel and the svn Command Log"
+/>
 
 ## Undoing
 

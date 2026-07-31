@@ -3,7 +3,7 @@ title: Working with diffs
 description: Read, compare, and save the diffs revision shows in the Main panel.
 ---
 
-import AppScreen from '../../../components/AppScreen.astro';
+import DemoVideo from '../../../components/DemoVideo.astro';
 import DiffBlock from '../../../components/DiffBlock.astro';
 import KeyCap from '../../../components/KeyCap.astro';
 
@@ -52,9 +52,7 @@ Main shows the combined diff of the whole list.
 ## Reading a diff side by side
 
 <KeyCap key="s" /> reopens the diff Main is showing as a two-pane comparison in a centered
-overlay:
-
-<AppScreen golden="TestSplitDiffGolden" />
+overlay.
 
 - Each removal sits opposite the addition that replaced it; context lines appear on both
   sides.
@@ -68,6 +66,13 @@ overlay:
 - The layout behind dims out of the way while you read.
 
 <KeyCap key="s" /> or <KeyCap key="esc" /> closes the overlay.
+
+<DemoVideo
+	name="split-diff"
+	width={1200}
+	height={700}
+	label="Opening the whole working copy's diff side by side from the root row, scrolling both panes together, and paging between files with the bracket keys"
+/>
 
 If Main has no diff to show — a directory row with directory diffs off, or a failed load —
 a toast says so rather than opening an empty overlay.
@@ -91,6 +96,13 @@ directory.
 Files land in [`diffOutputDir`](/reference/configuration/#diffoutputdir), which is created
 if it does not exist. Empty — the default — means the working copy's root, and a leading
 `~` is expanded to your home directory.
+
+<DemoVideo
+	name="save-diff"
+	width={1200}
+	height={700}
+	label="Writing a directory's combined diff to a file with w, accepting the suggested name, and finding the saved patch in the Diffs view"
+/>
 
 ## The Diffs view
 

@@ -4,6 +4,7 @@ description: Move the working copy to HEAD, or to any revision in the Log panel.
 ---
 
 import AppScreen from '../../../components/AppScreen.astro';
+import DemoVideo from '../../../components/DemoVideo.astro';
 import KeyCap from '../../../components/KeyCap.astro';
 
 ## To the latest revision
@@ -19,6 +20,13 @@ to put the working copy at an older revision.
 
 The asterisk in the Log panel marks where the working copy currently sits, so you can see
 what you are moving from.
+
+<DemoVideo
+	name="update"
+	width={1200}
+	height={700}
+	label="Moving the working copy back to an older revision from the Log panel with space, then catching it back up to HEAD with u, with both invocations recorded in the Command Log"
+/>
 
 ## What happens to your changes
 
