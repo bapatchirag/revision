@@ -48,7 +48,9 @@ jobs:
           gh release download "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --pattern 'revision-darwin-arm64' \
+            --pattern 'revision-darwin-amd64' \
             --pattern 'revision-linux-amd64' \
+            --pattern 'revision-linux-arm64' \
             --dir dist
 
       - name: Prepare extension
@@ -59,7 +61,7 @@ jobs:
           cp ../LICENSE LICENSE
           npm version "${{ steps.meta.outputs.version }}" --no-git-tag-version --allow-same-version
 
-      - name: Publish platform-specific and universal VSIXes
+      - name: Publish platform-specific VSIXes
         working-directory: extension
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
@@ -72,17 +74,12 @@ jobs:
 
           mkdir -p bin
 
-          # macOS (Apple Silicon)
-          cp ../dist/revision-darwin-arm64 bin/revision && chmod +x bin/revision
-          npx --yes @vscode/vsce@latest publish --target darwin-arm64 -p "$VSCE_PAT"
-
-          # Linux (x64)
-          cp ../dist/revision-linux-amd64 bin/revision && chmod +x bin/revision
-          npx --yes @vscode/vsce@latest publish --target linux-x64 -p "$VSCE_PAT"
-
-          # Universal fallback (no bundled binary; resolves from PATH)
-          rm -rf bin
-          npx --yes @vscode/vsce@latest publish -p "$VSCE_PAT"
+          # asset:vsce-target — vsce names x86-64 "x64", not "amd64".
+          for pair in darwin-arm64:darwin-arm64 darwin-amd64:darwin-x64 \
+                      linux-amd64:linux-x64 linux-arm64:linux-arm64; do
+            cp "../dist/revision-${pair%%:*}" bin/revision && chmod +x bin/revision
+            npx --yes @vscode/vsce@latest publish --target "${pair##*:}" -p "$VSCE_PAT"
+          done
 
       - name: Publish to Open VSX (optional)
         working-directory: extension
@@ -97,14 +94,9 @@ jobs:
 
           mkdir -p bin
 
-          # macOS (Apple Silicon)
-          cp ../dist/revision-darwin-arm64 bin/revision && chmod +x bin/revision
-          npx --yes ovsx publish --target darwin-arm64 -p "$OVSX_PAT"
-
-          # Linux (x64)
-          cp ../dist/revision-linux-amd64 bin/revision && chmod +x bin/revision
-          npx --yes ovsx publish --target linux-x64 -p "$OVSX_PAT"
-
-          # Universal fallback (no bundled binary; resolves from PATH)
-          rm -rf bin
-          npx --yes ovsx publish -p "$OVSX_PAT"
+          # asset:ovsx-target — ovsx names x86-64 "x64", not "amd64".
+          for pair in darwin-arm64:darwin-arm64 darwin-amd64:darwin-x64 \
+                      linux-amd64:linux-x64 linux-arm64:linux-arm64; do
+            cp "../dist/revision-${pair%%:*}" bin/revision && chmod +x bin/revision
+            npx --yes ovsx publish --target "${pair##*:}" -p "$OVSX_PAT"
+          done
