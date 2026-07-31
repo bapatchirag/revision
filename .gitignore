@@ -2,8 +2,8 @@
 /bin/
 /dist/
 /revision
-revision-darwin-arm64
-revision-linux-amd64
+revision-darwin-*
+revision-linux-*
 *.exe
 *.test
 *.out
@@ -13,22 +13,13 @@ coverage.html
 # Go
 vendor/
 
-# Node / VS Code extension
+# Node
 node_modules/
-extension/node_modules/
-extension/out/
-*.vsix
 
 # Documentation site (Astro)
 site/node_modules/
 site/dist/
 site/.astro/
-
-# Bundled binaries (populated by CI at package time)
-extension/bin/
-
-# Generated Marketplace README (copied from root at package time)
-extension/README.md
 
 # Local-only working docs
 /PLAN.md

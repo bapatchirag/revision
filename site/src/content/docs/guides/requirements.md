@@ -40,13 +40,15 @@ it is not. Both ship with OpenSSH and are normally already present. See
 | Platform | Support |
 |---|---|
 | macOS, Apple silicon (`darwin-arm64`) | Prebuilt binary |
+| macOS, Intel (`darwin-amd64`) | Prebuilt binary |
 | Linux, x86-64 (`linux-amd64`) | Prebuilt binary |
+| Linux, 64-bit ARM (`linux-arm64`) | Prebuilt binary |
 | Other Unix-like targets | Build from source with Go |
 | Windows | Not supported |
 
-The [install script](/guides/installation/) only serves the two prebuilt targets and
-tells you to build from source on anything else. Anywhere else Go and `svn` both run,
-`go install` should work — but it is not tested there.
+The [install script](/guides/installation/) serves exactly those four targets and rejects
+any other OS or architecture by name. Anywhere else Go and `svn` both run, `go install`
+should work — but it is not tested there.
 
 ## Terminal
 

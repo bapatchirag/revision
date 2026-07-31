@@ -22,30 +22,43 @@ If that fails, install Subversion — `brew install subversion` on macOS,
 
 If `svn --version` works in your shell but `revision` still cannot find it, `revision` is
 running with a different `PATH`. That usually means it was launched from a GUI or an
-editor rather than a login shell — the [VS Code extension](/reference/vscode-extension/)
-inherits the terminal's `PATH`, but a desktop launcher may not.
+editor rather than a login shell — an integrated terminal inherits the shell's `PATH`, but
+a desktop launcher may not.
 
 ## The install script says my platform is unsupported
 
 ```text
 install.sh: unsupported OS: freebsd
 install.sh: unsupported architecture: armv7l
-install.sh: no prebuilt binary for linux-arm64. Build from source instead:
-    go install github.com/bapatchirag/revision/cmd/revision@latest
 ```
 
-Prebuilt binaries exist for `darwin-arm64` and `linux-amd64` only. Everywhere else,
-build from source:
+Prebuilt binaries exist for macOS on Apple silicon and Intel, and for Linux on x86-64 and
+64-bit ARM. Everywhere else, build from source:
 
 ```sh
 go install github.com/bapatchirag/revision/cmd/revision@latest
 ```
 
-That covers Intel Macs, ARM Linux, and anything else Go targets. Note that builds produced
-this way never [self-update](/operations/updating-revision/) — re-run `go install` to
-upgrade.
+That covers anything else Go targets. Note that builds produced this way never
+[self-update](/operations/updating-revision/) — re-run `go install` to upgrade.
 
 Windows is not supported at all.
+
+## The install script cannot download the binary
+
+```text
+install.sh: download failed: https://github.com/bapatchirag/revision/releases/download/v1.3.0/revision-linux-arm64
+    This release may not include revision-linux-arm64. Build from source instead:
+    go install github.com/bapatchirag/revision/cmd/revision@latest
+```
+
+The platform is supported, but the release the script asked for carries no asset for it.
+The usual cause is `REVISION_VERSION` pinned to an older tag: releases through v1.3.0
+published only `revision-darwin-arm64` and `revision-linux-amd64`. Drop the pin to take the
+latest release, or build from source as the message suggests.
+
+The same message appears when the download itself fails — a proxy, a rate limit, no
+network. Retry once before concluding the asset is missing.
 
 ## `revision`: command not found after install
 

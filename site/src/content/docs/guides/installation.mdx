@@ -80,7 +80,18 @@ chmod +x revision-darwin-arm64
 mv revision-darwin-arm64 /usr/local/bin/revision
 ```
 
-Releases are published for `darwin-arm64` and `linux-amd64`.
+Each release publishes four assets:
+
+| Asset | Platform |
+|---|---|
+| `revision-darwin-arm64` | macOS, Apple silicon |
+| `revision-darwin-amd64` | macOS, Intel |
+| `revision-linux-amd64` | Linux, x86-64 |
+| `revision-linux-arm64` | Linux, 64-bit ARM |
+
+Releases through v1.3.0 published only `revision-darwin-arm64` and `revision-linux-amd64`,
+so pinning `REVISION_VERSION` to one of those tags on the other two platforms leaves
+[building with Go](#with-go) as the only option.
 
 ## From source
 

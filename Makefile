@@ -7,7 +7,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 # Every tape in docs/tapes except the settings-and-setup fragment they all source.
 TAPES   := $(filter-out docs/tapes/common.tape,$(wildcard docs/tapes/*.tape))
 
-.PHONY: all build run run-gallery site-data site-build site-dev demos test cover vet fmt lint tidy cross build-darwin build-linux clean
+.PHONY: all build run run-gallery site-data site-build site-dev demos test cover vet fmt lint tidy cross build-darwin-arm64 build-darwin-amd64 build-linux-amd64 build-linux-arm64 clean
 
 all: build
 
@@ -65,16 +65,24 @@ lint:
 tidy:
 	go mod tidy
 
-## build-darwin: static macOS arm64 binary into ./dist
-build-darwin:
+## build-darwin-arm64: static macOS arm64 binary into ./dist
+build-darwin-arm64:
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags '$(LDFLAGS)' -o $(DIST)/$(BINARY)-darwin-arm64 $(PKG)
 
-## build-linux: static Linux amd64 binary into ./dist
-build-linux:
+## build-darwin-amd64: static macOS amd64 binary into ./dist
+build-darwin-amd64:
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags '$(LDFLAGS)' -o $(DIST)/$(BINARY)-darwin-amd64 $(PKG)
+
+## build-linux-amd64: static Linux amd64 binary into ./dist
+build-linux-amd64:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags '$(LDFLAGS)' -o $(DIST)/$(BINARY)-linux-amd64 $(PKG)
 
-## cross: build both release binaries
-cross: build-darwin build-linux
+## build-linux-arm64: static Linux arm64 binary into ./dist
+build-linux-arm64:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags '$(LDFLAGS)' -o $(DIST)/$(BINARY)-linux-arm64 $(PKG)
+
+## cross: build every release binary
+cross: build-darwin-arm64 build-darwin-amd64 build-linux-amd64 build-linux-arm64
 
 ## clean: remove build artifacts
 clean:
