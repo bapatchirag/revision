@@ -63,7 +63,7 @@ SVN's command line is powerful but verbose for day-to-day work. `revision` wraps
 curl -fsSL https://raw.githubusercontent.com/bapatchirag/revision/main/install.sh | sh
 ```
 
-The script detects your OS and architecture, downloads the matching binary from the latest release, and installs it without `sudo` (falling back to `~/.local/bin`).
+The script detects your OS and architecture, downloads the matching binary from the latest release, and installs it without `sudo` (falling back to `~/.local/bin`). Prebuilt binaries cover macOS on Apple silicon and Intel, and Linux on x86-64 and 64-bit ARM.
 
 ### With Go
 
@@ -73,7 +73,7 @@ go install github.com/bapatchirag/revision/cmd/revision@latest
 
 ### Prebuilt binaries
 
-Download the binary for your platform from the [Releases](https://github.com/bapatchirag/revision/releases) page and put it on your `PATH`.
+Download the binary for your platform from the [Releases](https://github.com/bapatchirag/revision/releases) page and put it on your `PATH`. Each release publishes `revision-darwin-arm64`, `revision-darwin-amd64`, `revision-linux-amd64` and `revision-linux-arm64`.
 
 ### Updating
 
