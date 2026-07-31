@@ -4,6 +4,10 @@ description: A lazygit-style terminal UI for Subversion (SVN). Review changes, s
 template: splash
 editUrl: false
 lastUpdated: false
+head:
+  # Without this the page title and the site title collide as "revision | revision".
+  - tag: title
+    content: revision — a lazygit-style TUI for Subversion (SVN)
 hero:
   tagline: A lazygit-style terminal UI for Subversion
   # Frontmatter is not Markdown, so these carry the base themselves.
@@ -11,7 +15,9 @@ hero:
     - text: Get started
       link: /revision/guides/quick-start/
       variant: primary
-    - text: GitHub
+    # Splash pages have no mobile menu and hide the header's social area below
+    # 50rem, so this is the star link on a phone.
+    - text: Star on GitHub
       link: https://github.com/bapatchirag/revision
       variant: secondary
     - text: VS Code extension

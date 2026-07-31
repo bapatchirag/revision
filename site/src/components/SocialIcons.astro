@@ -1,0 +1,61 @@
+---
+/**
+ * Starlight SocialIcons override — the configured social links, plus the
+ * GitHub repository actions. Starlight renders this slot in the site header
+ * and in the mobile menu footer, so the links are on every page at every
+ * width.
+ *
+ * Plain links rather than the buttons.github.io widget: that injects a
+ * cross-origin iframe carrying GitHub's own CSS, which cannot pick up the
+ * Cipher tokens, and it points at these same URLs anyway.
+ */
+import Default from '@astrojs/starlight/components/SocialIcons.astro';
+
+const REPO = 'https://github.com/bapatchirag/revision';
+const OWNER = 'https://github.com/bapatchirag';
+
+const actions = [
+	{ text: 'Star', href: REPO, label: 'Star revision on GitHub' },
+	{ text: 'Fork', href: `${REPO}/fork`, label: 'Fork revision on GitHub' },
+	{ text: 'Watch', href: `${REPO}/subscription`, label: 'Watch revision on GitHub' },
+	{ text: 'Follow', href: OWNER, label: 'Follow bapatchirag on GitHub' },
+];
+---
+
+<Default />
+
+<div class="rv-gh">
+	{
+		actions.map(({ text, href, label }) => (
+			<a class="rv-gh__action" {href} aria-label={label}>
+				{text}
+			</a>
+		))
+	}
+</div>
+
+<style>
+	.rv-gh {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.rv-gh__action {
+		border: 1px solid var(--rv-border);
+		border-radius: 4px;
+		color: var(--rv-text-secondary);
+		font-family: var(--rv-font-chrome);
+		font-size: var(--sl-text-xs);
+		line-height: 1;
+		padding: 0.35rem 0.6rem;
+		text-decoration: none;
+		white-space: nowrap;
+	}
+
+	.rv-gh__action:hover,
+	.rv-gh__action:focus-visible {
+		border-color: var(--rv-border-focused);
+		color: var(--rv-accent);
+	}
+</style>
