@@ -41,7 +41,7 @@ release:
 changelog:
   use: github
   abbrev: -1
-  format: "{{ .Message }}{{ with .Author.Username }} (@{{ . }}){{ end }}"
+  format: "{{ .Message }}{{ with .Logins }} ({{ englishJoin . }}){{ end }}"
   filters:
     exclude:
       - '^[Mm]erge branch '
