@@ -111,6 +111,9 @@ func run(path string, build selfupdate.Build) error {
 	theme.ApplyColorProfile(cfg.Theme)
 
 	model := app.New(client, info, build, cfg)
+	// Every return path below leaves the session purged and any svn command
+	// still in flight abandoned.
+	defer model.Close()
 	model.SetStartupNotice(rec.Notice())
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	final, err := program.Run()

@@ -186,7 +186,8 @@ func (m *Model) resetForSource() {
 	if m.info != nil {
 		m.wcRevision = m.info.Revision
 	}
-	m.diffPath, m.diffText, m.diffErr = "", "", false
+	m.session.Purge()
+	m.clearDiff()
 	m.savedDiffItems, m.savedDiffsErr = nil, nil
 	m.savedPath, m.savedText, m.savedErr = "", "", false
 	for p := range m.filters {

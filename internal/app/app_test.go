@@ -240,6 +240,149 @@ func TestDiffRefreshKeepsMainScroll(t *testing.T) {
 	}
 }
 
+// TestDiffCacheServesRevisitedFile walks alpha → beta → alpha and asserts the
+// third selection costs no svn command: the session still holds alpha's diff, so
+// it renders on the same frame.
+func TestDiffCacheServesRevisitedFile(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "alpha.txt", State: svn.StateModified},
+		{Path: "beta.txt", State: svn.StateModified},
+	})
+	move := func(k tea.KeyType) tea.Cmd {
+		t.Helper()
+		next, cmd := m.Update(tea.KeyMsg{Type: k})
+		m = next.(*Model)
+		if cmd == nil {
+			t.Fatal("expected a selection command after moving the cursor")
+		}
+		next, cmd = m.Update(cmd())
+		m = next.(*Model)
+		return cmd
+	}
+
+	// alpha is selected on load; its diff arrives and is cached.
+	next, _ := m.Update(diffLoadedMsg{path: "alpha.txt", diff: "@@ -1 +1 @@\n+alpha body"})
+	m = next.(*Model)
+
+	// beta has never been looked at, so it has to be fetched.
+	if cmd := move(tea.KeyDown); cmd == nil {
+		t.Fatal("expected a diff load for a file that has not been seen")
+	}
+	next, _ = m.Update(diffLoadedMsg{path: "beta.txt", diff: "@@ -1 +1 @@\n+beta body"})
+	m = next.(*Model)
+
+	if cmd := move(tea.KeyUp); cmd != nil {
+		t.Error("returning to alpha should be answered from the session, with no svn command")
+	}
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "+alpha body") {
+		t.Errorf("main should show the cached diff immediately, got:\n%s", main)
+	}
+}
+
+// TestCachedDiffSupersedesLoadInFlight covers the load left running when the
+// cursor lands on a row the session can answer: its reply is for the row just
+// left, so it must be dropped rather than replace what is on screen.
+func TestCachedDiffSupersedesLoadInFlight(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "alpha.txt", State: svn.StateModified},
+		{Path: "beta.txt", State: svn.StateModified},
+	})
+	move := func(k tea.KeyType) {
+		t.Helper()
+		next, cmd := m.Update(tea.KeyMsg{Type: k})
+		m = next.(*Model)
+		if cmd == nil {
+			t.Fatal("expected a selection command after moving the cursor")
+		}
+		next, _ = m.Update(cmd())
+		m = next.(*Model)
+	}
+
+	next, _ := m.Update(diffLoadedMsg{path: "alpha.txt", diff: "@@ -1 +1 @@\n+alpha body"})
+	m = next.(*Model)
+
+	move(tea.KeyDown) // beta: not cached, so a load is now in flight
+	inFlight := m.diffGen.gen
+	move(tea.KeyUp) // alpha: answered from the session before beta replies
+
+	next, _ = m.Update(diffLoadedMsg{path: "beta.txt", diff: "+beta body", gen: inFlight})
+	m = next.(*Model)
+	main := stripANSI(m.main.View())
+	if strings.Contains(main, "beta body") || strings.Contains(main, "Loading diff") {
+		t.Errorf("a reply superseded by a cache hit must be dropped, got:\n%s", main)
+	}
+	if !strings.Contains(main, "+alpha body") {
+		t.Errorf("main should still show the cached diff, got:\n%s", main)
+	}
+}
+
+// TestStatusReloadKeepsDiffOnScreen covers the reload that follows every
+// mutation: when it reports the same working copy, the diff already on screen is
+// still the right one and must neither blank nor be fetched again.
+func TestStatusReloadKeepsDiffOnScreen(t *testing.T) {
+	items := []svn.StatusItem{{Path: "alpha.txt", State: svn.StateModified}}
+	m := loadItems(t, sizedModel(t), items)
+	next, _ := m.Update(diffLoadedMsg{path: "alpha.txt", diff: "@@ -1 +1 @@\n+alpha body"})
+	m = next.(*Model)
+
+	next, cmd := m.Update(statusLoadedMsg{items: items})
+	m = next.(*Model)
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "+alpha body") {
+		t.Errorf("a status reload should not blank the diff on screen, got:\n%s", main)
+	}
+	if cmd != nil {
+		t.Error("expected no diff load after a reload that changed nothing")
+	}
+}
+
+// TestStatusReloadDropsDiffThatMoved is the other half: when the reload reports
+// a file whose state changed, the cached diff no longer describes it, so it
+// clears and is fetched afresh.
+func TestStatusReloadDropsDiffThatMoved(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "alpha.txt", State: svn.StateModified},
+	})
+	next, _ := m.Update(diffLoadedMsg{path: "alpha.txt", diff: "@@ -1 +1 @@\n+alpha body"})
+	m = next.(*Model)
+
+	next, cmd := m.Update(statusLoadedMsg{items: []svn.StatusItem{
+		{Path: "alpha.txt", State: svn.StateModified, Changelist: stagedChangelist},
+	}})
+	m = next.(*Model)
+	if cmd == nil {
+		t.Fatal("expected the moved file's diff to be loaded again")
+	}
+	if main := stripANSI(m.main.View()); strings.Contains(main, "+alpha body") {
+		t.Errorf("a diff the status moved out from under should not be served, got:\n%s", main)
+	}
+}
+
+// TestModelCloseReleasesSession proves the exit path leaves nothing retained,
+// and that closing twice is harmless.
+func TestModelCloseReleasesSession(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "alpha.txt", State: svn.StateModified},
+	})
+	next, _ := m.Update(diffLoadedMsg{path: "alpha.txt", diff: "@@ -1 +1 @@\n+alpha body"})
+	m = next.(*Model)
+	if m.session.diffs.Len() == 0 {
+		t.Fatal("expected the loaded diff to be cached")
+	}
+
+	m.Close()
+	m.Close()
+
+	if n := m.session.diffs.Len(); n != 0 {
+		t.Errorf("session holds %d diffs after Close, want 0", n)
+	}
+	if m.fileItems != nil || m.clItems != nil || m.logEntries != nil || m.savedDiffItems != nil {
+		t.Error("Close should release the retained working-copy content")
+	}
+	if m.diffPath != "" || m.diffText != "" || m.mainText != "" {
+		t.Error("Close should release the diff and rendered content on screen")
+	}
+}
+
 func TestDirectoryDiffLoadsIntoMain(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "src/a.go", State: svn.StateModified},
@@ -256,6 +399,7 @@ func TestDirectoryDiffLoadsIntoMain(t *testing.T) {
 	// When it arrives, Main shows the diff of every file under the directory.
 	next, _ := m.Update(diffLoadedMsg{
 		path: "src",
+		dir:  true,
 		diff: "Index: src/a.go\n@@ -1 +1 @@\n+alpha\nIndex: src/b.go\n@@ -1 +1 @@\n+beta",
 	})
 	m = next.(*Model)
@@ -283,6 +427,7 @@ func TestRootDirectoryDiffCoversWholeWorkingCopy(t *testing.T) {
 	// it; it spans changes anywhere in the working copy, nested or not.
 	next, _ := m.Update(diffLoadedMsg{
 		path: fileTreeRoot,
+		dir:  true,
 		diff: "Index: readme.md\n@@ -1 +1 @@\n+top\nIndex: src/a.go\n@@ -1 +1 @@\n+nested",
 	})
 	m = next.(*Model)
@@ -330,6 +475,7 @@ func TestToggleDirDiffRevealsDirectoryDiff(t *testing.T) {
 	// When the diff arrives, Main shows it.
 	next, _ = m.Update(diffLoadedMsg{
 		path: "src",
+		dir:  true,
 		diff: "Index: src/a.go\n@@ -1 +1 @@\n+alpha",
 	})
 	m = next.(*Model)
@@ -345,7 +491,7 @@ func TestToggleDirDiffHidesDirectoryDiff(t *testing.T) {
 	})
 	selectDirRow(t, m, "src")
 	// Directory diffs are on by default, so the loaded diff shows in Main.
-	next, _ := m.Update(diffLoadedMsg{path: "src", diff: "Index: src/a.go\n@@ -1 +1 @@\n+alpha"})
+	next, _ := m.Update(diffLoadedMsg{path: "src", dir: true, diff: "Index: src/a.go\n@@ -1 +1 @@\n+alpha"})
 	m = next.(*Model)
 	if main := stripANSI(m.main.View()); !strings.Contains(main, "+alpha") {
 		t.Fatalf("expected the directory diff to show, got:\n%s", main)
@@ -500,7 +646,7 @@ func TestSaveDiffWritesDirectoryDiffAndCreatesOutputDir(t *testing.T) {
 		{Path: "src/b.go", State: svn.StateModified},
 	})
 	selectDirRow(t, m, "src")
-	next, _ := m.Update(diffLoadedMsg{path: "src", diff: "Index: src/a.go\n@@ -1 +1 @@\n+alpha\n"})
+	next, _ := m.Update(diffLoadedMsg{path: "src", dir: true, diff: "Index: src/a.go\n@@ -1 +1 @@\n+alpha\n"})
 	m = next.(*Model)
 
 	_, msg := saveDiffKey(t, m, "")

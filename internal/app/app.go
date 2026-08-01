@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -86,6 +87,11 @@ const settingsFormID = "settings"
 
 // searchBarID identifies the panel filter input on emitted messages.
 const searchBarID = "search"
+
+// diffDebounce is how long the cursor must rest on a selection before its diff
+// is asked of svn, so holding j/k through a tree runs one `svn diff` instead of
+// one per row. A diff already cached is shown immediately, debounce or not.
+const diffDebounce = 90 * time.Millisecond
 
 // mainSource selects which side panel's selection drives the Main viewport.
 type mainSource int
@@ -173,6 +179,12 @@ type Model struct {
 	source   mainSource
 	diffPath string
 	diffText string
+	// diffOfDir records that the diff on screen was produced for a directory row
+	// rather than a file, so it can be matched to its cache entry after the fact.
+	diffOfDir bool
+	// session caches what is reusable for the life of the process — diffs, so
+	// far. It is in-memory only and is emptied by Close.
+	session *sessionStore
 	// diffGen, statusGen, logGen and savedGen stamp the loads whose replies can
 	// be overtaken by a later request, so a superseded reply is dropped instead
 	// of rendered. diffGen covers both diff sources feeding Main — the working
@@ -314,6 +326,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		collapsedDirs:   map[string]bool{},
 		clCollapsedDirs: map[string]bool{},
 		filters:         map[int]string{},
+		session:         newSessionStore(),
 		source:          sourceFiles,
 		dirDiff:         cfg.DirectoryDiff,
 		hideUntracked:   cfg.HideUntracked,
@@ -401,6 +414,25 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// Close ends the session: every svn command still in flight is abandoned, the
+// caches are purged and the content the panels retained is released. It is the
+// counterpart to New and runs on every exit path, including the one that hands
+// off to a self-update. Nothing was written outside the process, so there is
+// nothing to clean up beyond memory. It is safe to call more than once.
+func (m *Model) Close() {
+	m.diffGen.stop()
+	m.statusGen.stop()
+	m.logGen.stop()
+	m.savedGen.stop()
+	m.session.Close()
+	m.clearDiff()
+	m.mainKey, m.mainText = "", ""
+	m.savedPath, m.savedText, m.savedErr = "", "", false
+	m.diffSrc = diffSource{}
+	m.fileItems, m.clItems, m.logEntries, m.savedDiffItems = nil, nil, nil, nil
+	m.cmdLog.clear()
+}
+
 // Update handles messages, global keys, and forwards the rest to the focused
 // panel.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -452,8 +484,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.err = nil
-		m.diffPath, m.diffText = "", ""
 		m.fileItems = msg.items
+		// The status every cached diff was produced against has just been re-read:
+		// keep the diffs it still agrees with and re-derive what is on screen from
+		// them, so a reload no longer blanks a diff it is about to fetch unchanged.
+		m.session.Reconcile(m.diffStamp)
+		m.rederiveDiff()
 		m.rebuildFileTree()
 		m.focusFirstFile()
 		m.rebuildChangelists()
@@ -480,17 +516,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case diffPendingMsg:
+		// The cursor rested long enough for this diff to be worth asking svn for.
+		if m.diffGen.stale(msg.gen) {
+			return m, nil
+		}
+		ctx, gen := m.diffGen.begin(loadTimeout)
+		return m, loadDiffCmd(ctx, m.client, msg.key, gen)
+
 	case diffLoadedMsg:
 		if m.diffGen.stale(msg.gen) {
 			return m, nil
 		}
-		m.diffPath = msg.path
-		m.diffErr = msg.err != nil
+		k := diffKey{path: msg.path, dir: msg.dir}
+		e := diffEntry{text: msg.diff, stamp: m.diffStamp(k)}
 		if msg.err != nil {
-			m.diffText = "Unable to load diff: " + msg.err.Error()
-		} else {
-			m.diffText = msg.diff
+			e.text, e.failed = "Unable to load diff: "+msg.err.Error(), true
 		}
+		m.session.PutDiff(k, e)
+		m.applyDiff(k, e)
 		if m.source == sourceFiles {
 			m.updateMain()
 		}
@@ -576,7 +620,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.showToast("commit complete", component.LevelSuccess)
 		}
-		m.diffPath, m.diffText = "", ""
+		m.clearDiff()
 		m.refreshChrome()
 		// A commit adds a revision at the head of history: show it.
 		m.log.GoTop()
@@ -588,7 +632,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.showToast("reverted "+msg.path, component.LevelSuccess)
-		m.diffPath, m.diffText = "", ""
+		m.clearDiff()
 		return m, m.reloadStatus()
 
 	case deletedMsg:
@@ -597,7 +641,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.showToast("deleted "+msg.path, component.LevelSuccess)
-		m.diffPath, m.diffText = "", ""
+		m.clearDiff()
 		return m, m.reloadStatus()
 
 	case updatedMsg:
@@ -615,7 +659,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.showToast("update complete", component.LevelSuccess)
 		}
-		m.diffPath, m.diffText = "", ""
+		m.clearDiff()
 		m.updateStatus()
 		m.updateBar()
 		// A revision picked in the Log was on the page on screen, so stay there; a
@@ -984,7 +1028,10 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	case key.Matches(k, m.keys.Refresh):
 		m.loading = true
 		m.dismissToast()
-		m.diffPath, m.diffText = "", ""
+		// An explicit refresh asks for fresh data: nothing may be answered from
+		// the session.
+		m.session.Purge()
+		m.clearDiff()
 		m.refreshChrome()
 		return tea.Batch(m.reloadStatus(), m.reloadLogPage(), m.reloadSavedDiffs()), true
 	case key.Matches(k, m.keys.FocusNext):
@@ -1901,7 +1948,8 @@ func (m *Model) submitSettings() tea.Cmd {
 	var reload tea.Cmd
 	if displayChanged {
 		m.retargetDisplay(cfg.DisplayFrom)
-		m.diffPath, m.diffText = "", ""
+		m.session.Purge()
+		m.clearDiff()
 		m.loading = true
 		m.refreshChrome()
 		reload = m.beginInitialLoad()
@@ -2288,9 +2336,62 @@ func (m *Model) reloadStatus() tea.Cmd {
 	return loadStatusCmd(ctx, m.client, gen)
 }
 
-func (m *Model) loadDiff(path string) tea.Cmd {
-	ctx, gen := m.diffGen.begin(loadTimeout)
-	return loadDiffCmd(ctx, m.client, path, gen)
+// loadDiff puts the diff for k on screen. One the session already holds for the
+// working copy's current state is applied on the spot and costs no command; a
+// miss is debounced, so passing over a row does not spawn an svn process for it.
+func (m *Model) loadDiff(k diffKey) tea.Cmd {
+	if e, ok := m.session.Diff(k, m.diffStamp(k)); ok {
+		// Whatever is in flight was for the row just left; its reply must not
+		// land on top of this one.
+		m.diffGen.next()
+		m.applyDiff(k, e)
+		if m.source == sourceFiles {
+			m.updateMain()
+		}
+		return nil
+	}
+	gen := m.diffGen.next()
+	return tea.Tick(diffDebounce, func(time.Time) tea.Msg {
+		return diffPendingMsg{key: k, gen: gen}
+	})
+}
+
+// diffStamp fingerprints the working-copy state a diff of k would be produced
+// from, as the session store's key to whether a cached diff is still good.
+func (m *Model) diffStamp(k diffKey) string {
+	root := ""
+	if m.client != nil {
+		root = m.client.Dir
+	}
+	return diffStampFor(root, m.wcRevision, m.fileItems, k)
+}
+
+// applyDiff puts a loaded (or cached) diff on screen, recording what it was
+// produced for so a later refresh can be told from a move to another selection.
+func (m *Model) applyDiff(k diffKey, e diffEntry) {
+	m.diffPath, m.diffOfDir = k.path, k.dir
+	m.diffText, m.diffErr = e.text, e.failed
+}
+
+// clearDiff drops the diff on screen, so Main falls back to its placeholder
+// until a fresh one lands.
+func (m *Model) clearDiff() {
+	m.diffPath, m.diffText, m.diffErr, m.diffOfDir = "", "", false, false
+}
+
+// rederiveDiff re-reads the diff on screen from the session once the status
+// behind it has moved: one the session still stands behind stays put, and one it
+// dropped clears, so the load that follows fetches it afresh.
+func (m *Model) rederiveDiff() {
+	if m.diffPath == "" {
+		return
+	}
+	k := diffKey{path: m.diffPath, dir: m.diffOfDir}
+	if e, ok := m.session.Diff(k, m.diffStamp(k)); ok {
+		m.applyDiff(k, e)
+		return
+	}
+	m.clearDiff()
 }
 
 func (m *Model) reloadSavedDiffs() tea.Cmd {
@@ -2310,17 +2411,31 @@ func (m *Model) diffLoadForSelection() tea.Cmd {
 	if m.filesViewIsDiffs() {
 		return m.savedDiffLoadForSelection()
 	}
-	if n, _, ok := m.selectedTreeNode(); ok && n.Item == nil {
-		if !m.dirDiff || m.diffPath == n.Path {
-			return nil
-		}
-		return m.loadDiff(n.Path)
-	}
-	it, ok := m.selectedFile()
-	if !ok || !it.State.IsDirty() || m.diffPath == it.Path {
+	k, ok := m.diffSelection()
+	if !ok || m.diffPath == k.path {
+		// There is nothing to fetch, so a load still in flight is for a row that
+		// has been left; its reply must not land on this one.
+		m.diffGen.next()
 		return nil
 	}
-	return m.loadDiff(it.Path)
+	return m.loadDiff(k)
+}
+
+// diffSelection returns the diff the Files selection calls for, or ok=false when
+// it calls for none: no selection, a file with no textual diff, or a directory
+// row while directory diffs are off.
+func (m *Model) diffSelection() (diffKey, bool) {
+	if n, _, ok := m.selectedTreeNode(); ok && n.Item == nil {
+		if !m.dirDiff {
+			return diffKey{}, false
+		}
+		return diffKey{path: n.Path, dir: true}, true
+	}
+	it, ok := m.selectedFile()
+	if !ok || !it.State.IsDirty() {
+		return diffKey{}, false
+	}
+	return diffKey{path: it.Path}, true
 }
 
 // toggleDirDiff flips whether directory rows show their combined diff. It lets a

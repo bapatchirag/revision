@@ -33,12 +33,18 @@ type loadGen struct {
 // and returns the stamp the new request's reply must carry. It is for loads that
 // run no svn command and so have no context to cancel.
 func (g *loadGen) next() uint64 {
+	g.stop()
+	g.gen++
+	return g.gen
+}
+
+// stop abandons the request in flight without opening a new generation, for
+// shutdown, where nothing is waiting for a reply.
+func (g *loadGen) stop() {
 	if g.cancel != nil {
 		g.cancel()
 		g.cancel = nil
 	}
-	g.gen++
-	return g.gen
 }
 
 // begin starts a new generation, returning the context the request runs under
@@ -72,12 +78,23 @@ type errMsg struct{ err error }
 
 func (e errMsg) Error() string { return e.err.Error() }
 
-// diffLoadedMsg carries the result of loading a single file's diff.
+// diffLoadedMsg carries the result of loading a single file's diff. dir marks a
+// diff produced for a directory row — spanning every change beneath it — rather
+// than for one file, so the two can be cached apart.
 type diffLoadedMsg struct {
 	path string
+	dir  bool
 	diff string
 	err  error
 	gen  uint64
+}
+
+// diffPendingMsg fires once the cursor has rested on a selection for
+// diffDebounce, at which point its diff is worth asking svn for. A stamp that
+// has been superseded means the cursor moved on, so the load never runs.
+type diffPendingMsg struct {
+	key diffKey
+	gen uint64
 }
 
 // diffSavedMsg carries the result of writing a diff to disk, along with the
@@ -267,14 +284,14 @@ func loadStatusCmd(ctx context.Context, client *svn.Client, gen uint64) tea.Cmd 
 // the message stays keyed by the original path so the current selection can match
 // it. Diff failures are carried on the message rather than promoted to a fatal
 // error so a single undiffable path never tears down the UI.
-func loadDiffCmd(ctx context.Context, client *svn.Client, path string, gen uint64) tea.Cmd {
-	target := path
+func loadDiffCmd(ctx context.Context, client *svn.Client, k diffKey, gen uint64) tea.Cmd {
+	target := k.path
 	if target == fileTreeRoot {
 		target = ""
 	}
 	return func() tea.Msg {
 		diff, err := client.Diff(ctx, target)
-		return diffLoadedMsg{path: path, diff: diff, err: err, gen: gen}
+		return diffLoadedMsg{path: k.path, dir: k.dir, diff: diff, err: err, gen: gen}
 	}
 }
 

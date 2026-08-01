@@ -78,6 +78,13 @@ func (l *commandLog) seq() int64 {
 	return l.total
 }
 
+// clear drops every retained entry, releasing the log at shutdown.
+func (l *commandLog) clear() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.entries = nil
+}
+
 // syncCommandLog refreshes the command-log viewport from the recorder when a new
 // command has been logged since the last refresh. It is cheap to call on every
 // message: the sequence check skips the rebuild when nothing changed, which also
