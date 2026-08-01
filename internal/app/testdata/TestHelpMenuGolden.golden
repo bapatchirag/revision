@@ -13,7 +13,7 @@
 │       │  Open file in editor        e    Filter panel               /│       │
 │       │  Change source path         P  View                          │       │
 ╰───────│  Refresh / settings     R / S    Switch file view       [ / ]│       │
-╭─ [3] L│                                  Side-by-side / save    s / w│       │
+╭─ [3] L│  Toggle live refresh        L    Side-by-side / save    s / w│       │
 │  Rev A│                                  Dir diff / untracked   D / U│───────╯
 │       │                                  Toggle command log         x│───────╮
 │       │                                General                       │       │

@@ -127,13 +127,6 @@ func (s *sessionStore) PutDiff(k diffKey, e diffEntry) {
 	s.diffs.Put(k, e)
 }
 
-// Reconcile drops every cached diff the working copy has moved out from under,
-// keeping the rest. stamp re-derives the fingerprint a diff of that key would
-// carry now; an entry survives only when it still matches.
-func (s *sessionStore) Reconcile(stamp func(diffKey) string) {
-	s.diffs.DeleteFunc(func(k diffKey, e diffEntry) bool { return e.stamp != stamp(k) })
-}
-
 // LogPage returns a page of history already fetched for k, so paging back over
 // ground already covered costs no command.
 func (s *sessionStore) LogPage(k logKey) (historyPage, bool) { return s.logPages.Get(k) }

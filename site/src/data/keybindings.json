@@ -92,6 +92,15 @@
     "description": "Refresh status and history, or open the settings editor."
   },
   {
+    "section": "Working copy",
+    "action": "Toggle live refresh",
+    "keys": [
+      "L"
+    ],
+    "context": "Global",
+    "description": "Turn background watching of the working copy on or off. While it is on, a change made outside revision reaches the Files and diff panels on its own. The toggle lasts for the session only; `liveRefresh` sets the default."
+  },
+  {
     "section": "Navigation",
     "action": "Jump to panel",
     "keys": [

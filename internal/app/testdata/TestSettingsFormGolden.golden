@@ -13,10 +13,10 @@
 │               │  Display from       cwd                      │               │
 │               │  Diff output                                 │               │
 ╰───────────────│  Optimistic updates on                       │               │
-╭─ [3] Log ─────│                                              │               │
-│  Rev Author Me│ctrl+s save · ↑↓ move · esc cancel            │───────────────╯
-│               ╰──────────────────────────────────────────────╯───────────────╮
-│                              ││No svn commands run yet.                      │
+╭─ [3] Log ─────│  Live refresh       on                       │               │
+│  Rev Author Me│                                              │───────────────╯
+│               │ctrl+s save · ↑↓ move · esc cancel            │───────────────╮
+│               ╰──────────────────────────────────────────────╯               │
 │                              ││                                              │
 │                              ││                                              │
 │                              ││                                              │

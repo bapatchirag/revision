@@ -112,6 +112,11 @@ type Config struct {
 	// the previous state back. When false every action waits for svn before
 	// anything on screen moves.
 	OptimisticUpdates bool `json:"optimisticUpdates"`
+	// LiveRefresh controls whether the working copy is watched in the background,
+	// so a change made outside revision reaches the Files and diff panels without
+	// an explicit refresh. Turn it off on a network filesystem or a very large
+	// working copy, where the periodic scan costs more than it is worth.
+	LiveRefresh bool `json:"liveRefresh"`
 }
 
 // Default returns the configuration used when no file exists yet or when a
@@ -127,6 +132,7 @@ func Default() Config {
 		DisplayFrom:       DisplayFromCWD,
 		DiffOutputDir:     "",
 		OptimisticUpdates: true,
+		LiveRefresh:       true,
 	}
 }
 

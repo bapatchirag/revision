@@ -52,7 +52,6 @@ func TestSessionKeepsDiffWhenNothingMoved(t *testing.T) {
 	s.PutDiff(k, diffEntry{text: "@@ alpha @@", stamp: before(k)})
 
 	// The same status over the same files: a reload must not cost a re-fetch.
-	s.Reconcile(before)
 	if !cachedDiff(s, k, before) {
 		t.Fatal("an unchanged file's diff should survive a status reload")
 	}
@@ -78,7 +77,6 @@ func TestSessionDropsDiffWhenStatusMoves(t *testing.T) {
 		{Path: "b.txt", State: svn.StateModified},
 	}
 	after := stamper(root, "42", staged)
-	s.Reconcile(after)
 
 	if cachedDiff(s, moved, after) {
 		t.Error("a file whose status moved should have been dropped")
@@ -99,7 +97,6 @@ func TestSessionDropsDiffWhenFileLeavesStatus(t *testing.T) {
 
 	// A revert leaves the file clean, so svn status stops reporting it.
 	after := stamper(root, "42", nil)
-	s.Reconcile(after)
 	if cachedDiff(s, k, after) {
 		t.Error("a reverted file's diff should have been dropped")
 	}
@@ -159,7 +156,6 @@ func TestSessionDropsDirectoryDiffWhenAnythingBeneathMoves(t *testing.T) {
 	// diff of src/ (and of the whole working copy) did.
 	grown := append(items, svn.StatusItem{Path: "src/c.go", State: svn.StateUnversioned})
 	after := stamper(root, "42", grown)
-	s.Reconcile(after)
 
 	if cachedDiff(s, src, after) {
 		t.Error("src/ gained a file; its combined diff should have been dropped")
@@ -195,6 +191,39 @@ func TestSessionForgetsFailureAfterTTL(t *testing.T) {
 	})
 	if cachedDiff(s, k, stamp) {
 		t.Error("an expired failure should be forgotten so the diff is tried again")
+	}
+}
+
+// TestStatusLoadLeavesTheCacheAlone locks in what makes a routine reload cheap:
+// with live refresh polling, a status arrival must not walk the cache. Entries
+// are revalidated as they are read instead, so what survives is unchanged and a
+// stale entry is still never served.
+func TestStatusLoadLeavesTheCacheAlone(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "alpha.txt", State: svn.StateModified},
+		{Path: "beta.txt", State: svn.StateModified},
+	})
+	next, _ := m.Update(diffLoadedMsg{path: "alpha.txt", diff: "@@ -1 +1 @@\n+alpha body"})
+	m = next.(*Model)
+	beta := diffKey{path: "beta.txt"}
+	m.session.PutDiff(beta, diffEntry{text: "@@ -1 +1 @@\n+beta body", stamp: m.diffStamp(beta)})
+
+	// beta is staged; nothing about alpha moved.
+	next, _ = m.Update(statusLoadedMsg{items: []svn.StatusItem{
+		{Path: "alpha.txt", State: svn.StateModified},
+		{Path: "beta.txt", State: svn.StateModified, Changelist: stagedChangelist},
+	}})
+	m = next.(*Model)
+
+	if n := m.session.diffs.Len(); n != 2 {
+		t.Errorf("session holds %d diffs after a status load, want both left where they were", n)
+	}
+	alpha := diffKey{path: "alpha.txt"}
+	if _, ok := m.session.Diff(alpha, m.diffStamp(alpha)); !ok {
+		t.Error("a path the status did not touch should still be served")
+	}
+	if _, ok := m.session.Diff(beta, m.diffStamp(beta)); ok {
+		t.Error("a path the status moved should be dropped as it is read")
 	}
 }
 

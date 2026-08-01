@@ -221,6 +221,25 @@ type Model struct {
 	diffSrc       diffSource
 	dirDiff       bool
 	hideUntracked bool
+	// liveRefresh is whether the working copy is being watched in the background.
+	// It is seeded from the configuration and toggled at runtime, kept apart from
+	// cfg so a session-only toggle is never persisted.
+	liveRefresh bool
+	// watchGen stamps the live-refresh poller, so a tick from one that has been
+	// stopped or restarted is dropped rather than acted on. watchTrackedFP and
+	// watchFullFP are the last fingerprints taken at each depth, watchFullDue when
+	// the next full scan is affordable and watchScanOff that the working copy is
+	// too large for one at all; watchEvery is the interval the poller is running
+	// at (backed off after a failure), watchQueued a change seen while the screen
+	// was busy, and watchFailed that the failure has already been reported.
+	watchGen       uint64
+	watchTrackedFP string
+	watchFullFP    string
+	watchFullDue   time.Time
+	watchScanOff   bool
+	watchEvery     time.Duration
+	watchQueued    bool
+	watchFailed    bool
 	// showCmdLog controls whether the command-log panel below Main is displayed.
 	// It defaults to on and is toggled at runtime; it is not persisted.
 	showCmdLog bool
@@ -356,6 +375,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		source:          sourceFiles,
 		dirDiff:         cfg.DirectoryDiff,
 		hideUntracked:   cfg.HideUntracked,
+		liveRefresh:     cfg.LiveRefresh,
 		showCmdLog:      true,
 		needsSSHKey:     info != nil && info.IsOverSSH(),
 		commitCL:        stagedChangelist,
@@ -451,6 +471,7 @@ func (m *Model) Close() {
 	m.logGen.stop()
 	m.revGen.stop()
 	m.savedGen.stop()
+	m.stopWatch()
 	m.session.Close()
 	m.clearDiff()
 	m.mainKey, m.mainText = "", ""
@@ -514,13 +535,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.err = nil
 		m.fileItems = msg.items
+		// The poller watches the paths svn reports, so the rows this reload added are
+		// the new baseline rather than a change of their own.
+		m.rebaseWatch()
 		// svn has reported the real status, so anything shown ahead of it is either
 		// confirmed by this or superseded; the snapshot behind it is now two steps back.
 		m.dropOptimistic()
-		// The status every cached diff was produced against has just been re-read:
-		// keep the diffs it still agrees with and re-derive what is on screen from
-		// them, so a reload no longer blanks a diff it is about to fetch unchanged.
-		m.session.Reconcile(m.diffStamp)
+		// Re-derive what is on screen from the session: a cached diff the status
+		// still stands behind stays put, so a reload no longer blanks a diff it is
+		// about to fetch unchanged. Nothing else in the cache is touched — every
+		// entry is re-checked when it is read, which keeps a routine reload cheap no
+		// matter how much has been browsed.
 		m.rederiveDiff()
 		m.rebuildFileTree()
 		m.focusFirstFile()
@@ -745,6 +770,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			log = m.resetLogPaging()
 		}
 		return m, tea.Batch(m.reloadStatus(), log)
+
+	case workingCopyChangedMsg:
+		return m, m.observeWorkingCopy(msg)
 
 	case updateAvailableMsg:
 		// Offer the update only when nothing else is on screen, so the prompt
@@ -1126,6 +1154,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return m.openFilter(), true
 	case key.Matches(k, m.keys.ToggleCmdLog):
 		return m.toggleCmdLog(), true
+	case key.Matches(k, m.keys.ToggleLiveRefresh):
+		return m.toggleLiveRefresh(), true
 	case key.Matches(k, m.keys.SaveDiff):
 		return m.saveDiff(), true
 	case key.Matches(k, m.keys.SplitDiff):
@@ -2062,17 +2092,20 @@ func (m *Model) submitSettings() tea.Cmd {
 	cfg.DisplayFrom = strings.TrimSpace(vals[6])
 	cfg.DiffOutputDir = strings.TrimSpace(vals[7])
 	cfg.OptimisticUpdates = vals[8] == "true"
+	cfg.LiveRefresh = vals[9] == "true"
 
 	m.closeSettings()
 
 	themeChanged := cfg.Theme != m.cfg.Theme
 	untrackedChanged := cfg.HideUntracked != m.hideUntracked
+	liveChanged := cfg.LiveRefresh != m.liveRefresh
 	displayChanged := cfg.DisplayFrom != m.cfg.DisplayFrom
 	diffDirChanged := cfg.DiffOutputDir != m.cfg.DiffOutputDir
 	logLimitChanged := cfg.LogLimit != m.cfg.LogLimit
 	m.cfg = cfg
 	m.dirDiff = cfg.DirectoryDiff
 	m.hideUntracked = cfg.HideUntracked
+	m.liveRefresh = cfg.LiveRefresh
 	if themeChanged {
 		m.previewTheme(cfg.Theme)
 	}
@@ -2089,6 +2122,15 @@ func (m *Model) submitSettings() tea.Cmd {
 		m.loading = true
 		m.refreshChrome()
 		reload = m.beginInitialLoad()
+	}
+	// A new display scope restarts the poller as part of the reload above; on its
+	// own the setting starts or stops it here.
+	if liveChanged && !displayChanged {
+		if m.liveRefresh {
+			reload = tea.Batch(reload, m.startWatch())
+		} else {
+			m.stopWatch()
+		}
 	}
 	// A new output directory means a different set of saved diffs to browse; the
 	// display scope changes it too, since a blank setting resolves to the root.
@@ -2219,6 +2261,7 @@ func settingsFields(cfg config.Config, dirDiff bool) []component.Field {
 		{Label: "Display from", Kind: component.FieldChoice, Value: cfg.DisplayFrom, Options: config.DisplayFromValues()},
 		{Label: "Diff output", Kind: component.FieldText, Value: cfg.DiffOutputDir},
 		{Label: "Optimistic updates", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.OptimisticUpdates)},
+		{Label: "Live refresh", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.LiveRefresh)},
 	}
 }
 
@@ -2268,7 +2311,7 @@ func (m *Model) sizeDiffEditor() {
 func (m *Model) beginInitialLoad() tea.Cmd {
 	m.forgetLogPaging()
 	m.headRev = ""
-	return tea.Batch(m.reloadStatus(), headRevisionCmd(m.client))
+	return tea.Batch(m.reloadStatus(), headRevisionCmd(m.client), m.startWatch())
 }
 
 // submitUnlock adds the configured SSH key to the agent with the entered
