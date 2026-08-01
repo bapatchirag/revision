@@ -10,9 +10,6 @@ import (
 	"github.com/bapatchirag/revision/internal/tui/theme"
 )
 
-// logLimit caps how many recent revisions the Log panel loads.
-const logLimit = 50
-
 // logColumns describes the Log table layout: revision, author and message
 // columns are all natural-width so the complete revision number and author name
 // are shown in full; any overflow is revealed by the table's horizontal

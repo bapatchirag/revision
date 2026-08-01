@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -105,9 +106,9 @@ func TestIntegrationLogAndDiff(t *testing.T) {
 	mustRun(t, wc, "svn", "commit", "-m", "initial import")
 	mustRun(t, wc, "svn", "update")
 
-	entries, err := c.Log(ctx, 10)
+	entries, _, err := c.LogPage(ctx, "", 10)
 	if err != nil {
-		t.Fatalf("Log: %v", err)
+		t.Fatalf("LogPage: %v", err)
 	}
 	if len(entries) == 0 {
 		t.Fatal("expected at least one log entry")
@@ -126,6 +127,60 @@ func TestIntegrationLogAndDiff(t *testing.T) {
 	}
 	if !strings.Contains(diff, "+world") {
 		t.Errorf("diff missing the added line:\n%s", diff)
+	}
+}
+
+func TestIntegrationLogPaging(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	writeFile(t, filepath.Join(wc, "f.txt"), "0\n")
+	mustRun(t, wc, "svn", "add", "f.txt")
+	for i := 1; i <= 5; i++ {
+		writeFile(t, filepath.Join(wc, "f.txt"), strings.Repeat("x\n", i))
+		mustRun(t, wc, "svn", "commit", "-m", "commit "+strconv.Itoa(i))
+		mustRun(t, wc, "svn", "update")
+	}
+
+	// Walk the whole history two revisions at a time; the pages must tile it
+	// exactly, with no repeats and no gaps.
+	var walked []string
+	anchor := ""
+	for page := 1; ; page++ {
+		if page > 5 {
+			t.Fatal("paging did not terminate")
+		}
+		entries, more, err := c.LogPage(ctx, anchor, 2)
+		if err != nil {
+			t.Fatalf("LogPage(%q): %v", anchor, err)
+		}
+		if len(entries) > 2 {
+			t.Fatalf("page %d has %d entries, want at most 2", page, len(entries))
+		}
+		for _, e := range entries {
+			walked = append(walked, e.Revision)
+		}
+		if !more {
+			break
+		}
+		anchor = entries[len(entries)-1].Revision
+	}
+
+	all, more, err := c.LogPage(ctx, "", 0)
+	if err != nil {
+		t.Fatalf("LogPage unlimited: %v", err)
+	}
+	if more {
+		t.Error("an unlimited fetch must not report a further page")
+	}
+	if len(walked) != len(all) {
+		t.Fatalf("paged through %d revisions, want %d", len(walked), len(all))
+	}
+	for i, e := range all {
+		if walked[i] != e.Revision {
+			t.Fatalf("paged revisions = %q, want %q", walked, "the unpaged order")
+		}
 	}
 }
 
@@ -166,10 +221,10 @@ func TestIntegrationStageAndCommit(t *testing.T) {
 
 	// Regression: the just-committed revision must appear in the log even though
 	// only a.txt was committed, so the working-copy root is still at the old
-	// revision (a mixed-revision working copy). Log pegs at HEAD to surface it.
-	entries, err := c.Log(ctx, 10)
+	// revision (a mixed-revision working copy). LogPage pegs at HEAD to surface it.
+	entries, _, err := c.LogPage(ctx, "", 10)
 	if err != nil {
-		t.Fatalf("Log after commit: %v", err)
+		t.Fatalf("LogPage after commit: %v", err)
 	}
 	found := false
 	for _, e := range entries {

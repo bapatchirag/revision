@@ -252,6 +252,32 @@ func TestTableIgnoresInputWhenBlurred(t *testing.T) {
 	}
 }
 
+func TestTableSetItemsKeepsCursorButGoTopResets(t *testing.T) {
+	tb := newStringTable()
+	tb.SetItems([][]string{{"r3", "a"}, {"r2", "b"}, {"r1", "c"}})
+	tb.SetSize(20, 6)
+	tb.Focus()
+
+	tb.Update(keyDown())
+	tb.Update(keyDown())
+	if tb.Index() != 2 {
+		t.Fatalf("cursor = %d, want 2", tb.Index())
+	}
+
+	// Refreshing the same page keeps the cursor; turning a page resets it.
+	tb.SetItems([][]string{{"r6", "d"}, {"r5", "e"}, {"r4", "f"}})
+	if tb.Index() != 2 {
+		t.Errorf("cursor = %d after SetItems, want 2 (kept)", tb.Index())
+	}
+	tb.GoTop()
+	if tb.Index() != 0 {
+		t.Errorf("cursor = %d after GoTop, want 0", tb.Index())
+	}
+	if row, ok := tb.Selected(); !ok || row[0] != "r6" {
+		t.Errorf("selected = %v, want the first row", row)
+	}
+}
+
 // TestTableHorizontalScroll scrolls a table whose message column overflows and
 // checks the horizontal scrollbar appears and the window shifts.
 func TestTableHorizontalScroll(t *testing.T) {

@@ -76,6 +76,14 @@ func (t *Table[T]) Items() []T { return t.items }
 // Index returns the cursor position.
 func (t *Table[T]) Index() int { return t.cursor }
 
+// GoTop moves the cursor and the scroll window back to the first row. SetItems
+// deliberately keeps the cursor where it was, so callers replacing the rows with
+// an unrelated set — turning a page rather than refreshing one — call this to
+// start at the top.
+func (t *Table[T]) GoTop() {
+	t.cursor, t.offset, t.xOffset = 0, 0, 0
+}
+
 // Selected returns the item under the cursor and whether one exists.
 func (t *Table[T]) Selected() (T, bool) {
 	if t.cursor >= 0 && t.cursor < len(t.items) {

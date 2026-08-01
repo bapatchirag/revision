@@ -86,7 +86,7 @@ func TestBarDropsRepoAndRevision(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "modified.go", State: svn.StateModified},
 	})
-	m = stepModel(t, m, logLoadedMsg{entries: []svn.LogEntry{{Revision: "50"}}})
+	m = stepModel(t, m, logLoadedMsg{page: 1, entries: []svn.LogEntry{{Revision: "50"}}})
 
 	bar := lastLine(stripANSI(m.View()))
 	for _, unwanted := range []string{"svn.example.com", "r42", "r50", "HEAD"} {

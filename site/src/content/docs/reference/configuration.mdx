@@ -51,7 +51,7 @@ display-scope changes take effect immediately.
 | `displayFrom` | string | `cwd` | Where the working copy is displayed from: `cwd` or `root`. |
 | `sshKeyPath` | string | `~/.ssh/id_rsa` | The SSH private key to load for `svn+ssh://` working copies. |
 | `diffOutputDir` | string | `""` | Where diffs saved with <KeyCap key="w" /> are written. |
-| `logLimit` | int | `100` | How many revisions the Log panel loads. |
+| `logLimit` | int | `100` | How many revisions the Log panel loads per page. |
 | `editor` | string | `native` | Which editor <KeyCap key="e" /> opens the highlighted file in. |
 
 ### theme
@@ -99,10 +99,13 @@ inside it you started `revision` in and regardless of `displayFrom`.
 
 ### logLimit
 
-:::caution[Not applied yet]
-`logLimit` is stored and editable today, but the Log panel currently loads a fixed 50
-revisions. Wiring it up is on the [roadmap](https://github.com/bapatchirag/revision#roadmap).
-:::
+How many revisions the Log panel fetches at a time. It is a page size, not a ceiling on
+how far back you can look: <KeyCap key="n" /> and <KeyCap key="p" /> turn the panel
+through the rest of the history a page at a time. See [the Log
+panel](/guides/panels/#log).
+
+Raise it to page less often, lower it to make each fetch cheaper over a slow `svn+ssh://`
+connection. Changing it returns the panel to the first page.
 
 ### editor
 

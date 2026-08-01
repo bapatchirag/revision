@@ -191,6 +191,10 @@ func HelpSections() []Section {
 				Description: "Jump to the first or last row.",
 			},
 			{
+				Action: "Next / prev history page", Keys: []string{"n", "p"}, Context: "Log",
+				Description: "Load the next or previous page of revision history. A page holds `logLimit` revisions.",
+			},
+			{
 				Action: "Scroll main up / down", Keys: []string{"K", "J"}, Context: "Main",
 				Description: "Scroll the Main panel up or down a page.",
 			},

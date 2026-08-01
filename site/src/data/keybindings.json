@@ -127,6 +127,16 @@
   },
   {
     "section": "Navigation",
+    "action": "Next / prev history page",
+    "keys": [
+      "n",
+      "p"
+    ],
+    "context": "Log",
+    "description": "Load the next or previous page of revision history. A page holds `logLimit` revisions."
+  },
+  {
+    "section": "Navigation",
     "action": "Scroll main up / down",
     "keys": [
       "K",
