@@ -1381,12 +1381,12 @@ func TestSpaceAddsUnversionedFile(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "untracked.txt", State: svn.StateUnversioned},
 	})
+	if act, ok := m.stageTarget(); !ok || !act.add {
+		t.Errorf("unversioned stage target should svn add first, got %+v (ok=%v)", act, ok)
+	}
 	// An unversioned file is now addable: space produces an add+stage command.
 	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace}); cmd == nil {
 		t.Error("expected an add+stage command for an unversioned file")
-	}
-	if act, ok := m.stageTarget(); !ok || !act.add {
-		t.Errorf("unversioned stage target should svn add first, got %+v (ok=%v)", act, ok)
 	}
 }
 
@@ -1435,11 +1435,11 @@ func TestSpaceStagesRootDirectory(t *testing.T) {
 	if !ok || root.Path != fileTreeRoot {
 		t.Fatalf("expected cursor on the / root row, got %+v (ok=%v)", root, ok)
 	}
-	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace}); cmd == nil {
-		t.Error("expected a stage command when space is pressed on the root row")
-	}
 	if acts := directoryStageActions(root, m.fileItems); len(acts) != 2 {
 		t.Errorf("root should stage all 2 files, got %d: %+v", len(acts), acts)
+	}
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace}); cmd == nil {
+		t.Error("expected a stage command when space is pressed on the root row")
 	}
 }
 
@@ -1449,11 +1449,6 @@ func TestSpaceOnFullyStagedDirectoryUnstages(t *testing.T) {
 		{Path: "src/b.go", State: svn.StateModified, Changelist: stagedChangelist},
 	})
 	selectDirRow(t, m, "src")
-	// Everything under src/ is already staged, so pressing space again unstages
-	// the whole subtree.
-	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace}); cmd == nil {
-		t.Error("expected an unstage command when a fully staged directory is toggled")
-	}
 	acts := directoryUnstageActions(fileNode{Name: "src", Path: "src"}, m.fileItems)
 	if len(acts) != 2 {
 		t.Fatalf("expected 2 unstage actions under src/, got %d: %+v", len(acts), acts)
@@ -1463,6 +1458,11 @@ func TestSpaceOnFullyStagedDirectoryUnstages(t *testing.T) {
 			t.Errorf("an unstage action should neither stage nor add, got %+v", a)
 		}
 	}
+	// Everything under src/ is already staged, so pressing space again unstages
+	// the whole subtree.
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace}); cmd == nil {
+		t.Error("expected an unstage command when a fully staged directory is toggled")
+	}
 }
 
 func TestSpaceOnDirectoryInNamedChangelistsRemovesThem(t *testing.T) {
@@ -1471,11 +1471,6 @@ func TestSpaceOnDirectoryInNamedChangelistsRemovesThem(t *testing.T) {
 		{Path: "src/b.go", State: svn.StateModified, Changelist: "bugfix"},
 	})
 	selectDirRow(t, m, "src")
-	// Every file under src/ already belongs to a named changelist; nothing is left
-	// to stage, so space removes them all from their changelists.
-	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace}); cmd == nil {
-		t.Error("expected a command removing named-changelist files under the directory")
-	}
 	acts := directoryUnstageActions(fileNode{Name: "src", Path: "src"}, m.fileItems)
 	if len(acts) != 2 {
 		t.Fatalf("expected 2 removals under src/, got %d: %+v", len(acts), acts)
@@ -1484,6 +1479,11 @@ func TestSpaceOnDirectoryInNamedChangelistsRemovesThem(t *testing.T) {
 		if a.stage || a.add {
 			t.Errorf("a removal should neither stage nor add, got %+v", a)
 		}
+	}
+	// Every file under src/ already belongs to a named changelist; nothing is left
+	// to stage, so space removes them all from their changelists.
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace}); cmd == nil {
+		t.Error("expected a command removing named-changelist files under the directory")
 	}
 }
 

@@ -23,6 +23,9 @@ func TestDefault(t *testing.T) {
 	if def.HideUntracked {
 		t.Error("Default().HideUntracked = true, want false")
 	}
+	if !def.OptimisticUpdates {
+		t.Error("Default().OptimisticUpdates = false, want true")
+	}
 	if def.SSHKeyPath != "~/.ssh/id_rsa" {
 		t.Errorf("Default().SSHKeyPath = %q, want %q", def.SSHKeyPath, "~/.ssh/id_rsa")
 	}
@@ -166,6 +169,21 @@ func TestLoadEnablesHideUntracked(t *testing.T) {
 	}
 	if !got.HideUntracked {
 		t.Error("HideUntracked = false, want true (enabled on disk)")
+	}
+}
+
+func TestLoadDisablesOptimisticUpdates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"optimisticUpdates":false}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got, err := loadFrom(path)
+	if err != nil {
+		t.Fatalf("loadFrom: unexpected error %v", err)
+	}
+	if got.OptimisticUpdates {
+		t.Error("OptimisticUpdates = true, want false (disabled on disk)")
 	}
 }
 

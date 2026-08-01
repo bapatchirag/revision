@@ -168,11 +168,14 @@ type revisionPendingMsg struct {
 	gen uint64
 }
 
-// stagedMsg carries the result of staging or unstaging a single path.
+// stagedMsg carries the result of staging or unstaging a single path. token
+// identifies the optimistic change the model applied ahead of this reply, so a
+// failure can be undone; it is zero when the change was not shown in advance.
 type stagedMsg struct {
 	path       string
 	staged     bool
 	changelist string // non-empty when a named changelist was assigned
+	token      uint64
 	err        error
 }
 
@@ -418,13 +421,13 @@ func loadRevisionDetailCmd(ctx context.Context, client *svn.Client, rev string, 
 // stageCmd applies a stage action off the UI goroutine: it optionally runs
 // `svn add` first (for a previously unversioned file), then adds the path to, or
 // removes it from, the staged changelist.
-func stageCmd(client *svn.Client, changelist string, act stageAction) tea.Cmd {
+func stageCmd(client *svn.Client, changelist string, act stageAction, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if act.add {
 			if err := client.Add(ctx, act.path); err != nil {
-				return stagedMsg{path: act.path, staged: act.stage, err: err}
+				return stagedMsg{path: act.path, staged: act.stage, token: token, err: err}
 			}
 		}
 		var err error
@@ -433,7 +436,7 @@ func stageCmd(client *svn.Client, changelist string, act stageAction) tea.Cmd {
 		} else {
 			err = client.RemoveFromChangelist(ctx, act.path)
 		}
-		return stagedMsg{path: act.path, staged: act.stage, err: err}
+		return stagedMsg{path: act.path, staged: act.stage, token: token, err: err}
 	}
 }
 
@@ -443,14 +446,14 @@ func stageCmd(client *svn.Client, changelist string, act stageAction) tea.Cmd {
 // the staged changelist. It stops on the first error. Success rides on a single
 // stagedMsg with no changelist name, so — like acting on a single file — it shows
 // no toast; the follow-up status reload makes the change visible.
-func stageManyCmd(client *svn.Client, changelist string, acts []stageAction) tea.Cmd {
+func stageManyCmd(client *svn.Client, changelist string, acts []stageAction, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		for _, act := range acts {
 			if act.add {
 				if err := client.Add(ctx, act.path); err != nil {
-					return stagedMsg{path: act.path, staged: act.stage, err: err}
+					return stagedMsg{path: act.path, staged: act.stage, token: token, err: err}
 				}
 			}
 			var err error
@@ -460,10 +463,10 @@ func stageManyCmd(client *svn.Client, changelist string, acts []stageAction) tea
 				err = client.RemoveFromChangelist(ctx, act.path)
 			}
 			if err != nil {
-				return stagedMsg{path: act.path, staged: act.stage, err: err}
+				return stagedMsg{path: act.path, staged: act.stage, token: token, err: err}
 			}
 		}
-		return stagedMsg{staged: true}
+		return stagedMsg{staged: true, token: token}
 	}
 }
 
@@ -482,21 +485,21 @@ func commitCmd(client *svn.Client, message, changelist string) tea.Cmd {
 // result rides on stagedMsg (carrying the changelist name so the app can confirm
 // the assignment); the reported path is the sole file when one was named, or an
 // "N files" count when several were named together.
-func assignChangelistCmd(client *svn.Client, name string, targets []changelistTarget) tea.Cmd {
+func assignChangelistCmd(client *svn.Client, name string, targets []changelistTarget, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		for _, t := range targets {
 			if t.add {
 				if err := client.Add(ctx, t.path); err != nil {
-					return stagedMsg{path: t.path, staged: true, changelist: name, err: err}
+					return stagedMsg{path: t.path, staged: true, changelist: name, token: token, err: err}
 				}
 			}
 			if err := client.AddToChangelist(ctx, name, t.path); err != nil {
-				return stagedMsg{path: t.path, staged: true, changelist: name, err: err}
+				return stagedMsg{path: t.path, staged: true, changelist: name, token: token, err: err}
 			}
 		}
-		return stagedMsg{path: assignedLabel(targets), staged: true, changelist: name}
+		return stagedMsg{path: assignedLabel(targets), staged: true, changelist: name, token: token}
 	}
 }
 

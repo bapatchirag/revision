@@ -194,6 +194,11 @@ type Model struct {
 	// session caches what is reusable for the life of the process — diffs, so
 	// far. It is in-memory only and is emptied by Close.
 	session *sessionStore
+	// optimistic holds the status svn last reported while a change already shown
+	// on screen is still in flight, so a failure can put it back; optimisticTok
+	// stamps each such change so a reply can be matched to the state it belongs to.
+	optimistic    *optimisticState
+	optimisticTok uint64
 	// diffGen, statusGen, logGen and savedGen stamp the loads whose replies can
 	// be overtaken by a later request, so a superseded reply is dropped instead
 	// of rendered. diffGen covers both diff sources feeding Main — the working
@@ -441,6 +446,7 @@ func (m *Model) Close() {
 	m.savedPath, m.savedText, m.savedErr = "", "", false
 	m.diffSrc = diffSource{}
 	m.fileItems, m.clItems, m.logEntries, m.savedDiffItems = nil, nil, nil, nil
+	m.dropOptimistic()
 	m.cmdLog.clear()
 }
 
@@ -496,6 +502,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.err = nil
 		m.fileItems = msg.items
+		// svn has reported the real status, so anything shown ahead of it is either
+		// confirmed by this or superseded; the snapshot behind it is now two steps back.
+		m.dropOptimistic()
 		// The status every cached diff was produced against has just been re-read:
 		// keep the diffs it still agrees with and re-derive what is on screen from
 		// them, so a reload no longer blanks a diff it is about to fetch unchanged.
@@ -643,8 +652,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case stagedMsg:
 		if msg.err != nil {
 			m.showToast(failureText("stage", msg.err), component.LevelError)
-			return m, nil
+			if msg.token == 0 {
+				return m, nil
+			}
+			// Put the change back the way it was, then ask svn for the truth: a fan-out
+			// over several files stops at the first failure, so some may have landed.
+			m.settleOptimistic(msg.token, msg.err)
+			return m, m.reloadStatus()
 		}
+		m.settleOptimistic(msg.token, nil)
 		if msg.changelist != "" {
 			m.showToast("added "+msg.path+" to "+msg.changelist, component.LevelSuccess)
 		}
@@ -1204,7 +1220,8 @@ func (m *Model) stageSelected() tea.Cmd {
 		}
 		return nil
 	}
-	return stageCmd(m.client, stagedChangelist, act)
+	acts := []stageAction{act}
+	return stageCmd(m.client, stagedChangelist, act, m.applyOptimistic(stageMutations(acts, stagedChangelist)))
 }
 
 // stageDirectory toggles staging for the files beneath the selected directory
@@ -1215,14 +1232,15 @@ func (m *Model) stageSelected() tea.Cmd {
 // directory holding only clean or ignored files has nothing to do and warns
 // instead of running svn.
 func (m *Model) stageDirectory(n fileNode, items []svn.StatusItem) tea.Cmd {
-	if acts := directoryStageActions(n, items); len(acts) > 0 {
-		return stageManyCmd(m.client, stagedChangelist, acts)
+	acts := directoryStageActions(n, items)
+	if len(acts) == 0 {
+		acts = directoryUnstageActions(n, items)
 	}
-	if acts := directoryUnstageActions(n, items); len(acts) > 0 {
-		return stageManyCmd(m.client, stagedChangelist, acts)
+	if len(acts) == 0 {
+		m.showToast("nothing to stage or unstage under "+dirLabel(n), component.LevelWarning)
+		return nil
 	}
-	m.showToast("nothing to stage or unstage under "+dirLabel(n), component.LevelWarning)
-	return nil
+	return stageManyCmd(m.client, stagedChangelist, acts, m.applyOptimistic(stageMutations(acts, stagedChangelist)))
 }
 
 // directoryStageActions builds the stage actions that stage every stageable file
@@ -1336,7 +1354,8 @@ func (m *Model) submitChangelist(name string) tea.Cmd {
 	}
 	m.naming = false
 	m.nameEditor.Blur()
-	return assignChangelistCmd(m.client, name, m.nameTargets)
+	targets := m.nameTargets
+	return assignChangelistCmd(m.client, name, targets, m.applyOptimistic(changelistMutations(targets, name)))
 }
 
 // selectedFile returns the file the current Files-panel view points at: the
@@ -1364,10 +1383,38 @@ func (m *Model) selectedFile() (svn.StatusItem, bool) {
 }
 
 // rebuildFileTree re-flattens the current status items into the Changes tree,
-// honoring the remembered per-directory collapse state. The List clamps the
-// cursor, so it stays in range as rows appear or disappear.
+// honoring the remembered per-directory collapse state. The cursor is put back
+// on the row it was on by path, so a rebuild that reorders or drops rows keeps
+// the user on the same file rather than the same row number.
 func (m *Model) rebuildFileTree() {
+	path := selectedNodePath(m.files)
 	m.files.SetItems(buildFileTree(m.filteredStatusItems(m.fileItems), m.collapsedDirs))
+	selectNodePath(m.files, path)
+}
+
+// selectedNodePath returns the path of the row a file tree's cursor rests on,
+// for restoring the selection across a rebuild.
+func selectedNodePath(l *component.List[fileNode]) string {
+	n, ok := l.Selected()
+	if !ok {
+		return ""
+	}
+	return n.Path
+}
+
+// selectNodePath moves a file tree's cursor back onto path. A path the rebuild
+// dropped leaves the cursor where the List clamped it — on the row that took its
+// place — which is the nearest thing that survived.
+func selectNodePath(l *component.List[fileNode], path string) {
+	if path == "" {
+		return
+	}
+	for i, n := range l.Items() {
+		if n.Path == path {
+			l.SetIndex(i)
+			return
+		}
+	}
 }
 
 // focusFirstFile parks the Changes-tree cursor on the first file leaf the first
@@ -1406,9 +1453,12 @@ func (m *Model) toggleCollapse() tea.Cmd {
 }
 
 // rebuildClTree re-flattens the drilled-in changelist's items into its tree,
-// honoring the drill's own per-directory collapse state.
+// honoring the drill's own per-directory collapse state and keeping the cursor
+// on the same file across the rebuild.
 func (m *Model) rebuildClTree() {
+	path := selectedNodePath(m.clFiles)
 	m.clFiles.SetItems(buildFileTree(m.filteredStatusItems(m.clItems), m.clCollapsedDirs))
+	selectNodePath(m.clFiles, path)
 }
 
 // toggleClCollapse expands or collapses the directory under the drilled-in
@@ -1970,6 +2020,7 @@ func (m *Model) submitSettings() tea.Cmd {
 	}
 	cfg.DisplayFrom = strings.TrimSpace(vals[6])
 	cfg.DiffOutputDir = strings.TrimSpace(vals[7])
+	cfg.OptimisticUpdates = vals[8] == "true"
 
 	m.closeSettings()
 
@@ -2126,6 +2177,7 @@ func settingsFields(cfg config.Config, dirDiff bool) []component.Field {
 		{Label: "SSH key", Kind: component.FieldText, Value: cfg.SSHKeyPath},
 		{Label: "Display from", Kind: component.FieldChoice, Value: cfg.DisplayFrom, Options: config.DisplayFromValues()},
 		{Label: "Diff output", Kind: component.FieldText, Value: cfg.DiffOutputDir},
+		{Label: "Optimistic updates", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.OptimisticUpdates)},
 	}
 }
 

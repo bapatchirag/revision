@@ -107,20 +107,26 @@ type Config struct {
 	// revision was started. A leading ~ is expanded to the user's home directory.
 	// Resolve it with DiffDir rather than reading it directly.
 	DiffOutputDir string `json:"diffOutputDir"`
+	// OptimisticUpdates controls whether a staging action is shown as done the
+	// moment it is asked for, with svn confirming afterwards and a failure putting
+	// the previous state back. When false every action waits for svn before
+	// anything on screen moves.
+	OptimisticUpdates bool `json:"optimisticUpdates"`
 }
 
 // Default returns the configuration used when no file exists yet or when a
 // field is absent from the on-disk document.
 func Default() Config {
 	return Config{
-		LogLimit:      100,
-		Editor:        EditorNative,
-		Theme:         "auto",
-		DirectoryDiff: true,
-		HideUntracked: false,
-		SSHKeyPath:    "~/.ssh/id_rsa",
-		DisplayFrom:   DisplayFromCWD,
-		DiffOutputDir: "",
+		LogLimit:          100,
+		Editor:            EditorNative,
+		Theme:             "auto",
+		DirectoryDiff:     true,
+		HideUntracked:     false,
+		SSHKeyPath:        "~/.ssh/id_rsa",
+		DisplayFrom:       DisplayFromCWD,
+		DiffOutputDir:     "",
+		OptimisticUpdates: true,
 	}
 }
 

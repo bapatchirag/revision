@@ -3,16 +3,16 @@
 │Source    /home/alice/work/wc ││                                              │
 │CWD       /home/alice/work/wc ││                                              │
 │Branch    trunk               ││                                              │
-│Revision  r42                 ││                                              │
-│               ╭─ Settings ───────────────────────────────────╮               │
-╰───────────────│> Log limit      100                          │               │
-╭─ [2] ─ Changes│  Editor         native                       │               │
-│  ▾ /          │  Theme          auto                         │               │
-│>     M modifie│  Directory diff on                           │               │
-│               │  Hide untracked off                          │               │
-│               │  SSH key        ~/.ssh/id_rsa                │               │
-│               │  Display from   cwd                          │               │
-╰───────────────│  Diff output                                 │               │
+│Revision  r42  ╭─ Settings ───────────────────────────────────╮               │
+│               │> Log limit          100                      │               │
+╰───────────────│  Editor             native                   │               │
+╭─ [2] ─ Changes│  Theme              auto                     │               │
+│  ▾ /          │  Directory diff     on                       │               │
+│>     M modifie│  Hide untracked     off                      │               │
+│               │  SSH key            ~/.ssh/id_rsa            │               │
+│               │  Display from       cwd                      │               │
+│               │  Diff output                                 │               │
+╰───────────────│  Optimistic updates on                       │               │
 ╭─ [3] Log ─────│                                              │               │
 │  Rev Author Me│ctrl+s save · ↑↓ move · esc cancel            │───────────────╯
 │               ╰──────────────────────────────────────────────╯───────────────╮
