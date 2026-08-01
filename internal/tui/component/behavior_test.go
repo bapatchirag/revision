@@ -708,6 +708,46 @@ func TestPromptSecretMasksValue(t *testing.T) {
 	}
 }
 
+func TestPromptLockedPrefixResistsEditing(t *testing.T) {
+	p := component.NewPrompt("path", "Change source path", "", testTheme(), testKeys())
+	p.Focus()
+	p.SetValue("/wc/internal/app")
+	p.SetLocked("/wc")
+
+	for range 30 {
+		p.Update(keyBackspace())
+	}
+	if p.Value() != "/wc" {
+		t.Fatalf("backspace ate the locked prefix: value = %q, want /wc", p.Value())
+	}
+
+	// The cursor cannot be walked into the prefix either, so typing lands after it.
+	for range 10 {
+		p.Update(keyLeft())
+	}
+	p.Update(runes("/sub"))
+	if p.Value() != "/wc/sub" {
+		t.Errorf("value = %q, want /wc/sub", p.Value())
+	}
+}
+
+func TestPromptLockReplacesValueOutsidePrefix(t *testing.T) {
+	p := component.NewPrompt("path", "Change source path", "", testTheme(), testKeys())
+	p.Focus()
+	p.SetValue("/elsewhere")
+	p.SetLocked("/wc")
+
+	if p.Value() != "/wc" {
+		t.Errorf("value = %q, want the lock to replace a value outside it", p.Value())
+	}
+	// Reset returns to the prefix rather than emptying the input.
+	p.Update(runes("/sub"))
+	p.Reset()
+	if p.Value() != "/wc" {
+		t.Errorf("reset value = %q, want /wc", p.Value())
+	}
+}
+
 // TestStatusBarDropsHintsThatDoNotFit asserts the bar keeps whole hints and
 // marks the dropped tail with an ellipsis rather than clipping mid-hint.
 func TestStatusBarDropsHintsThatDoNotFit(t *testing.T) {

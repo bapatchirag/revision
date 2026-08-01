@@ -127,6 +127,7 @@ type Model struct {
 	editor     *component.TextArea
 	nameEditor *component.Prompt
 	diffEditor *component.Prompt
+	pathEditor *component.Prompt
 	passEditor *component.Prompt
 	modal      *component.Modal
 	progress   *component.Modal
@@ -188,6 +189,9 @@ type Model struct {
 	editing    bool
 	naming     bool
 	savingDiff bool
+	// retargeting is true while the prompt that re-points revision at another
+	// source directory is open.
+	retargeting bool
 	// splitting is true while the side-by-side view of the on-screen diff is
 	// floated over the layout.
 	splitting    bool
@@ -285,6 +289,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		editor:          component.NewTextArea(commitEditorID, "Commit message", "Enter a commit message…", th, keys),
 		nameEditor:      component.NewPrompt(changelistEditorID, "Changelist name", "e.g. feature-x", th, keys),
 		diffEditor:      component.NewPrompt(diffNameEditorID, "Save diff as", "e.g. changes.diff", th, keys),
+		pathEditor:      component.NewPrompt(sourcePathID, "Change source path", "e.g. /path/to/working-copy", th, keys),
 		passEditor:      component.NewPrompt(passphraseEditorID, "SSH key passphrase", "passphrase for "+cfg.SSHKeyPath, th, keys),
 		modal:           component.NewModal(confirmModalID, "", "", th, keys),
 		progress:        component.NewModal("update-progress", "", "", th, keys),
@@ -402,6 +407,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.savingDiff {
 			m.sizeDiffEditor()
+		}
+		if m.retargeting {
+			m.sizeSourcePath()
 		}
 		if m.splitting {
 			m.sizeSplitDiff()
@@ -644,6 +652,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.closeUnlock()
 		return m, m.beginInitialLoad()
 
+	case sourceChangedMsg:
+		return m, m.applySourceChange(msg)
+
 	case uimsg.SelectedMsg:
 		return m, m.handleSelection(msg)
 
@@ -692,6 +703,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.submitChangelist(msg.Value)
 		case diffNameEditorID:
 			return m, m.submitDiffName(msg.Value)
+		case sourcePathID:
+			return m, m.submitSourcePath(msg.Value)
 		case settingsFormID:
 			return m, m.submitSettings()
 		case passphraseEditorID:
@@ -734,6 +747,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.nameEditor.Blur()
 		case diffNameEditorID:
 			m.closeDiffName()
+		case sourcePathID:
+			m.closeSourcePath()
 		case splitDiffID:
 			m.closeSplitDiff()
 		case passphraseEditorID:
@@ -781,6 +796,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.savingDiff {
 			return m, m.diffEditor.Update(msg)
+		}
+		if m.retargeting {
+			// Every edit re-lists the directories under the path being typed, so the
+			// suggestions follow it. Scrolling the list writes the value too, so its
+			// own picks are left alone.
+			before := m.pathEditor.Value()
+			cmd := m.pathEditor.Update(msg)
+			if m.pathEditor.Value() != before && !m.pathEditor.ListFocused() {
+				m.refreshSourceOptions()
+			}
+			return m, cmd
 		}
 		if m.splitting {
 			// The side-by-side view owns the keyboard while open: it scrolls, esc
@@ -864,6 +890,8 @@ func (m *Model) View() string {
 		view = m.overlayCenter(view, m.nameEditor.View())
 	case m.savingDiff:
 		view = m.overlayCenter(view, m.diffEditor.View())
+	case m.retargeting:
+		view = m.overlayCenter(view, m.pathEditor.View())
 	case m.splitting:
 		// The side-by-side view all but fills the screen and is read rather than
 		// acted on, so the layout behind it recedes to a single dim color.
@@ -943,6 +971,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return m.afterFocusChange(), true
 	case key.Matches(k, m.keys.Settings):
 		return m.openSettings(), true
+	case key.Matches(k, m.keys.ChangeDir):
+		return m.openSourcePath(), true
 	case key.Matches(k, m.keys.Filter):
 		return m.openFilter(), true
 	case key.Matches(k, m.keys.ToggleCmdLog):
@@ -1704,7 +1734,7 @@ func (m *Model) closeHelp() {
 // screen, so a background event (like the update check completing) knows not to
 // steal focus.
 func (m *Model) overlayActive() bool {
-	return m.aborting || m.unlocking || m.editing || m.naming || m.savingDiff || m.splitting || m.confirming || m.helping || m.updating || m.configuring
+	return m.aborting || m.unlocking || m.editing || m.naming || m.savingDiff || m.retargeting || m.splitting || m.confirming || m.helping || m.updating || m.configuring
 }
 
 // openUpdate shows the startup update prompt for the given release as a centered
@@ -1762,6 +1792,7 @@ func (m *Model) previewTheme(name string) {
 	m.editor.SetTheme(th)
 	m.nameEditor.SetTheme(th)
 	m.diffEditor.SetTheme(th)
+	m.pathEditor.SetTheme(th)
 	m.modal.SetTheme(th)
 	m.menu.SetTheme(th)
 	m.updateMenu.SetTheme(th)
@@ -2938,7 +2969,11 @@ func (m *Model) barHints() []string {
 // panelHints are the keys panel p responds to, most useful first.
 func (m *Model) panelHints(p int) []string {
 	switch p {
-	case panelStatus, panelMain:
+	case panelStatus:
+		// The Status panel is where the source path is shown, so it is also where
+		// the key that changes it is worth advertising.
+		return []string{"/ search", "P source path"}
+	case panelMain:
 		return []string{"/ search"}
 	case panelFiles:
 		return m.filesHints()

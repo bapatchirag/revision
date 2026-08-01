@@ -49,11 +49,12 @@ type KeyMap struct {
 
 	OpenEditor key.Binding
 
-	Filter   key.Binding
-	Refresh  key.Binding
-	Settings key.Binding
-	Help     key.Binding
-	Quit     key.Binding
+	Filter    key.Binding
+	Refresh   key.Binding
+	Settings  key.Binding
+	ChangeDir key.Binding
+	Help      key.Binding
+	Quit      key.Binding
 }
 
 // Default returns the standard, lazygit-flavored bindings.
@@ -95,6 +96,7 @@ func Default() KeyMap {
 		Filter:          key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Refresh:         key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh")),
 		Settings:        key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "settings")),
+		ChangeDir:       key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "change source path")),
 		Help:            key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:            key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	}
@@ -167,6 +169,10 @@ func HelpSections() []Section {
 			{
 				Action: "Open file in editor", Keys: []string{"e"}, Context: "Files",
 				Description: "Open the highlighted file in the configured editor.",
+			},
+			{
+				Action: "Change source path", Keys: []string{"P"}, Context: "Global",
+				Description: "Re-scope revision to another directory inside the working copy, browsing to it from a prompt that opens on the directory it is reading now. The working copy's root is fixed, and the new source lasts for the session only — it is never saved.",
 			},
 			{
 				Action: "Refresh / settings", Keys: []string{"R", "S"}, Context: "Global",

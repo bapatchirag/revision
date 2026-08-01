@@ -131,6 +131,26 @@ type sshCheckedMsg struct {
 // sshAddedMsg carries the result of adding the SSH key to the agent.
 type sshAddedMsg struct{ err error }
 
+// sourceChangedMsg carries the result of probing a candidate source directory:
+// the client rooted at it and the working-copy info read from there, or the
+// error that rules the directory out.
+type sourceChangedMsg struct {
+	client *svn.Client
+	info   *svn.Info
+	err    error
+}
+
+// probeSourceCmd asks svn, off the UI goroutine, whether client's directory is a
+// working copy, so the session is only re-rooted on a directory known to be one.
+func probeSourceCmd(client *svn.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		info, err := client.Info(ctx)
+		return sourceChangedMsg{client: client, info: info, err: err}
+	}
+}
+
 // startupNoticeCmd emits a startupNoticeMsg so a launch-time notice is shown
 // through the normal toast path once the program is running.
 func startupNoticeCmd(text string) tea.Cmd {
