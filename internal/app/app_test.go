@@ -1068,6 +1068,7 @@ func TestStatusPanelShowsAbout(t *testing.T) {
 
 	view := stripANSI(m.View())
 	for _, want := range []string{
+		"bapatchirag.github.io/revision",
 		"revision/issues",
 		"revision/releases",
 		"Chirag Bapat",

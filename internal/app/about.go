@@ -8,6 +8,7 @@ import (
 
 // Project links surfaced on the Status panel's Main "about" screen.
 const (
+	projectDocsURL  = "https://bapatchirag.github.io/revision/"
 	repoIssuesURL   = "https://github.com/bapatchirag/revision/issues"
 	repoReleasesURL = "https://github.com/bapatchirag/revision/releases"
 )
@@ -33,6 +34,9 @@ func (m *Model) statusDetail() string {
 		accent.Render(revisionLogo),
 		"",
 		muted.Render("MIT © Chirag Bapat"),
+		"",
+		label.Render("Documentation"),
+		"  " + link.Render(projectDocsURL),
 		"",
 		label.Render("Report an issue"),
 		"  " + link.Render(repoIssuesURL),

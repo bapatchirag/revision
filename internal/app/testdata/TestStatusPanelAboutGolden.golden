@@ -6,16 +6,16 @@
 │Revision  r42                         ││                                                          │
 │                                      ││MIT © Chirag Bapat                                        │
 ╰──────────────────────────────────────╯│                                                          │
-╭─ [2] ─ Changes ─── Changelists ─── Di╮│Report an issue                                           │
-│  ▾ /                                 ││  https://github.com/bapatchirag/revision/issues          │
+╭─ [2] ─ Changes ─── Changelists ─── Di╮│Documentation                                             │
+│  ▾ /                                 ││  https://bapatchirag.github.io/revision/                 │
 │      M modified.go                   ││                                                          │
+│                                      ││Report an issue                                           │
+│                                      ││  https://github.com/bapatchirag/revision/issues          │
+│                                      ││                                                          │
 │                                      ││Release notes                                             │
 │                                      ││  https://github.com/bapatchirag/revision/releases        │
 │                                      ││                                                          │
-│                                      ││Press S to review the active settings and any overrides.  │
-│                                      ││                                                          │
-│                                      ││                                                          │
-╰────────────────────────── 1 of 1 ────╯│                                                          │
+╰────────────────────────── 1 of 1 ────╯│Press S to review the active settings and any overrides.  │
 ╭─ [3] Log ────────────────────────────╮│                                                          │
 │  Rev Author Message                  ││                                                          │
 │                                      ││                                                          │
