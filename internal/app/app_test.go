@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -160,6 +161,82 @@ func TestStaleDiffIgnoredForOtherFile(t *testing.T) {
 	m = next.(*Model)
 	if main := stripANSI(m.main.View()); strings.Contains(main, "+stale") {
 		t.Errorf("main should ignore a diff for an unselected file, got:\n%s", main)
+	}
+}
+
+// TestSupersededDiffReplyIgnored walks the cursor alpha → beta → alpha faster
+// than svn answers, then lets the replies land out of order. The one for beta is
+// superseded by the time it arrives, so it must be dropped instead of pinning
+// Main on a "Loading diff…" it will never be asked to replace.
+func TestSupersededDiffReplyIgnored(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "alpha.txt", State: svn.StateModified},
+		{Path: "beta.txt", State: svn.StateModified},
+	})
+	move := func(k tea.KeyType) {
+		t.Helper()
+		next, cmd := m.Update(tea.KeyMsg{Type: k})
+		m = next.(*Model)
+		if cmd == nil {
+			t.Fatal("expected a selection command after moving the cursor")
+		}
+		next, _ = m.Update(cmd())
+		m = next.(*Model)
+	}
+
+	// The status load requested alpha's diff; the two moves supersede it in turn.
+	move(tea.KeyDown)
+	beta := m.diffGen.gen
+	move(tea.KeyUp)
+	if m.diffGen.gen == beta {
+		t.Fatal("expected returning to alpha to issue a fresh diff load")
+	}
+
+	next, _ := m.Update(diffLoadedMsg{path: "alpha.txt", diff: "+fresh alpha", gen: m.diffGen.gen})
+	m = next.(*Model)
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "fresh alpha") {
+		t.Fatalf("main should show the current selection's diff, got:\n%s", main)
+	}
+
+	next, _ = m.Update(diffLoadedMsg{path: "beta.txt", diff: "+stale beta", gen: beta})
+	m = next.(*Model)
+	main := stripANSI(m.main.View())
+	if strings.Contains(main, "stale beta") || strings.Contains(main, "Loading diff") {
+		t.Errorf("superseded diff reply should be dropped, got:\n%s", main)
+	}
+}
+
+// TestDiffRefreshKeepsMainScroll re-delivers the diff already on screen, as a
+// reload of the same selection does, and asserts Main stays where the user
+// scrolled to instead of snapping back to the top.
+func TestDiffRefreshKeepsMainScroll(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "committed.txt", State: svn.StateModified},
+	})
+	body := make([]string, 40)
+	for i := range body {
+		body[i] = fmt.Sprintf("+line%02d", i)
+	}
+	diff := "@@ -1 +1 @@\n" + strings.Join(body, "\n")
+
+	next, _ := m.Update(diffLoadedMsg{path: "committed.txt", diff: diff})
+	m = next.(*Model)
+
+	// Scroll Main down a page from the Main panel itself.
+	m.focus.Focus(panelMain)
+	m.afterFocusChange()
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	m = next.(*Model)
+	scrolled := stripANSI(m.main.View())
+	if strings.Contains(scrolled, "+line00") {
+		t.Fatalf("expected Main to have scrolled past the top, got:\n%s", scrolled)
+	}
+
+	// The same diff arriving again is a refresh of what is on screen.
+	next, _ = m.Update(diffLoadedMsg{path: "committed.txt", diff: diff})
+	m = next.(*Model)
+	if got := stripANSI(m.main.View()); got != scrolled {
+		t.Errorf("refresh moved Main; want the scrolled view\n--- before ---\n%s\n--- after ---\n%s", scrolled, got)
 	}
 }
 

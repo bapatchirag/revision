@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,9 +16,55 @@ import (
 	"github.com/bapatchirag/revision/internal/svn"
 )
 
+// loadTimeout caps how long a status, diff or history load may run before it is
+// abandoned.
+const loadTimeout = 30 * time.Second
+
+// loadGen stamps one class of async load so a reply overtaken by a later request
+// can be dropped instead of rendered. Each new request bumps the generation and
+// abandons the one still in flight; a reply is only applied when it carries the
+// current stamp.
+type loadGen struct {
+	gen    uint64
+	cancel context.CancelFunc
+}
+
+// next abandons the request in flight — whatever it returns is now superseded —
+// and returns the stamp the new request's reply must carry. It is for loads that
+// run no svn command and so have no context to cancel.
+func (g *loadGen) next() uint64 {
+	if g.cancel != nil {
+		g.cancel()
+		g.cancel = nil
+	}
+	g.gen++
+	return g.gen
+}
+
+// begin starts a new generation, returning the context the request runs under
+// and the stamp its reply must carry. The cancel is retained so the request
+// after it can abandon this one.
+func (g *loadGen) begin(timeout time.Duration) (context.Context, uint64) {
+	gen := g.next()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	g.cancel = cancel
+	return ctx, gen
+}
+
+// stale reports whether a reply stamped gen has been superseded. The zero stamp
+// marks an unstamped reply — every load the model issues is stamped from 1 up —
+// and is always applied.
+func (g *loadGen) stale(gen uint64) bool { return gen != 0 && gen != g.gen }
+
+// superseded reports whether ctx was cancelled by a later request for the same
+// data, in which case its reply is dropped. A deadline that simply expired is a
+// real failure and still surfaces.
+func superseded(ctx context.Context) bool { return errors.Is(ctx.Err(), context.Canceled) }
+
 // statusLoadedMsg carries the result of a successful status refresh.
 type statusLoadedMsg struct {
 	items []svn.StatusItem
+	gen   uint64
 }
 
 // errMsg carries an error to surface in the UI.
@@ -30,6 +77,7 @@ type diffLoadedMsg struct {
 	path string
 	diff string
 	err  error
+	gen  uint64
 }
 
 // diffSavedMsg carries the result of writing a diff to disk, along with the
@@ -44,6 +92,7 @@ type diffSavedMsg struct {
 type savedDiffsLoadedMsg struct {
 	files []savedDiff
 	err   error
+	gen   uint64
 }
 
 // savedDiffReadMsg carries the contents of a saved patch file, keyed by the path
@@ -52,6 +101,7 @@ type savedDiffReadMsg struct {
 	path string
 	text string
 	err  error
+	gen  uint64
 }
 
 // editedMsg carries the result of opening a file in the configured editor. name
@@ -72,6 +122,7 @@ type logLoadedMsg struct {
 	page    int
 	more    bool
 	err     error
+	gen     uint64
 }
 
 // stagedMsg carries the result of staging or unstaging a single path.
@@ -195,15 +246,18 @@ func checkUpdateCmd(build selfupdate.Build) tea.Cmd {
 }
 
 // loadStatusCmd runs `svn status` off the UI goroutine and reports the result.
-func loadStatusCmd(client *svn.Client) tea.Cmd {
+// A run abandoned in favour of a later status load reports nothing, so a
+// cancellation the model asked for never surfaces as a failure.
+func loadStatusCmd(ctx context.Context, client *svn.Client, gen uint64) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
 		items, err := client.Status(ctx)
+		if superseded(ctx) {
+			return nil
+		}
 		if err != nil {
 			return errMsg{err}
 		}
-		return statusLoadedMsg{items: items}
+		return statusLoadedMsg{items: items, gen: gen}
 	}
 }
 
@@ -213,16 +267,14 @@ func loadStatusCmd(client *svn.Client) tea.Cmd {
 // the message stays keyed by the original path so the current selection can match
 // it. Diff failures are carried on the message rather than promoted to a fatal
 // error so a single undiffable path never tears down the UI.
-func loadDiffCmd(client *svn.Client, path string) tea.Cmd {
+func loadDiffCmd(ctx context.Context, client *svn.Client, path string, gen uint64) tea.Cmd {
 	target := path
 	if target == fileTreeRoot {
 		target = ""
 	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
 		diff, err := client.Diff(ctx, target)
-		return diffLoadedMsg{path: path, diff: diff, err: err}
+		return diffLoadedMsg{path: path, diff: diff, err: err, gen: gen}
 	}
 }
 
@@ -241,20 +293,20 @@ func saveDiffCmd(dir, name, diff string) tea.Cmd {
 
 // loadSavedDiffsCmd lists the patch files already saved in dir, off the UI
 // goroutine, for the Diffs view to browse.
-func loadSavedDiffsCmd(dir string) tea.Cmd {
+func loadSavedDiffsCmd(dir string, gen uint64) tea.Cmd {
 	return func() tea.Msg {
 		files, err := scanSavedDiffs(dir)
-		return savedDiffsLoadedMsg{files: files, err: err}
+		return savedDiffsLoadedMsg{files: files, err: err, gen: gen}
 	}
 }
 
 // readSavedDiffCmd reads a saved patch file off the UI goroutine so it can be
 // shown in Main. A read failure is carried on the message rather than promoted
 // to a fatal error, so an unreadable file never tears down the UI.
-func readSavedDiffCmd(path string) tea.Cmd {
+func readSavedDiffCmd(path string, gen uint64) tea.Cmd {
 	return func() tea.Msg {
 		b, err := os.ReadFile(path)
-		return savedDiffReadMsg{path: path, text: string(b), err: err}
+		return savedDiffReadMsg{path: path, text: string(b), err: err, gen: gen}
 	}
 }
 
@@ -295,12 +347,10 @@ func writeDiff(dir, name, diff string) diffSavedMsg {
 // is the revision the previous page ended on (empty for the first page) and page
 // is the 1-based number the result belongs to. Errors are carried on the message
 // so history-load failures stay confined to the Log panel.
-func loadLogCmd(client *svn.Client, anchor string, page, limit int) tea.Cmd {
+func loadLogCmd(ctx context.Context, client *svn.Client, anchor string, page, limit int, gen uint64) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
 		entries, more, err := client.LogPage(ctx, anchor, limit)
-		return logLoadedMsg{entries: entries, page: page, more: more, err: err}
+		return logLoadedMsg{entries: entries, page: page, more: more, err: err, gen: gen}
 	}
 }
 

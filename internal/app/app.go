@@ -173,6 +173,18 @@ type Model struct {
 	source   mainSource
 	diffPath string
 	diffText string
+	// diffGen, statusGen, logGen and savedGen stamp the loads whose replies can
+	// be overtaken by a later request, so a superseded reply is dropped instead
+	// of rendered. diffGen covers both diff sources feeding Main — the working
+	// copy and the saved-patch reader — since only one of them is on screen.
+	diffGen   loadGen
+	statusGen loadGen
+	logGen    loadGen
+	savedGen  loadGen
+	// mainKey identifies the selection mainText was rendered for, so a refresh of
+	// what is already on screen can keep the reader's scroll position.
+	mainKey  string
+	mainText string
 	// diffErr records that diffText is a load-failure notice rather than a patch,
 	// so it is never written out as one.
 	diffErr bool
@@ -375,11 +387,11 @@ func (m *Model) Init() tea.Cmd {
 	if m.needsSSHKey {
 		cmds = append(cmds, sshCheckCmd(m.cfg.SSHKeyPath))
 	} else {
-		cmds = append(cmds, loadStatusCmd(m.client), m.resetLogPaging())
+		cmds = append(cmds, m.reloadStatus(), m.resetLogPaging())
 	}
 	// The saved diffs live on local disk, so the Diffs view can be populated
 	// regardless of whether the repository is reachable yet.
-	cmds = append(cmds, loadSavedDiffsCmd(m.diffDir()))
+	cmds = append(cmds, m.reloadSavedDiffs())
 	if m.build.IsRelease() {
 		cmds = append(cmds, checkUpdateCmd(m.build))
 	}
@@ -435,6 +447,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case statusLoadedMsg:
+		if m.statusGen.stale(msg.gen) {
+			return m, nil
+		}
 		m.loading = false
 		m.err = nil
 		m.diffPath, m.diffText = "", ""
@@ -448,7 +463,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case logLoadedMsg:
 		// A page turn taken while this load was in flight supersedes it.
-		if msg.page != m.logPage {
+		if m.logGen.stale(msg.gen) || msg.page != m.logPage {
 			return m, nil
 		}
 		m.logErr = msg.err
@@ -466,6 +481,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case diffLoadedMsg:
+		if m.diffGen.stale(msg.gen) {
+			return m, nil
+		}
 		m.diffPath = msg.path
 		m.diffErr = msg.err != nil
 		if msg.err != nil {
@@ -485,9 +503,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.showToast("diff saved to "+msg.path, component.LevelSuccess)
 		// The new file belongs in the Diffs view, so re-scan the store.
-		return m, loadSavedDiffsCmd(m.diffDir())
+		return m, m.reloadSavedDiffs()
 
 	case savedDiffsLoadedMsg:
+		if m.savedGen.stale(msg.gen) {
+			return m, nil
+		}
 		m.savedDiffsErr = msg.err
 		m.savedDiffItems = msg.files
 		m.rebuildSavedDiffs()
@@ -498,6 +519,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case savedDiffReadMsg:
+		if m.diffGen.stale(msg.gen) {
+			return m, nil
+		}
 		m.savedPath = msg.path
 		m.savedErr = msg.err != nil
 		if msg.err != nil {
@@ -520,7 +544,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// A terminal editor has exited, so the file may have changed: re-read the
 		// working copy (which reloads the diff on screen) and the saved-diff store.
-		return m, tea.Batch(loadStatusCmd(m.client), loadSavedDiffsCmd(m.diffDir()))
+		return m, tea.Batch(m.reloadStatus(), m.reloadSavedDiffs())
 
 	case errMsg:
 		m.loading = false
@@ -537,7 +561,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showToast("added "+msg.path+" to "+msg.changelist, component.LevelSuccess)
 		}
 		// Reload status so the changelist grouping (and staged marker) refresh.
-		return m, loadStatusCmd(m.client)
+		return m, m.reloadStatus()
 
 	case committedMsg:
 		if msg.err != nil {
@@ -556,7 +580,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshChrome()
 		// A commit adds a revision at the head of history: show it.
 		m.log.GoTop()
-		return m, tea.Batch(loadStatusCmd(m.client), m.resetLogPaging())
+		return m, tea.Batch(m.reloadStatus(), m.resetLogPaging())
 
 	case revertedMsg:
 		if msg.err != nil {
@@ -565,7 +589,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.showToast("reverted "+msg.path, component.LevelSuccess)
 		m.diffPath, m.diffText = "", ""
-		return m, loadStatusCmd(m.client)
+		return m, m.reloadStatus()
 
 	case deletedMsg:
 		if msg.err != nil {
@@ -574,7 +598,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.showToast("deleted "+msg.path, component.LevelSuccess)
 		m.diffPath, m.diffText = "", ""
-		return m, loadStatusCmd(m.client)
+		return m, m.reloadStatus()
 
 	case updatedMsg:
 		m.updatingWC = false
@@ -601,7 +625,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.log.GoTop()
 			log = m.resetLogPaging()
 		}
-		return m, tea.Batch(loadStatusCmd(m.client), log)
+		return m, tea.Batch(m.reloadStatus(), log)
 
 	case updateAvailableMsg:
 		// Offer the update only when nothing else is on screen, so the prompt
@@ -682,7 +706,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.diffLoadForSelection()
 			case savedDiffsViewName:
 				// Re-scan on entry so diffs saved (or removed) elsewhere show up.
-				return m, tea.Batch(loadSavedDiffsCmd(m.diffDir()), m.savedDiffLoadForSelection())
+				return m, tea.Batch(m.reloadSavedDiffs(), m.savedDiffLoadForSelection())
 			}
 		}
 		return m, nil
@@ -962,7 +986,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		m.dismissToast()
 		m.diffPath, m.diffText = "", ""
 		m.refreshChrome()
-		return tea.Batch(loadStatusCmd(m.client), m.reloadLogPage(), loadSavedDiffsCmd(m.diffDir())), true
+		return tea.Batch(m.reloadStatus(), m.reloadLogPage(), m.reloadSavedDiffs()), true
 	case key.Matches(k, m.keys.FocusNext):
 		m.focusNextPanel()
 		return m.afterFocusChange(), true
@@ -1886,7 +1910,7 @@ func (m *Model) submitSettings() tea.Cmd {
 	// display scope changes it too, since a blank setting resolves to the root.
 	if diffDirChanged || displayChanged {
 		m.savedPath, m.savedText, m.savedErr = "", "", false
-		reload = tea.Batch(reload, loadSavedDiffsCmd(m.diffDir()))
+		reload = tea.Batch(reload, m.reloadSavedDiffs())
 	}
 	// A new page size puts different revisions on every page, so the anchors
 	// reached with the old one no longer address anything.
@@ -2050,7 +2074,7 @@ func (m *Model) sizeDiffEditor() {
 // the rest of the UI depends on. It is deferred until any required svn+ssh key
 // is unlocked, so those remote operations don't fail on a locked key.
 func (m *Model) beginInitialLoad() tea.Cmd {
-	return tea.Batch(loadStatusCmd(m.client), m.resetLogPaging())
+	return tea.Batch(m.reloadStatus(), m.resetLogPaging())
 }
 
 // submitUnlock adds the configured SSH key to the agent with the entered
@@ -2255,6 +2279,28 @@ func (m *Model) syncMainTitle() {
 	}
 }
 
+// reloadStatus, loadDiff, reloadSavedDiffs and readSavedDiff issue the loads
+// whose replies can be overtaken by a later request. Each abandons the request
+// still in flight and stamps the new one, so only the reply the model is still
+// waiting for is applied.
+func (m *Model) reloadStatus() tea.Cmd {
+	ctx, gen := m.statusGen.begin(loadTimeout)
+	return loadStatusCmd(ctx, m.client, gen)
+}
+
+func (m *Model) loadDiff(path string) tea.Cmd {
+	ctx, gen := m.diffGen.begin(loadTimeout)
+	return loadDiffCmd(ctx, m.client, path, gen)
+}
+
+func (m *Model) reloadSavedDiffs() tea.Cmd {
+	return loadSavedDiffsCmd(m.diffDir(), m.savedGen.next())
+}
+
+func (m *Model) readSavedDiff(path string) tea.Cmd {
+	return readSavedDiffCmd(path, m.diffGen.next())
+}
+
 // diffLoadForSelection returns a command to load the diff that Main should show
 // for the current Files selection when it is not already loaded. In the Diffs
 // view that is the highlighted saved patch file; otherwise a directory row loads
@@ -2268,13 +2314,13 @@ func (m *Model) diffLoadForSelection() tea.Cmd {
 		if !m.dirDiff || m.diffPath == n.Path {
 			return nil
 		}
-		return loadDiffCmd(m.client, n.Path)
+		return m.loadDiff(n.Path)
 	}
 	it, ok := m.selectedFile()
 	if !ok || !it.State.IsDirty() || m.diffPath == it.Path {
 		return nil
 	}
-	return loadDiffCmd(m.client, it.Path)
+	return m.loadDiff(it.Path)
 }
 
 // toggleDirDiff flips whether directory rows show their combined diff. It lets a
@@ -2576,7 +2622,8 @@ func (m *Model) loadLogPage(page int) tea.Cmd {
 		anchor = m.logAnchors[page-2]
 	}
 	m.logPage = page
-	return loadLogCmd(m.client, anchor, page, m.cfg.LogLimit)
+	ctx, gen := m.logGen.begin(loadTimeout)
+	return loadLogCmd(ctx, m.client, anchor, page, m.cfg.LogLimit, gen)
 }
 
 // resetLogPaging returns the Log panel to the first page and forgets the anchors
@@ -2728,12 +2775,49 @@ func (m *Model) headRevision() string {
 // The Main and Status panels are searched (not filtered): any active search
 // re-highlights against the new content inside the Viewport, so nothing is set
 // here beyond the content itself.
+//
+// Content identical to what is displayed is not written at all, and a refresh of
+// the same selection keeps the reader's scroll position; only a move to another
+// selection starts back at the top.
 func (m *Model) updateMain() {
 	// Only a unified diff carries the one-column +/-/space marker that must stay
 	// pinned while the body scrolls horizontally; mainContent sets the gutter for
 	// that case, and this baseline clears it for every other view.
 	m.main.SetGutter(0)
-	m.main.SetContent(m.mainContent())
+	content := m.mainContent()
+	key := m.mainSelectionKey()
+	switch {
+	case key == m.mainKey && content == m.mainText:
+		return
+	case key == m.mainKey:
+		m.main.SetContentPreservingScroll(content)
+	default:
+		m.main.SetContent(content)
+	}
+	m.mainKey, m.mainText = key, content
+}
+
+// mainSelectionKey identifies what Main is showing — the driving panel and the
+// row selected in it — so a reload of the same subject can be told from a move
+// to a different one.
+func (m *Model) mainSelectionKey() string {
+	switch m.source {
+	case sourceStatus:
+		return "status"
+	case sourceLog:
+		e, _ := m.log.Selected()
+		return "log:" + e.Revision
+	}
+	switch {
+	case m.filesViewIsDiffs():
+		d, _ := m.savedDiffs.Selected()
+		return "saved:" + d.Path
+	case m.filesViewIsChangelists() && !m.inChangelistDrill():
+		g, _ := m.changelists.Selected()
+		return "changelist:" + g.Name
+	}
+	n, _, _ := m.selectedTreeNode()
+	return "files:" + n.Path
 }
 
 // mainContent computes the raw Main text for the current state, setting the diff

@@ -158,7 +158,7 @@ func (m *Model) applySourceChange(msg sourceChangedMsg) tea.Cmd {
 	m.retargetDisplay(m.cfg.DisplayFrom)
 	m.resetForSource()
 	m.showToast("source path: "+m.client.Dir, component.LevelSuccess)
-	return tea.Batch(m.beginInitialLoad(), loadSavedDiffsCmd(m.diffDir()))
+	return tea.Batch(m.beginInitialLoad(), m.reloadSavedDiffs())
 }
 
 // resetForSource clears everything the previous source directory produced — the

@@ -130,7 +130,7 @@ func (m *Model) savedDiffLoadForSelection() tea.Cmd {
 	if !ok || m.savedPath == d.Path {
 		return nil
 	}
-	return readSavedDiffCmd(d.Path)
+	return m.readSavedDiff(d.Path)
 }
 
 // savedDiffDetail renders the highlighted saved patch file in Main, with a
