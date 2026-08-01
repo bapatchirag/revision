@@ -184,10 +184,13 @@ func filesUnder(n fileNode, items []svn.StatusItem) []svn.StatusItem {
 // renderFileNode adapts a tree row for the reusable List: directory rows show a
 // chevron (▾ expanded, ▸ collapsed) and the segment name with a trailing slash
 // (the root row shows just "/"); file rows reuse the flat status rendering
-// (marker + code + name) indented by depth.
-func renderFileNode(th theme.Theme) func(fileNode) string {
+// (marker + code + name) indented by depth. pending reports how many files the
+// row covers that svn is still working on: a file leaf is dimmed and marked, a
+// directory row carries the count.
+func renderFileNode(th theme.Theme, pending func(fileNode) int) func(fileNode) string {
 	return func(n fileNode) string {
 		indent := strings.Repeat("  ", n.Depth)
+		count := pending(n)
 		if n.Item == nil {
 			chevron := "▾"
 			if n.Collapsed {
@@ -195,7 +198,14 @@ func renderFileNode(th theme.Theme) func(fileNode) string {
 			}
 			marker := lipgloss.NewStyle().Foreground(th.Muted).Render(chevron)
 			name := lipgloss.NewStyle().Foreground(th.Info).Bold(true).Render(dirLabel(n))
-			return indent + marker + " " + name
+			row := indent + marker + " " + name
+			if count > 0 {
+				row += lipgloss.NewStyle().Foreground(th.Muted).Render(pendingLabel(count))
+			}
+			return row
+		}
+		if count > 0 {
+			return indent + pendingStatusRow(th, *n.Item, n.Name)
 		}
 		return indent + statusRow(th, *n.Item, n.Name)
 	}

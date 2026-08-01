@@ -30,6 +30,20 @@ func statusRow(th theme.Theme, it svn.StatusItem, label string) string {
 	return mark + " " + code + " " + label
 }
 
+// pendingStatusRow renders a file row whose action svn has been asked for but
+// has not confirmed: the same marker/code/label shape as statusRow, dimmed
+// throughout and tailed by an ellipsis, so it reads as in flight rather than
+// done.
+func pendingStatusRow(th theme.Theme, it svn.StatusItem, label string) string {
+	mark := " "
+	if it.Changelist != "" {
+		mark = "●"
+	}
+	return lipgloss.NewStyle().
+		Foreground(th.Muted).
+		Render(mark + " " + it.State.Code() + " " + label + " " + pendingMarker)
+}
+
 // stateColor maps an SVN working-copy state onto a theme color.
 func stateColor(th theme.Theme, s svn.FileState) lipgloss.Color {
 	switch s {

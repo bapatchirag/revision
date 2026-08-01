@@ -250,6 +250,13 @@ type Model struct {
 	aborting     bool
 	passAttempts int
 	pending      tea.Cmd
+	// pendingOps marks the paths a revert, delete or commit is running on, so
+	// those rows read as in flight rather than done; pendingHold is what the
+	// confirmation prompt on screen will mark once accepted, and pendingTok stamps
+	// each action so its reply clears only its own rows.
+	pendingOps  map[string]pendingOp
+	pendingHold *pendingHold
+	pendingTok  uint64
 	// updateConflictPrompt stages a second "conflicts will be skipped" confirm shown after the default update confirm.
 	updateConflictPrompt string
 	// updatingWC is true while an svn update runs, showing the progress modal.
@@ -284,9 +291,12 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	var m *Model
 
 	status := component.NewViewport(th, keys)
-	files := component.NewList[fileNode]("files", renderFileNode(th), th, keys)
+	// The pending lookup reads through m, which is assigned below before any row
+	// is rendered, so a row marked in flight dims without a rebuild.
+	pending := func(n fileNode) int { return m.pendingCount(n) }
+	files := component.NewList[fileNode]("files", renderFileNode(th, pending), th, keys)
 	changelists := component.NewList[changelistGroup](changelistsListID, renderChangelistGroup(th), th, keys)
-	clFiles := component.NewList[fileNode](changelistFilesID, renderFileNode(th), th, keys)
+	clFiles := component.NewList[fileNode](changelistFilesID, renderFileNode(th, pending), th, keys)
 	savedDiffs := component.NewList[savedDiff](savedDiffsListID, renderSavedDiff(th), th, keys)
 	filesViews := component.NewViews(filesViewsID, []component.View{
 		{Name: "Changes", Content: files},
@@ -341,6 +351,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		collapsedDirs:   map[string]bool{},
 		clCollapsedDirs: map[string]bool{},
 		filters:         map[int]string{},
+		pendingOps:      map[string]pendingOp{},
 		session:         newSessionStore(),
 		source:          sourceFiles,
 		dirDiff:         cfg.DirectoryDiff,
@@ -447,6 +458,7 @@ func (m *Model) Close() {
 	m.diffSrc = diffSource{}
 	m.fileItems, m.clItems, m.logEntries, m.savedDiffItems = nil, nil, nil, nil
 	m.dropOptimistic()
+	m.pendingOps, m.pendingHold = nil, nil
 	m.cmdLog.clear()
 }
 
@@ -668,6 +680,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.reloadStatus()
 
 	case committedMsg:
+		m.clearPending(msg.token)
 		if msg.err != nil {
 			m.loading = false
 			m.showToast(failureText("commit", msg.err), component.LevelError)
@@ -687,6 +700,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.reloadStatus(), m.resetLogPaging())
 
 	case revertedMsg:
+		m.clearPending(msg.token)
 		if msg.err != nil {
 			m.showToast(failureText("revert", msg.err), component.LevelError)
 			return m, nil
@@ -696,6 +710,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.reloadStatus()
 
 	case deletedMsg:
+		m.clearPending(msg.token)
 		if msg.err != nil {
 			m.showToast(failureText("delete", msg.err), component.LevelError)
 			return m, nil
@@ -856,6 +871,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			cmd := m.pending
 			m.pending = nil
+			// The action is on its way now, so the rows it touches read as in flight.
+			m.markHeldPending()
 			if m.updateProgress != "" {
 				// The pending command is an svn update; show the progress modal
 				// until it completes (cleared in the updatedMsg handler).
@@ -887,6 +904,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case confirmModalID:
 			m.closeConfirm()
 			m.pending = nil
+			m.pendingHold = nil
 			m.updateConflictPrompt = ""
 			m.updateProgress = ""
 		case updateMenuID:
@@ -1211,7 +1229,10 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 // stageable).
 func (m *Model) stageSelected() tea.Cmd {
 	if n, items, ok := m.selectedDirectory(); ok {
-		return m.stageDirectory(n, items)
+		return m.stageDirectory(n, m.withoutPending(items))
+	}
+	if m.selectionPending() {
+		return nil
 	}
 	act, ok := m.stageTarget()
 	if !ok {
@@ -1562,7 +1583,7 @@ func (m *Model) assignChangelist() tea.Cmd {
 	targets := m.stagedTargets()
 	if len(targets) == 0 {
 		it, ok := m.selectedFile()
-		if !ok {
+		if !ok || m.isPending(it.Path) {
 			return nil
 		}
 		if isNamedChangelist(it.Changelist) {
@@ -1587,11 +1608,11 @@ func (m *Model) assignChangelist() tea.Cmd {
 // stagedTargets collects every file currently in the anonymous staged bucket as
 // changelist targets, so naming a changelist moves the whole staged set as a
 // unit. Staged files are already versioned, so in practice none need an
-// `svn add` first.
+// `svn add` first. Files already waiting on svn are left out.
 func (m *Model) stagedTargets() []changelistTarget {
 	var targets []changelistTarget
 	for _, it := range m.fileItems {
-		if it.Changelist == stagedChangelist {
+		if it.Changelist == stagedChangelist && !m.isPending(it.Path) {
 			targets = append(targets, changelistTarget{path: it.Path, add: it.State == svn.StateUnversioned})
 		}
 	}
@@ -1616,8 +1637,13 @@ func (m *Model) syncDrill() {
 
 // openCommit opens the commit-message editor for the current commit target: the
 // selected changelist when in the Changelists view, otherwise the anonymous
-// staged bucket. It refuses an empty target.
+// staged bucket. It refuses an empty target, and one whose commit is still
+// running.
 func (m *Model) openCommit() tea.Cmd {
+	if m.commitPending() {
+		m.showToast("a commit is already running", component.LevelWarning)
+		return nil
+	}
 	target, label, ok := m.commitTarget()
 	if !ok {
 		return nil
@@ -1660,34 +1686,41 @@ func (m *Model) commitTarget() (cl, label string, ok bool) {
 	return stagedChangelist, displayCL(stagedChangelist), true
 }
 
+// pathsInChangelist returns the pending files belonging to the named changelist.
+func (m *Model) pathsInChangelist(name string) []string {
+	var paths []string
+	for _, it := range m.fileItems {
+		if it.Changelist == name {
+			paths = append(paths, it.Path)
+		}
+	}
+	return paths
+}
+
 // countInChangelist returns how many pending files belong to the named
 // changelist.
 func (m *Model) countInChangelist(name string) int {
-	n := 0
-	for _, it := range m.fileItems {
-		if it.Changelist == name {
-			n++
-		}
-	}
-	return n
+	return len(m.pathsInChangelist(name))
 }
 
 // requestRevert asks to discard local changes to the current selection, opening a
 // confirmation modal. On a directory row it reverts every dirty file beneath it;
-// on a file leaf a clean/unversioned selection has nothing to revert.
+// on a file leaf a clean/unversioned selection has nothing to revert. A row
+// already waiting on svn is left alone.
 func (m *Model) requestRevert() tea.Cmd {
 	if n, items, ok := m.selectedDirectory(); ok {
-		return m.requestRevertDirectory(n, items)
+		return m.requestRevertDirectory(n, m.withoutPending(items))
 	}
 	it, ok := m.selectedFile()
-	if !ok {
+	if !ok || m.isPending(it.Path) {
 		return nil
 	}
 	if !it.State.IsDirty() {
 		m.showToast("nothing to revert in "+it.Path, component.LevelWarning)
 		return nil
 	}
-	m.pending = revertCmd(m.client, it.Path)
+	token := m.nextPendingToken()
+	m.confirmAction(revertCmd(m.client, it.Path, token), holdPending(pendingRevert, token, it.Path))
 	m.openConfirm("Revert changes?", "Discard local changes to "+it.Path+"? This cannot be undone.")
 	return nil
 }
@@ -1701,7 +1734,8 @@ func (m *Model) requestRevertDirectory(n fileNode, items []svn.StatusItem) tea.C
 		m.showToast("nothing to revert under "+dirLabel(n), component.LevelWarning)
 		return nil
 	}
-	m.pending = revertManyCmd(m.client, paths)
+	token := m.nextPendingToken()
+	m.confirmAction(revertManyCmd(m.client, paths, token), holdPending(pendingRevert, token, paths...))
 	m.openConfirm("Revert changes?", fmt.Sprintf(
 		"Discard local changes to %d files under %s? This cannot be undone.", len(paths), dirLabel(n)))
 	return nil
@@ -1722,13 +1756,14 @@ func directoryRevertPaths(n fileNode, items []svn.StatusItem) []string {
 // requestDelete asks to remove the current selection, opening a confirmation
 // modal. On a directory row it removes every deletable file beneath it; on a file
 // leaf a versioned file is scheduled for deletion, an unversioned one is removed
-// from disk, and ignored files are left alone.
+// from disk, and ignored files are left alone. A row already waiting on svn is
+// left alone too.
 func (m *Model) requestDelete() tea.Cmd {
 	if n, items, ok := m.selectedDirectory(); ok {
-		return m.requestDeleteDirectory(n, items)
+		return m.requestDeleteDirectory(n, m.withoutPending(items))
 	}
 	it, ok := m.selectedFile()
-	if !ok {
+	if !ok || m.isPending(it.Path) {
 		return nil
 	}
 	if it.State == svn.StateIgnored {
@@ -1740,7 +1775,8 @@ func (m *Model) requestDelete() tea.Cmd {
 	if act.unversioned {
 		message = "Permanently delete untracked " + it.Path + " from disk? This cannot be undone."
 	}
-	m.pending = deleteCmd(m.client, act)
+	token := m.nextPendingToken()
+	m.confirmAction(deleteCmd(m.client, act, token), holdPending(pendingDelete, token, act.path))
 	m.openConfirm("Delete file?", message)
 	return nil
 }
@@ -1755,7 +1791,12 @@ func (m *Model) requestDeleteDirectory(n fileNode, items []svn.StatusItem) tea.C
 		m.showToast("nothing to delete under "+dirLabel(n), component.LevelWarning)
 		return nil
 	}
-	m.pending = deleteManyCmd(m.client, acts)
+	paths := make([]string, 0, len(acts))
+	for _, act := range acts {
+		paths = append(paths, act.path)
+	}
+	token := m.nextPendingToken()
+	m.confirmAction(deleteManyCmd(m.client, acts, token), holdPending(pendingDelete, token, paths...))
 	m.openConfirm("Delete files?", deleteDirectoryMessage(n, acts))
 	return nil
 }
@@ -1801,7 +1842,7 @@ func deleteDirectoryMessage(n fileNode, acts []deleteAction) string {
 // revision. It confirms first — like the update-to-revision flow — and adds a
 // second confirmation when the working copy already holds conflicts svn skips.
 func (m *Model) requestUpdate() tea.Cmd {
-	m.pending = updateCmd(m.client)
+	m.confirmAction(updateCmd(m.client), nil)
 	m.updateConflictPrompt = conflictUpdatePrompt(m.conflictedPaths(), "the latest revision")
 	m.updateProgress = updateProgressText(m.wcRevision, "the latest revision")
 	m.openConfirm("Update working copy?", "Update the working copy to the latest revision? Uncommitted changes are kept and merged.")
@@ -1817,7 +1858,7 @@ func (m *Model) requestUpdateToRevision() tea.Cmd {
 		m.showToast("no revision selected", component.LevelWarning)
 		return nil
 	}
-	m.pending = updateToRevisionCmd(m.client, entry.Revision)
+	m.confirmAction(updateToRevisionCmd(m.client, entry.Revision), nil)
 	m.updateConflictPrompt = conflictUpdatePrompt(m.conflictedPaths(), "r"+entry.Revision)
 	m.updateProgress = updateProgressText(m.wcRevision, "r"+entry.Revision)
 	m.openConfirm("Update to revision?", "Update the working copy to r"+entry.Revision+"? Uncommitted changes are kept and merged.")
@@ -1964,8 +2005,8 @@ func (m *Model) previewTheme(name string) {
 	m.form.SetTheme(th)
 	m.toast.SetTheme(th)
 	m.splitDiff.SetTheme(th)
-	m.files.SetRender(renderFileNode(th))
-	m.clFiles.SetRender(renderFileNode(th))
+	m.files.SetRender(renderFileNode(th, m.pendingCount))
+	m.clFiles.SetRender(renderFileNode(th, m.pendingCount))
 	m.changelists.SetRender(renderChangelistGroup(th))
 	m.savedDiffs.SetRender(renderSavedDiff(th))
 	m.refreshChrome()
@@ -2182,7 +2223,8 @@ func settingsFields(cfg config.Config, dirDiff bool) []component.Field {
 }
 
 // submitCommit closes the editor and commits the target changelist with the
-// entered message, rejecting an empty message.
+// entered message, rejecting an empty message. The files going in are marked as
+// in flight until svn answers.
 func (m *Model) submitCommit(message string) tea.Cmd {
 	if strings.TrimSpace(message) == "" {
 		m.showToast("commit message cannot be empty", component.LevelWarning)
@@ -2191,8 +2233,10 @@ func (m *Model) submitCommit(message string) tea.Cmd {
 	m.editing = false
 	m.editor.Blur()
 	m.loading = true
+	token := m.nextPendingToken()
+	m.markPending(pendingCommit, token, m.pathsInChangelist(m.commitCL))
 	m.refreshChrome()
-	return commitCmd(m.client, message, m.commitCL)
+	return commitCmd(m.client, message, m.commitCL, token)
 }
 
 // sizeEditor sizes the commit editor to a centered portion of the screen.

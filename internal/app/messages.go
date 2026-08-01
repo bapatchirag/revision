@@ -179,22 +179,29 @@ type stagedMsg struct {
 	err        error
 }
 
-// committedMsg carries the result of a commit.
+// committedMsg carries the result of a commit. token identifies the rows the
+// model marked as in flight when the commit was dispatched, so the reply clears
+// exactly those; it is zero when nothing was marked.
 type committedMsg struct {
 	revision string
+	token    uint64
 	err      error
 }
 
-// revertedMsg carries the result of reverting a single path.
+// revertedMsg carries the result of reverting a single path. token identifies
+// the rows marked as in flight for it, as on committedMsg.
 type revertedMsg struct {
-	path string
-	err  error
+	path  string
+	token uint64
+	err   error
 }
 
-// deletedMsg carries the result of deleting a single path.
+// deletedMsg carries the result of deleting a single path. token identifies the
+// rows marked as in flight for it, as on committedMsg.
 type deletedMsg struct {
-	path string
-	err  error
+	path  string
+	token uint64
+	err   error
 }
 
 // updatedMsg carries the result of an `svn update`. toRevision distinguishes an
@@ -471,12 +478,12 @@ func stageManyCmd(client *svn.Client, changelist string, acts []stageAction, tok
 }
 
 // commitCmd commits the staged changelist off the UI goroutine.
-func commitCmd(client *svn.Client, message, changelist string) tea.Cmd {
+func commitCmd(client *svn.Client, message, changelist string, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		rev, err := client.Commit(ctx, message, changelist)
-		return committedMsg{revision: rev, err: err}
+		return committedMsg{revision: rev, token: token, err: err}
 	}
 }
 
@@ -522,11 +529,11 @@ func batchLabel(n int, first string) string {
 }
 
 // revertCmd discards local modifications to path off the UI goroutine.
-func revertCmd(client *svn.Client, path string) tea.Cmd {
+func revertCmd(client *svn.Client, path string, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		return revertedMsg{path: path, err: client.Revert(ctx, path)}
+		return revertedMsg{path: path, token: token, err: client.Revert(ctx, path)}
 	}
 }
 
@@ -534,22 +541,22 @@ func revertCmd(client *svn.Client, path string) tea.Cmd {
 // UI goroutine, stopping on the first error. Success rides on a single
 // revertedMsg carrying an "N files" summary, mirroring how acting on one file
 // reports a single path.
-func revertManyCmd(client *svn.Client, paths []string) tea.Cmd {
+func revertManyCmd(client *svn.Client, paths []string, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		for _, p := range paths {
 			if err := client.Revert(ctx, p); err != nil {
-				return revertedMsg{path: p, err: err}
+				return revertedMsg{path: p, token: token, err: err}
 			}
 		}
-		return revertedMsg{path: batchLabel(len(paths), paths[0])}
+		return revertedMsg{path: batchLabel(len(paths), paths[0]), token: token}
 	}
 }
 
 // deleteCmd deletes a path off the UI goroutine: a versioned path is scheduled
 // for removal (svn delete), an unversioned one is removed from disk.
-func deleteCmd(client *svn.Client, act deleteAction) tea.Cmd {
+func deleteCmd(client *svn.Client, act deleteAction, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -559,7 +566,7 @@ func deleteCmd(client *svn.Client, act deleteAction) tea.Cmd {
 		} else {
 			err = client.Delete(ctx, act.path)
 		}
-		return deletedMsg{path: act.path, err: err}
+		return deletedMsg{path: act.path, token: token, err: err}
 	}
 }
 
@@ -567,7 +574,7 @@ func deleteCmd(client *svn.Client, act deleteAction) tea.Cmd {
 // versioned path is scheduled for removal (svn delete) and each unversioned one
 // is removed from disk. It stops on the first error; success rides on a single
 // deletedMsg carrying an "N files" summary.
-func deleteManyCmd(client *svn.Client, acts []deleteAction) tea.Cmd {
+func deleteManyCmd(client *svn.Client, acts []deleteAction, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -579,10 +586,10 @@ func deleteManyCmd(client *svn.Client, acts []deleteAction) tea.Cmd {
 				err = client.Delete(ctx, act.path)
 			}
 			if err != nil {
-				return deletedMsg{path: act.path, err: err}
+				return deletedMsg{path: act.path, token: token, err: err}
 			}
 		}
-		return deletedMsg{path: batchLabel(len(acts), acts[0].path)}
+		return deletedMsg{path: batchLabel(len(acts), acts[0].path), token: token}
 	}
 }
 
