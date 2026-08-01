@@ -32,6 +32,14 @@ cannot use.
 This sets where `revision` *operates*; [`displayFrom`](/reference/configuration/#displayfrom)
 controls how much of the working copy it *shows*.
 
+Once the TUI is open, `P` re-scopes it to another directory inside that working copy for
+the rest of the session. The prompt opens on the directory `revision` is reading now — the
+`Source` row of the Status panel — and suggests the directories under whatever you have
+typed, so you can browse to the target instead of typing it out. The working copy's root is
+fixed at the head of the input — it cannot be deleted, and a path above it is refused — so
+the source can never leave the checkout. The new source is never saved; the next launch
+uses `--path` again.
+
 ### `--version`
 
 ```sh

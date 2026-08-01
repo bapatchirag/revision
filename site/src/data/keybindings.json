@@ -74,6 +74,15 @@
   },
   {
     "section": "Working copy",
+    "action": "Change source path",
+    "keys": [
+      "P"
+    ],
+    "context": "Global",
+    "description": "Re-scope revision to another directory inside the working copy, browsing to it from a prompt that opens on the directory it is reading now. The working copy's root is fixed, and the new source lasts for the session only — it is never saved."
+  },
+  {
+    "section": "Working copy",
     "action": "Refresh / settings",
     "keys": [
       "R",

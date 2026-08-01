@@ -11,8 +11,8 @@
 │>     M│  Update working copy        u    Scroll main l / r      h / l│       │
 │       │  Update to rev (Log)    space    Line start / end  home / end│       │
 │       │  Open file in editor        e    Filter panel               /│       │
-│       │  Refresh / settings     R / S  View                          │       │
-╰───────│                                  Switch file view       [ / ]│       │
+│       │  Change source path         P  View                          │       │
+╰───────│  Refresh / settings     R / S    Switch file view       [ / ]│       │
 ╭─ [3] L│                                  Side-by-side / save    s / w│       │
 │  Rev A│                                  Dir diff / untracked   D / U│───────╯
 │       │                                  Toggle command log         x│───────╮
