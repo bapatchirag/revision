@@ -508,6 +508,24 @@ func TestToggleDirDiffHidesDirectoryDiff(t *testing.T) {
 	}
 }
 
+// stubSVN re-points the model's client at a temp working copy and a stub binary
+// that prints diff verbatim, so a save — which generates its patch by running
+// svn — can be exercised without Subversion. The recorder is carried over so
+// the command log still sees the invocation.
+func stubSVN(t *testing.T, m *Model, diff string) {
+	t.Helper()
+	dir := t.TempDir()
+	body := filepath.Join(dir, "diff.txt")
+	if err := os.WriteFile(body, []byte(diff), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "svn-stub")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\ncat "+body+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m.client = &svn.Client{Dir: dir, Bin: bin, Recorder: m.client.Recorder}
+}
+
 // saveDiffKey presses the save-diff key and answers the file-name prompt: name
 // is typed into the input when non-empty, otherwise the blank entry falls back to
 // the prompt's default. It returns the message the resulting write produced, or
@@ -543,6 +561,7 @@ func TestSaveDiffWritesSelectedFileDiff(t *testing.T) {
 	})
 	next, _ := m.Update(diffLoadedMsg{path: "src/a.go", diff: "Index: src/a.go\n@@ -1 +1 @@\n-old\n+new"})
 	m = next.(*Model)
+	stubSVN(t, m, "Index: src/a.go\n@@ -1 +1 @@\n-old\n+new")
 
 	m, msg := saveDiffKey(t, m, "")
 	saved, ok := msg.(diffSavedMsg)
@@ -570,6 +589,12 @@ func TestSaveDiffWritesSelectedFileDiff(t *testing.T) {
 	m = next.(*Model)
 	if view := stripANSI(m.View()); !strings.Contains(view, "diff saved") {
 		t.Errorf("expected the save toast, got:\n%s", view)
+	}
+	// The diffs revision loads on its own stay out of the command log, but the
+	// one the user asked to be written out is an action like any other.
+	logged := m.cmdLog.snapshot()
+	if len(logged) != 1 || logged[0].Subcommand != "diff" || !strings.Contains(logged[0].Command, "diff src/a.go") {
+		t.Errorf("expected the save's svn diff in the command log, got %+v", logged)
 	}
 }
 
@@ -621,6 +646,7 @@ func TestSaveDiffUsesEnteredName(t *testing.T) {
 	})
 	next, _ := m.Update(diffLoadedMsg{path: "src/a.go", diff: "@@ -1 +1 @@\n+new"})
 	m = next.(*Model)
+	stubSVN(t, m, "@@ -1 +1 @@\n+new")
 
 	// A name with no patch extension gains ".diff"; any directory part is dropped
 	// so the file always lands in the output directory.
@@ -648,6 +674,7 @@ func TestSaveDiffWritesDirectoryDiffAndCreatesOutputDir(t *testing.T) {
 	selectDirRow(t, m, "src")
 	next, _ := m.Update(diffLoadedMsg{path: "src", dir: true, diff: "Index: src/a.go\n@@ -1 +1 @@\n+alpha\n"})
 	m = next.(*Model)
+	stubSVN(t, m, "Index: src/a.go\n@@ -1 +1 @@\n+alpha\n")
 
 	_, msg := saveDiffKey(t, m, "")
 	saved, ok := msg.(diffSavedMsg)
@@ -2091,7 +2118,7 @@ func TestRenderLogRowColorsWorkingCopyAsterisk(t *testing.T) {
 	th := theme.Default()
 
 	// The working-copy row carries a coloured asterisk that strips to "* r42".
-	star := renderLogRow(svn.LogEntry{Revision: "42"}, "42", th)[0]
+	star := renderLogRow(svn.LogEntry{Revision: "42"}, "42", false, th)[0]
 	if stripANSI(star) == star {
 		t.Errorf("expected the asterisk to be coloured (ANSI), got plain %q", star)
 	}
@@ -2100,9 +2127,18 @@ func TestRenderLogRowColorsWorkingCopyAsterisk(t *testing.T) {
 	}
 
 	// Other rows are a plain, unstyled two-space prefix of the same width.
-	other := renderLogRow(svn.LogEntry{Revision: "41"}, "42", th)[0]
+	other := renderLogRow(svn.LogEntry{Revision: "41"}, "42", false, th)[0]
 	if other != "  r41" {
 		t.Errorf("non-working-copy row should be plain %q, got %q", "  r41", other)
+	}
+
+	// A page turn in flight dims the rows of the page being left.
+	stale := renderLogRow(svn.LogEntry{Revision: "41"}, "42", true, th)[0]
+	if stripANSI(stale) == stale {
+		t.Errorf("expected a stale row to be dimmed (ANSI), got plain %q", stale)
+	}
+	if got := stripANSI(stale); got != "  r41" {
+		t.Errorf("dimmed row should still read %q, got %q", "  r41", got)
 	}
 }
 
@@ -2164,6 +2200,122 @@ func pressRune(t *testing.T, m *Model, r rune) (*Model, tea.Cmd) {
 	t.Helper()
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	return next.(*Model), cmd
+}
+
+func TestInitDefersHistoryAndSavedDiffs(t *testing.T) {
+	m := sizedModel(t)
+	m.Init()
+
+	if m.logRequested || m.logGen.gen != 0 {
+		t.Errorf("startup should not fetch a page of history (requested=%v gen=%d)", m.logRequested, m.logGen.gen)
+	}
+	if m.savedGen.gen != 0 {
+		t.Errorf("savedGen = %d, want 0: the saved diffs are scanned when the Diffs view is opened", m.savedGen.gen)
+	}
+	if m.statusGen.gen != 1 {
+		t.Errorf("statusGen = %d, want 1: status is the load startup waits on", m.statusGen.gen)
+	}
+}
+
+func TestHistoryIsFetchedOnce(t *testing.T) {
+	m := sizedModel(t)
+	m.Init()
+
+	// The first status has landed, so the page can be prefetched behind it.
+	m = loadItems(t, m, nil)
+	if !m.logRequested || m.logGen.gen != 1 {
+		t.Fatalf("the first status should prefetch page 1 (requested=%v gen=%d)", m.logRequested, m.logGen.gen)
+	}
+
+	// Neither another status nor a look at the panel asks for it again.
+	m = loadItems(t, m, nil)
+	m, cmd := pressRune(t, m, '3')
+	if cmd != nil {
+		t.Error("focusing the Log panel should not re-fetch a page already asked for")
+	}
+	if m.logGen.gen != 1 {
+		t.Errorf("logGen = %d, want 1: history is fetched once", m.logGen.gen)
+	}
+}
+
+func TestLogPanelFocusFetchesHistoryAndReportsTheWait(t *testing.T) {
+	m := sizedModel(t)
+	m.Init()
+	// Focus the Log panel before the status arrives, so the panel is the first
+	// to ask for history.
+	m, cmd := pressRune(t, m, '3')
+	if cmd == nil || m.logGen.gen != 1 {
+		t.Fatalf("the first look at the Log panel should fetch page 1 (gen=%d)", m.logGen.gen)
+	}
+
+	m = loadItems(t, m, nil)
+	if m.logGen.gen != 1 {
+		t.Errorf("logGen = %d, want 1: the status prefetch should find the page already asked for", m.logGen.gen)
+	}
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "Loading history") {
+		t.Errorf("expected the Log panel to report the wait, got:\n%s", main)
+	}
+
+	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{{Revision: "50", Author: "alice", Message: "fifty"}}})
+	m = next.(*Model)
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "r50") {
+		t.Errorf("expected the revision detail once history landed, got:\n%s", main)
+	}
+}
+
+func TestRevisionDetailFillsInChangedPaths(t *testing.T) {
+	m := logPagedModel(t)
+
+	// The metadata is on screen before the changed paths have been asked for.
+	main := stripANSI(m.main.View())
+	if !strings.Contains(main, "r50") || !strings.Contains(main, "alice") {
+		t.Fatalf("expected the revision metadata immediately, got:\n%s", main)
+	}
+	if strings.Contains(main, "Changed paths") {
+		t.Errorf("changed paths cost their own load and should not be shown yet:\n%s", main)
+	}
+
+	next, _ := m.Update(revisionDetailMsg{rev: "50", paths: []svn.ChangedPath{
+		{Action: "M", Path: "/trunk/committed.txt"},
+	}})
+	m = next.(*Model)
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "Changed paths") || !strings.Contains(main, "M /trunk/committed.txt") {
+		t.Errorf("expected the changed paths once the detail landed, got:\n%s", main)
+	}
+
+	// Revisions are immutable, so the detail is never asked for twice.
+	if cmd := m.revisionDetailForSelection(); cmd != nil {
+		t.Error("a revision whose detail is held should issue no command")
+	}
+}
+
+func TestLogPageTurnServesCachedPage(t *testing.T) {
+	m := logPagedModel(t)
+	next, _ := m.Update(revisionDetailMsg{rev: "50", paths: []svn.ChangedPath{{Action: "M", Path: "/trunk/a"}}})
+	m = next.(*Model)
+
+	m, _ = pressRune(t, m, 'n')
+	next, _ = m.Update(logLoadedMsg{page: 2, entries: []svn.LogEntry{{Revision: "48"}, {Revision: "47"}}})
+	m = next.(*Model)
+
+	// Page 1 was cached as it loaded, so turning back to it costs no command and
+	// its rows are on screen before anything else runs.
+	m, cmd := pressRune(t, m, 'p')
+	if cmd != nil {
+		t.Error("a page already fetched should be served from the session")
+	}
+	if m.logLoading {
+		t.Error("a cached page turn should leave nothing in flight")
+	}
+	if len(m.logEntries) != 2 || m.logEntries[0].Revision != "50" {
+		t.Errorf("cached page 1 = %+v, want r50 and r49", m.logEntries)
+	}
+	if items := m.log.Items(); len(items) != 2 || items[0].Revision != "50" {
+		t.Errorf("the table should show the cached rows, got %+v", items)
+	}
+	if !m.logMore {
+		t.Error("the cached page should restore that a further page follows it")
+	}
 }
 
 func TestLogPagingWalksForwardAndBack(t *testing.T) {

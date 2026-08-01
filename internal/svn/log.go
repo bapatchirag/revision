@@ -33,7 +33,10 @@ type logEntryXML struct {
 // starts at the newest revision; otherwise the page starts at the revision
 // following anchor, which must be a revision from the preceding page. A limit of
 // zero or less applies svn's own default and never reports a further page.
-// Changed paths are included (--verbose).
+//
+// Changed paths are not included: --verbose over a whole page is by far the most
+// expensive call revision makes, so every LogEntry.Paths is empty here and is
+// filled in one revision at a time by RevisionDetail.
 //
 // It targets the working-copy root pegged at HEAD (".@HEAD") rather than the
 // default BASE. After committing a single path the working copy is left at a
@@ -59,7 +62,7 @@ func (c *Client) LogPage(ctx context.Context, anchor string, limit int) ([]LogEn
 // it is anchored on a revision from the preceding page instead. The range is
 // deliberately over-fetched — see logPageFrom for what the extra rows are for.
 func logPageArgs(anchor string, limit int) []string {
-	args := []string{"log", "--xml", "--verbose"}
+	args := []string{"log", "--xml"}
 	if anchor != "" {
 		args = append(args, "-r", anchor+":1")
 	}
@@ -89,6 +92,50 @@ func logPageFrom(entries []LogEntry, anchor string, limit int) ([]LogEntry, bool
 		return entries[:limit], true
 	}
 	return entries, false
+}
+
+// RevisionDetail returns the full record of a single revision, including the
+// paths it changed (--verbose), for the Log panel's detail view. Revisions are
+// immutable, so a detail once read stays good.
+func (c *Client) RevisionDetail(ctx context.Context, rev string) (LogEntry, error) {
+	out, err := c.run(ctx, revisionDetailArgs(rev)...)
+	if err != nil {
+		return LogEntry{}, err
+	}
+	entries, err := parseLog(out)
+	if err != nil {
+		return LogEntry{}, err
+	}
+	if len(entries) == 0 {
+		return LogEntry{}, fmt.Errorf("no log entry for r%s", rev)
+	}
+	return entries[0], nil
+}
+
+func revisionDetailArgs(rev string) []string {
+	return []string{"log", "--xml", "--verbose", "-r", rev, "--limit", "1", ".@HEAD"}
+}
+
+// HeadRevision returns the repository's newest revision. It is the cheapest
+// question `svn log` answers — one entry, no changed paths — so the HEAD
+// indicator can be filled in without paying for a page of history.
+func (c *Client) HeadRevision(ctx context.Context) (string, error) {
+	out, err := c.run(ctx, headRevisionArgs()...)
+	if err != nil {
+		return "", err
+	}
+	entries, err := parseLog(out)
+	if err != nil {
+		return "", err
+	}
+	if len(entries) == 0 {
+		return "", nil
+	}
+	return entries[0].Revision, nil
+}
+
+func headRevisionArgs() []string {
+	return []string{"log", "--xml", "--limit", "1", ".@HEAD"}
 }
 
 func parseLog(data []byte) ([]LogEntry, error) {

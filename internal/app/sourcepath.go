@@ -158,7 +158,7 @@ func (m *Model) applySourceChange(msg sourceChangedMsg) tea.Cmd {
 	m.retargetDisplay(m.cfg.DisplayFrom)
 	m.resetForSource()
 	m.showToast("source path: "+m.client.Dir, component.LevelSuccess)
-	return tea.Batch(m.beginInitialLoad(), m.reloadSavedDiffs())
+	return tea.Batch(m.beginInitialLoad(), m.reloadSavedDiffsIfShown())
 }
 
 // resetForSource clears everything the previous source directory produced — the
@@ -178,6 +178,8 @@ func (m *Model) resetForSource() {
 	m.logEntries = nil
 	m.logErr = nil
 	m.logMore = false
+	m.logLoading = false
+	m.headRev = ""
 	// The Log table holds its own copy of the rows, so it has to be emptied here
 	// or the old tree's revisions stay on screen until the new page arrives.
 	m.applyLogFilter()

@@ -24,6 +24,15 @@ const (
 	diffFailTTL = 10 * time.Second
 )
 
+// History cache bounds: a generous walk back through the log, and the changed
+// paths of every revision looked at along the way.
+const (
+	logPageCacheEntries = 32
+	logPageCacheBytes   = 4 << 20 // 4 MiB
+	revDetailEntries    = 512
+	revDetailBytes      = 4 << 20 // 4 MiB
+)
+
 // diffKey identifies a cached diff: the path it was produced for, and whether
 // that path was a directory row — whose diff spans every change beneath it —
 // rather than a single file.
@@ -43,11 +52,28 @@ type diffEntry struct {
 	expires time.Time
 }
 
+// logKey identifies a cached page of history: the revision it starts after
+// (empty for the first page) and the page size it was fetched with, since a
+// different size puts different revisions on every page.
+type logKey struct {
+	anchor string
+	limit  int
+}
+
+// historyPage is one cached page of revisions, with whether a further page
+// follows it.
+type historyPage struct {
+	entries []svn.LogEntry
+	more    bool
+}
+
 // sessionStore holds what revision can reuse for the life of the process. It is
 // in-memory only, so Close leaves nothing behind. It is owned by Model and only
 // touched from Update, so it needs no locking of its own.
 type sessionStore struct {
-	diffs *cache.LRU[diffKey, diffEntry]
+	diffs      *cache.LRU[diffKey, diffEntry]
+	logPages   *cache.LRU[logKey, historyPage]
+	revDetails *cache.LRU[string, []svn.ChangedPath]
 }
 
 // newSessionStore returns an empty store with the caches bounded.
@@ -56,7 +82,25 @@ func newSessionStore() *sessionStore {
 		diffs: cache.New[diffKey, diffEntry](diffCacheEntries, diffCacheBytes, func(e diffEntry) int {
 			return len(e.text) + len(e.stamp)
 		}),
+		logPages:   cache.New[logKey, historyPage](logPageCacheEntries, logPageCacheBytes, historyPageSize),
+		revDetails: cache.New[string, []svn.ChangedPath](revDetailEntries, revDetailBytes, changedPathsSize),
 	}
+}
+
+func historyPageSize(p historyPage) int {
+	n := 0
+	for _, e := range p.entries {
+		n += len(e.Revision) + len(e.Author) + len(e.Message)
+	}
+	return n
+}
+
+func changedPathsSize(paths []svn.ChangedPath) int {
+	n := 0
+	for _, p := range paths {
+		n += len(p.Action) + len(p.Path)
+	}
+	return n
 }
 
 // Diff returns the cached diff for k when it was produced from the working-copy
@@ -90,8 +134,32 @@ func (s *sessionStore) Reconcile(stamp func(diffKey) string) {
 	s.diffs.DeleteFunc(func(k diffKey, e diffEntry) bool { return e.stamp != stamp(k) })
 }
 
+// LogPage returns a page of history already fetched for k, so paging back over
+// ground already covered costs no command.
+func (s *sessionStore) LogPage(k logKey) (historyPage, bool) { return s.logPages.Get(k) }
+
+// PutLogPage records a loaded page of history.
+func (s *sessionStore) PutLogPage(k logKey, p historyPage) { s.logPages.Put(k, p) }
+
+// PurgeLogPages forgets every cached page, for when the history itself has moved
+// — a commit, an update, or an explicit refresh.
+func (s *sessionStore) PurgeLogPages() { s.logPages.Purge() }
+
+// RevDetail returns the changed paths already read for a revision. Revisions are
+// immutable, so an entry here never goes stale.
+func (s *sessionStore) RevDetail(rev string) ([]svn.ChangedPath, bool) { return s.revDetails.Get(rev) }
+
+// PutRevDetail records the changed paths of one revision.
+func (s *sessionStore) PutRevDetail(rev string, paths []svn.ChangedPath) {
+	s.revDetails.Put(rev, paths)
+}
+
 // Purge empties every cache, so the next look at anything is answered by svn.
-func (s *sessionStore) Purge() { s.diffs.Purge() }
+func (s *sessionStore) Purge() {
+	s.diffs.Purge()
+	s.logPages.Purge()
+	s.revDetails.Purge()
+}
 
 // Close releases the session. Nothing is written to disk, so purging the caches
 // is the whole of it; it is safe to call more than once.

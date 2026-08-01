@@ -158,6 +158,15 @@ type Model struct {
 	logPage    int
 	logAnchors []string
 	logMore    bool
+	// logRequested records that the first page of history has been asked for, so
+	// the prefetch that follows the first status and the load that follows the
+	// first look at the Log panel cannot both fetch it. logLoading is true while a
+	// page is in flight, which dims the rows of the page being left.
+	logRequested bool
+	logLoading   bool
+	// headRev is the repository's newest revision, read at startup and refreshed
+	// whenever the first page of history lands.
+	headRev    string
 	wcRevision string
 	// workDir is the directory revision was launched from (os.Getwd at startup).
 	workDir string
@@ -192,6 +201,7 @@ type Model struct {
 	diffGen   loadGen
 	statusGen loadGen
 	logGen    loadGen
+	revGen    loadGen
 	savedGen  loadGen
 	// mainKey identifies the selection mainText was rendered for, so a refresh of
 	// what is already on screen can keep the reader's scroll position.
@@ -279,7 +289,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		{Name: savedDiffsViewName, Content: savedDiffs},
 	}, th, keys)
 	logTable := component.NewTable[svn.LogEntry]("log", logColumns(), func(it svn.LogEntry) []string {
-		return renderLogRow(it, m.wcRevision, m.theme)
+		return renderLogRow(it, m.wcRevision, m.logLoading, m.theme)
 	}, th, keys)
 	main := component.NewViewport(th, keys)
 	cmdLogView := component.NewViewport(th, keys)
@@ -350,7 +360,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	if m.client != nil {
 		log := m.cmdLog
 		m.client.Recorder = func(r svn.CommandRecord) {
-			if isReadOnlyCommand(r.Subcommand) {
+			if !loggedCommand(r) {
 				return
 			}
 			log.record(r)
@@ -390,21 +400,21 @@ func (m *Model) retargetDisplay(scope string) {
 	m.client = &next
 }
 
-// Init loads the initial working-copy status and revision history, and — on a
-// release build — checks GitHub for a newer version in the background. When the
-// working copy is served over svn+ssh, it first ensures the configured SSH key
-// is loaded in the agent, deferring the initial load behind the passphrase
-// overlay when the key still needs unlocking.
+// Init loads the initial working-copy status and the revision the repository is
+// at, and — on a release build — checks GitHub for a newer version in the
+// background. When the working copy is served over svn+ssh, it first ensures the
+// configured SSH key is loaded in the agent, deferring the initial load behind
+// the passphrase overlay when the key still needs unlocking.
+//
+// A page of history and the saved-diff scan are not part of startup: neither can
+// be seen until a panel that shows them is looked at, so both are deferred.
 func (m *Model) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	if m.needsSSHKey {
 		cmds = append(cmds, sshCheckCmd(m.cfg.SSHKeyPath))
 	} else {
-		cmds = append(cmds, m.reloadStatus(), m.resetLogPaging())
+		cmds = append(cmds, m.beginInitialLoad())
 	}
-	// The saved diffs live on local disk, so the Diffs view can be populated
-	// regardless of whether the repository is reachable yet.
-	cmds = append(cmds, m.reloadSavedDiffs())
 	if m.build.IsRelease() {
 		cmds = append(cmds, checkUpdateCmd(m.build))
 	}
@@ -423,6 +433,7 @@ func (m *Model) Close() {
 	m.diffGen.stop()
 	m.statusGen.stop()
 	m.logGen.stop()
+	m.revGen.stop()
 	m.savedGen.stop()
 	m.session.Close()
 	m.clearDiff()
@@ -495,22 +506,55 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildChangelists()
 		m.syncDrill()
 		m.refreshChrome()
-		return m, m.diffLoadForSelection()
+		// The first paint is done, so the page of history the Log panel needs can
+		// be fetched now without the cost falling on startup.
+		return m, tea.Batch(m.diffLoadForSelection(), m.ensureLogPage())
 
 	case logLoadedMsg:
 		// A page turn taken while this load was in flight supersedes it.
 		if m.logGen.stale(msg.gen) || msg.page != m.logPage {
 			return m, nil
 		}
-		m.logErr = msg.err
-		m.logEntries = msg.entries
-		m.logMore = msg.more
-		m.recordLogAnchor()
-		m.applyLogFilter()
-		// History reveals HEAD, shown by the revision indicator next to the
-		// working-copy revision, so refresh the Status panel and bar.
+		m.logLoading = false
+		if msg.err == nil {
+			m.session.PutLogPage(
+				logKey{anchor: m.logAnchor(msg.page), limit: m.cfg.LogLimit},
+				historyPage{entries: msg.entries, more: msg.more},
+			)
+		}
+		m.applyLogPage(historyPage{entries: msg.entries, more: msg.more}, msg.err)
+		return m, m.revisionDetailForSelection()
+
+	case headLoadedMsg:
+		// The HEAD probe is the only svn command startup runs against the
+		// repository, so its failure is what tells the Log panel it is unreachable.
+		if msg.err != nil {
+			m.logErr = msg.err
+			if m.source == sourceLog {
+				m.updateMain()
+			}
+			return m, nil
+		}
+		m.headRev = msg.rev
 		m.updateStatus()
-		m.updateBar()
+		return m, nil
+
+	case revisionPendingMsg:
+		// The cursor rested long enough for this revision's paths to be worth
+		// asking svn for.
+		if m.revGen.stale(msg.gen) {
+			return m, nil
+		}
+		ctx, gen := m.revGen.begin(loadTimeout)
+		return m, loadRevisionDetailCmd(ctx, m.client, msg.rev, gen)
+
+	case revisionDetailMsg:
+		// A revision that cannot be described leaves its metadata on screen; only
+		// the changed-path list is missing, which is not worth an error for.
+		if m.revGen.stale(msg.gen) || msg.err != nil {
+			return m, nil
+		}
+		m.session.PutRevDetail(msg.rev, msg.paths)
 		if m.source == sourceLog {
 			m.updateMain()
 		}
@@ -588,7 +632,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// A terminal editor has exited, so the file may have changed: re-read the
 		// working copy (which reloads the diff on screen) and the saved-diff store.
-		return m, tea.Batch(m.reloadStatus(), m.reloadSavedDiffs())
+		return m, tea.Batch(m.reloadStatus(), m.reloadSavedDiffsIfShown())
 
 	case errMsg:
 		m.loading = false
@@ -1033,7 +1077,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		m.session.Purge()
 		m.clearDiff()
 		m.refreshChrome()
-		return tea.Batch(m.reloadStatus(), m.reloadLogPage(), m.reloadSavedDiffs()), true
+		return tea.Batch(m.reloadStatus(), m.reloadLogPage(), m.reloadSavedDiffsIfShown()), true
 	case key.Matches(k, m.keys.FocusNext):
 		m.focusNextPanel()
 		return m.afterFocusChange(), true
@@ -1957,8 +2001,10 @@ func (m *Model) submitSettings() tea.Cmd {
 	// A new output directory means a different set of saved diffs to browse; the
 	// display scope changes it too, since a blank setting resolves to the root.
 	if diffDirChanged || displayChanged {
+		m.savedDiffItems, m.savedDiffsErr = nil, nil
 		m.savedPath, m.savedText, m.savedErr = "", "", false
-		reload = tea.Batch(reload, m.reloadSavedDiffs())
+		m.rebuildSavedDiffs()
+		reload = tea.Batch(reload, m.reloadSavedDiffsIfShown())
 	}
 	// A new page size puts different revisions on every page, so the anchors
 	// reached with the old one no longer address anything.
@@ -2118,11 +2164,15 @@ func (m *Model) sizeDiffEditor() {
 	m.diffEditor.SetSize(w, 0)
 }
 
-// beginInitialLoad kicks off the working-copy status and revision-history loads
-// the rest of the UI depends on. It is deferred until any required svn+ssh key
-// is unlocked, so those remote operations don't fail on a locked key.
+// beginInitialLoad kicks off the loads the first paint depends on: the
+// working-copy status, and the single log entry the HEAD indicator needs. It is
+// deferred until any required svn+ssh key is unlocked, so those remote
+// operations don't fail on a locked key. A page of history is not part of it —
+// that follows the first status, or the first look at the Log panel.
 func (m *Model) beginInitialLoad() tea.Cmd {
-	return tea.Batch(m.reloadStatus(), m.resetLogPaging())
+	m.forgetLogPaging()
+	m.headRev = ""
+	return tea.Batch(m.reloadStatus(), headRevisionCmd(m.client))
 }
 
 // submitUnlock adds the configured SSH key to the agent with the entered
@@ -2267,6 +2317,7 @@ func (m *Model) handleSelection(sel uimsg.SelectedMsg) tea.Cmd {
 	case "log":
 		if m.source == sourceLog {
 			m.updateMain()
+			return m.revisionDetailForSelection()
 		}
 	}
 	return nil
@@ -2285,13 +2336,19 @@ func (m *Model) afterFocusChange() tea.Cmd {
 	case panelMain, panelCmdLog:
 		// Focusing Main or the command log only scrolls it; keep the current source.
 	}
+	// History is asked for before Main is rendered, so the first look at the Log
+	// panel shows that it is loading rather than that it is empty.
+	var cmd tea.Cmd
+	if m.source == sourceLog {
+		cmd = tea.Batch(m.ensureLogPage(), m.revisionDetailForSelection())
+	}
 	m.syncMainTitle()
 	m.updateBar()
 	m.updateMain()
 	if m.source == sourceFiles {
 		return m.diffLoadForSelection()
 	}
-	return nil
+	return cmd
 }
 
 // focusNextPanel and focusPrevPanel cycle focus like the focus manager but skip
@@ -2396,6 +2453,17 @@ func (m *Model) rederiveDiff() {
 
 func (m *Model) reloadSavedDiffs() tea.Cmd {
 	return loadSavedDiffsCmd(m.diffDir(), m.savedGen.next())
+}
+
+// reloadSavedDiffsIfShown re-scans the patch files only while the Diffs view is
+// the one on screen. Anywhere else the scan is deferred: that view re-scans
+// whenever it is opened, so the disk is never read for a list nobody is looking
+// at.
+func (m *Model) reloadSavedDiffsIfShown() tea.Cmd {
+	if !m.filesViewIsDiffs() {
+		return nil
+	}
+	return m.reloadSavedDiffs()
 }
 
 func (m *Model) readSavedDiff(path string) tea.Cmd {
@@ -2730,23 +2798,82 @@ func (m *Model) filteredLogEntries() []svn.LogEntry {
 
 // loadLogPage fetches the given 1-based page of history. The anchor it needs was
 // recorded when the preceding page loaded, so only a page that has been reached
-// before — or the first — can be requested.
+// before — or the first — can be requested. A page the session already holds is
+// rendered on the spot and costs no command, so paging back over ground already
+// covered is instant.
 func (m *Model) loadLogPage(page int) tea.Cmd {
-	anchor := ""
-	if page > 1 {
-		anchor = m.logAnchors[page-2]
-	}
 	m.logPage = page
+	m.logRequested = true
+	k := logKey{anchor: m.logAnchor(page), limit: m.cfg.LogLimit}
+	if p, ok := m.session.LogPage(k); ok {
+		// Whatever is in flight was for the page just left; its reply must not
+		// land on top of this one.
+		m.logGen.next()
+		m.logLoading = false
+		m.applyLogPage(p, nil)
+		return m.revisionDetailForSelection()
+	}
+	// The rows of the page being left stay on screen, dimmed, until the new page
+	// lands, so the panel never blanks mid-turn.
+	m.logLoading = true
 	ctx, gen := m.logGen.begin(loadTimeout)
-	return loadLogCmd(ctx, m.client, anchor, page, m.cfg.LogLimit, gen)
+	return loadLogCmd(ctx, m.client, k.anchor, page, m.cfg.LogLimit, gen)
 }
 
-// resetLogPaging returns the Log panel to the first page and forgets the anchors
-// reached from the old history, for when what is being logged changes.
+// logAnchor returns the revision the given 1-based page starts after, recorded
+// when the page before it loaded. The first page needs none.
+func (m *Model) logAnchor(page int) string {
+	if page <= 1 || page-2 >= len(m.logAnchors) {
+		return ""
+	}
+	return m.logAnchors[page-2]
+}
+
+// applyLogPage puts a page of history — freshly loaded or served from the
+// session — on screen, refreshing the Status panel and bar with the HEAD the
+// first page reveals.
+func (m *Model) applyLogPage(p historyPage, err error) {
+	m.logErr = err
+	m.logEntries = p.entries
+	m.logMore = p.more
+	m.recordLogAnchor()
+	m.applyLogFilter()
+	if m.logPage == 1 && len(p.entries) > 0 {
+		m.headRev = p.entries[0].Revision
+	}
+	m.updateStatus()
+	m.updateBar()
+	if m.source == sourceLog {
+		m.updateMain()
+	}
+}
+
+// ensureLogPage fetches the page of history the Log panel needs, once. It is
+// called both when the first status lands and when the panel is first looked at,
+// whichever comes first; the second caller finds the page already asked for and
+// does nothing.
+func (m *Model) ensureLogPage() tea.Cmd {
+	if m.logRequested {
+		return nil
+	}
+	return m.loadLogPage(m.logPage)
+}
+
+// resetLogPaging returns the Log panel to the first page and reloads it, for
+// when what is being logged changes.
 func (m *Model) resetLogPaging() tea.Cmd {
+	m.forgetLogPaging()
+	return m.loadLogPage(1)
+}
+
+// forgetLogPaging drops everything the old history was addressed by: the page on
+// screen, the anchors reached from it and the pages the session held.
+func (m *Model) forgetLogPaging() {
 	m.logAnchors = nil
 	m.logMore = false
-	return m.loadLogPage(1)
+	m.logPage = 1
+	m.logRequested = false
+	m.session.PurgeLogPages()
 }
 
 // recordLogAnchor remembers the revision the page on screen ends on, which is
@@ -2762,8 +2889,10 @@ func (m *Model) recordLogAnchor() {
 	m.logAnchors[m.logPage-1] = last
 }
 
-// reloadLogPage refetches the page on screen, keeping the cursor where it is.
+// reloadLogPage refetches the page on screen, keeping the cursor where it is. It
+// is an explicit refresh, so the cached pages are dropped rather than served.
 func (m *Model) reloadLogPage() tea.Cmd {
+	m.session.PurgeLogPages()
 	return m.loadLogPage(m.logPage)
 }
 
@@ -2876,15 +3005,10 @@ func (m *Model) updateStatus() {
 	m.status.SetContent(strings.Join(lines, "\n"))
 }
 
-// headRevision returns the repository's latest revision, taken from the newest
-// log entry (history is pegged at HEAD, so entry 0 is HEAD). It is empty until
-// history has loaded.
-func (m *Model) headRevision() string {
-	if len(m.logEntries) == 0 {
-		return ""
-	}
-	return m.logEntries[0].Revision
-}
+// headRevision returns the repository's latest revision: read at startup by the
+// one-entry HEAD probe, and refreshed whenever the first page of history lands.
+// It is empty until that probe answers.
+func (m *Model) headRevision() string { return m.headRev }
 
 // updateMain fills the Main panel from whichever side panel currently drives it.
 // The Main and Status panels are searched (not filtered): any active search
@@ -3101,11 +3225,16 @@ func (m *Model) fileDetail() string {
 }
 
 // logDetail renders the metadata, message and changed paths of the selected
-// revision.
+// revision. The changed paths cost their own `svn log --verbose`, so they are
+// filled in from the session when that load has landed and the rest of the
+// detail is shown without waiting for it.
 func (m *Model) logDetail() string {
 	entry, ok := m.log.Selected()
 	if !ok {
-		if m.logErr != nil {
+		switch {
+		case m.logLoading:
+			return "Loading history…"
+		case m.logErr != nil:
 			return "Unable to load history: " + m.logErr.Error()
 		}
 		return "No revision history."
@@ -3119,13 +3248,34 @@ func (m *Model) logDetail() string {
 		lines = append(lines, "date:   "+entry.Date.Format("2006-01-02 15:04"))
 	}
 	lines = append(lines, "", entry.Message)
-	if len(entry.Paths) > 0 {
+	if paths, ok := m.session.RevDetail(entry.Revision); ok && len(paths) > 0 {
 		lines = append(lines, "", "Changed paths:")
-		for _, p := range entry.Paths {
+		for _, p := range paths {
 			lines = append(lines, fmt.Sprintf("  %s %s", p.Action, p.Path))
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// revisionDetailForSelection returns a command to read the changed paths of the
+// selected revision. Revisions are immutable, so one the session already holds
+// costs no command; a miss is debounced like a diff, so walking the Log panel
+// does not spawn an svn process for every row passed over.
+func (m *Model) revisionDetailForSelection() tea.Cmd {
+	// Whatever is in flight was for the row just left; its reply is of no use
+	// now, so it is dropped rather than rendered.
+	gen := m.revGen.next()
+	entry, ok := m.log.Selected()
+	if !ok || entry.Revision == "" {
+		return nil
+	}
+	if _, held := m.session.RevDetail(entry.Revision); held {
+		return nil
+	}
+	rev := entry.Revision
+	return tea.Tick(diffDebounce, func(time.Time) tea.Msg {
+		return revisionPendingMsg{rev: rev, gen: gen}
+	})
 }
 
 // updateBar sets the contextual key hints and the right-aligned load state.

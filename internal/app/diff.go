@@ -13,12 +13,11 @@ import (
 )
 
 // diffSource is what a queued save will write once the file-name prompt is
-// answered: either the diff already on screen (text), or the paths whose diff
-// must still be generated (a changelist, whose files need not share a directory).
-// name is the file name a blank entry falls back to.
+// answered: the paths whose diff is to be generated — one target for a file or
+// directory row, every member for a changelist, none at all for the whole
+// working copy. name is the file name a blank entry falls back to.
 type diffSource struct {
 	name  string
-	text  string
 	paths []string
 }
 
@@ -43,10 +42,20 @@ func (m *Model) saveDiff() tea.Cmd {
 		m.showToast("no diff to save for this selection", component.LevelWarning)
 		return nil
 	}
-	// The diff is snapshotted so what is written is what was on screen when the
-	// prompt opened, whatever lands behind the overlay meanwhile.
-	m.openDiffPrompt(diffSource{name: diffFileName(m.diffPath), text: m.diffText})
+	// The target is snapshotted, so what is written is the diff of the selection
+	// the prompt opened on, whatever happens behind the overlay meanwhile.
+	m.openDiffPrompt(diffSource{name: diffFileName(m.diffPath), paths: diffTargets(m.diffPath)})
 	return nil
+}
+
+// diffTargets is the path set that diffs a single Files-panel selection. The
+// synthetic "/" root covers the whole working copy, which svn diffs with no path
+// at all.
+func diffTargets(path string) []string {
+	if path == fileTreeRoot {
+		return nil
+	}
+	return []string{path}
 }
 
 // saveChangelistDiff queues a save of the highlighted changelist's combined diff.
@@ -79,16 +88,13 @@ func (m *Model) openDiffPrompt(src diffSource) {
 }
 
 // submitDiffName closes the prompt and writes the queued diff under the entered
-// name, into the configured output directory. A changelist's diff is generated
-// as part of the write, since it was never on screen.
+// name, into the configured output directory. The patch is generated as part of
+// the write, so the `svn diff` behind it is one the user asked for and shows up
+// in the command log.
 func (m *Model) submitDiffName(name string) tea.Cmd {
 	src := m.diffSrc
 	m.closeDiffName()
-	file := diffSaveName(name, src.name)
-	if len(src.paths) > 0 {
-		return saveChangelistDiffCmd(m.client, src.paths, m.diffDir(), file)
-	}
-	return saveDiffCmd(m.diffDir(), file, src.text)
+	return saveDiffCmd(m.client, src.paths, m.diffDir(), diffSaveName(name, src.name))
 }
 
 // closeDiffName hides the save-diff prompt and drops the queued source.

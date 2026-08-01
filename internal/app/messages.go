@@ -142,6 +142,32 @@ type logLoadedMsg struct {
 	gen     uint64
 }
 
+// headLoadedMsg carries the repository's newest revision from the one-entry log
+// read at startup, which is all the HEAD indicator needs.
+type headLoadedMsg struct {
+	rev string
+	err error
+}
+
+// revisionDetailMsg carries the changed paths of one revision, loaded on demand
+// because `svn log --verbose` over a whole page is the most expensive call
+// revision makes.
+type revisionDetailMsg struct {
+	rev   string
+	paths []svn.ChangedPath
+	err   error
+	gen   uint64
+}
+
+// revisionPendingMsg fires once the cursor has rested on a revision for
+// diffDebounce, at which point its changed paths are worth asking svn for. A
+// stamp that has been superseded means the cursor moved on, so the load never
+// runs.
+type revisionPendingMsg struct {
+	rev string
+	gen uint64
+}
+
 // stagedMsg carries the result of staging or unstaging a single path.
 type stagedMsg struct {
 	path       string
@@ -303,9 +329,20 @@ const (
 	diffFilePerm = 0o644
 )
 
-// saveDiffCmd writes diff into dir as name off the UI goroutine.
-func saveDiffCmd(dir, name, diff string) tea.Cmd {
-	return func() tea.Msg { return writeDiff(dir, name, diff) }
+// saveDiffCmd generates the diff of the given paths and writes it into dir as
+// name, off the UI goroutine. An empty path set diffs the whole working copy.
+// The run is marked as a user action, so — unlike the diffs revision loads to
+// fill Main — it is reported in the command log.
+func saveDiffCmd(client *svn.Client, paths []string, dir, name string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(svn.WithUserAction(context.Background()), 60*time.Second)
+		defer cancel()
+		diff, err := client.DiffPaths(ctx, paths)
+		if err != nil {
+			return diffSavedMsg{path: filepath.Join(dir, name), err: err}
+		}
+		return writeDiff(dir, name, diff)
+	}
 }
 
 // loadSavedDiffsCmd lists the patch files already saved in dir, off the UI
@@ -324,21 +361,6 @@ func readSavedDiffCmd(path string, gen uint64) tea.Cmd {
 	return func() tea.Msg {
 		b, err := os.ReadFile(path)
 		return savedDiffReadMsg{path: path, text: string(b), err: err, gen: gen}
-	}
-}
-
-// saveChangelistDiffCmd generates the combined diff of the given paths and
-// writes it, off the UI goroutine. It backs saving a changelist, whose diff is
-// not on screen and so has to be produced first.
-func saveChangelistDiffCmd(client *svn.Client, paths []string, dir, name string) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		diff, err := client.DiffPaths(ctx, paths)
-		if err != nil {
-			return diffSavedMsg{path: filepath.Join(dir, name), err: err}
-		}
-		return writeDiff(dir, name, diff)
 	}
 }
 
@@ -368,6 +390,28 @@ func loadLogCmd(ctx context.Context, client *svn.Client, anchor string, page, li
 	return func() tea.Msg {
 		entries, more, err := client.LogPage(ctx, anchor, limit)
 		return logLoadedMsg{entries: entries, page: page, more: more, err: err, gen: gen}
+	}
+}
+
+// headRevisionCmd reads just the newest revision off the UI goroutine, so the
+// Status panel's HEAD indicator is correct from the first paint without a page
+// of history being fetched for it.
+func headRevisionCmd(client *svn.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
+		defer cancel()
+		rev, err := client.HeadRevision(ctx)
+		return headLoadedMsg{rev: rev, err: err}
+	}
+}
+
+// loadRevisionDetailCmd reads one revision's changed paths off the UI goroutine.
+// Errors are carried on the message so a revision that cannot be described
+// leaves the metadata already on screen intact.
+func loadRevisionDetailCmd(ctx context.Context, client *svn.Client, rev string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		entry, err := client.RevisionDetail(ctx, rev)
+		return revisionDetailMsg{rev: rev, paths: entry.Paths, err: err, gen: gen}
 	}
 }
 
