@@ -144,7 +144,14 @@ type Model struct {
 	clItems          []svn.StatusItem
 	clCollapsedDirs  map[string]bool
 	logEntries       []svn.LogEntry
-	wcRevision       string
+	// logPage is the 1-based page of history on screen. logAnchors[i] is the
+	// revision page i+2 starts after — recorded as each page loads, since a page
+	// can only be addressed by a revision from the one before it — and logMore
+	// reports whether a further page exists.
+	logPage    int
+	logAnchors []string
+	logMore    bool
+	wcRevision string
 	// workDir is the directory revision was launched from (os.Getwd at startup).
 	workDir string
 	// launchDir is the directory the svn client was pointed at on startup — the
@@ -297,6 +304,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		needsSSHKey:     info != nil && info.IsOverSSH(),
 		commitCL:        stagedChangelist,
 		build:           build,
+		logPage:         1,
 		loading:         true,
 	}
 	m.passEditor.SetSecret(true)
@@ -362,7 +370,7 @@ func (m *Model) Init() tea.Cmd {
 	if m.needsSSHKey {
 		cmds = append(cmds, sshCheckCmd(m.cfg.SSHKeyPath))
 	} else {
-		cmds = append(cmds, loadStatusCmd(m.client), loadLogCmd(m.client))
+		cmds = append(cmds, loadStatusCmd(m.client), m.resetLogPaging())
 	}
 	// The saved diffs live on local disk, so the Diffs view can be populated
 	// regardless of whether the repository is reachable yet.
@@ -431,8 +439,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.diffLoadForSelection()
 
 	case logLoadedMsg:
+		// A page turn taken while this load was in flight supersedes it.
+		if msg.page != m.logPage {
+			return m, nil
+		}
 		m.logErr = msg.err
 		m.logEntries = msg.entries
+		m.logMore = msg.more
+		m.recordLogAnchor()
 		m.applyLogFilter()
 		// History reveals HEAD, shown by the revision indicator next to the
 		// working-copy revision, so refresh the Status panel and bar.
@@ -532,7 +546,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.diffPath, m.diffText = "", ""
 		m.refreshChrome()
-		return m, tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client))
+		// A commit adds a revision at the head of history: show it.
+		m.log.GoTop()
+		return m, tea.Batch(loadStatusCmd(m.client), m.resetLogPaging())
 
 	case revertedMsg:
 		if msg.err != nil {
@@ -570,7 +586,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.diffPath, m.diffText = "", ""
 		m.updateStatus()
 		m.updateBar()
-		return m, tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client))
+		// A revision picked in the Log was on the page on screen, so stay there; a
+		// plain update lands on HEAD, which is on the first page.
+		log := m.reloadLogPage()
+		if !msg.toRevision {
+			m.log.GoTop()
+			log = m.resetLogPaging()
+		}
+		return m, tea.Batch(loadStatusCmd(m.client), log)
 
 	case updateAvailableMsg:
 		// Offer the update only when nothing else is on screen, so the prompt
@@ -881,6 +904,7 @@ func (m *Model) overlayToast(base string) string {
 // right column.
 func (m *Model) baseView() string {
 	m.panels[panelFiles].SetFooter(m.filesFooter())
+	m.panels[panelLog].SetFooter(m.logFooter())
 	left := lipgloss.JoinVertical(lipgloss.Left,
 		m.panels[panelStatus].View(),
 		m.panels[panelFiles].View(),
@@ -910,7 +934,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		m.dismissToast()
 		m.diffPath, m.diffText = "", ""
 		m.refreshChrome()
-		return tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client), loadSavedDiffsCmd(m.diffDir())), true
+		return tea.Batch(loadStatusCmd(m.client), m.reloadLogPage(), loadSavedDiffsCmd(m.diffDir())), true
 	case key.Matches(k, m.keys.FocusNext):
 		m.focusNextPanel()
 		return m.afterFocusChange(), true
@@ -980,6 +1004,14 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		}
 		if m.focus.Index() == panelFiles {
 			return m.assignChangelist(), true
+		}
+		if m.focus.Index() == panelLog {
+			return m.nextLogPage(), true
+		}
+		return nil, false
+	case "p":
+		if m.focus.Index() == panelLog {
+			return m.prevLogPage(), true
 		}
 		return nil, false
 	case "N":
@@ -1799,6 +1831,7 @@ func (m *Model) submitSettings() tea.Cmd {
 	untrackedChanged := cfg.HideUntracked != m.hideUntracked
 	displayChanged := cfg.DisplayFrom != m.cfg.DisplayFrom
 	diffDirChanged := cfg.DiffOutputDir != m.cfg.DiffOutputDir
+	logLimitChanged := cfg.LogLimit != m.cfg.LogLimit
 	m.cfg = cfg
 	m.dirDiff = cfg.DirectoryDiff
 	m.hideUntracked = cfg.HideUntracked
@@ -1823,6 +1856,12 @@ func (m *Model) submitSettings() tea.Cmd {
 	if diffDirChanged || displayChanged {
 		m.savedPath, m.savedText, m.savedErr = "", "", false
 		reload = tea.Batch(reload, loadSavedDiffsCmd(m.diffDir()))
+	}
+	// A new page size puts different revisions on every page, so the anchors
+	// reached with the old one no longer address anything.
+	if logLimitChanged && !displayChanged {
+		m.log.GoTop()
+		reload = tea.Batch(reload, m.resetLogPaging())
 	}
 	if err := config.Save(m.cfg); err != nil {
 		m.showToast("couldn't save settings: "+err.Error(), component.LevelWarning)
@@ -1980,7 +2019,7 @@ func (m *Model) sizeDiffEditor() {
 // the rest of the UI depends on. It is deferred until any required svn+ssh key
 // is unlocked, so those remote operations don't fail on a locked key.
 func (m *Model) beginInitialLoad() tea.Cmd {
-	return tea.Batch(loadStatusCmd(m.client), loadLogCmd(m.client))
+	return tea.Batch(loadStatusCmd(m.client), m.resetLogPaging())
 }
 
 // submitUnlock adds the configured SSH key to the agent with the entered
@@ -2481,7 +2520,8 @@ func (m *Model) applyLogFilter() {
 }
 
 // filteredLogEntries returns the revisions matching the Log-panel filter, or all
-// of them when no filter is set.
+// of them when no filter is set. The filter only ever sees the page on screen,
+// since that is all the Log panel holds.
 func (m *Model) filteredLogEntries() []svn.LogEntry {
 	q := parseFilter(m.filters[panelLog], logFilterKeys)
 	if q.empty() {
@@ -2494,6 +2534,75 @@ func (m *Model) filteredLogEntries() []svn.LogEntry {
 		}
 	}
 	return out
+}
+
+// loadLogPage fetches the given 1-based page of history. The anchor it needs was
+// recorded when the preceding page loaded, so only a page that has been reached
+// before — or the first — can be requested.
+func (m *Model) loadLogPage(page int) tea.Cmd {
+	anchor := ""
+	if page > 1 {
+		anchor = m.logAnchors[page-2]
+	}
+	m.logPage = page
+	return loadLogCmd(m.client, anchor, page, m.cfg.LogLimit)
+}
+
+// resetLogPaging returns the Log panel to the first page and forgets the anchors
+// reached from the old history, for when what is being logged changes.
+func (m *Model) resetLogPaging() tea.Cmd {
+	m.logAnchors = nil
+	m.logMore = false
+	return m.loadLogPage(1)
+}
+
+// recordLogAnchor remembers the revision the page on screen ends on, which is
+// what the page after it must be anchored to.
+func (m *Model) recordLogAnchor() {
+	if !m.logMore || len(m.logEntries) == 0 {
+		return
+	}
+	last := m.logEntries[len(m.logEntries)-1].Revision
+	for len(m.logAnchors) < m.logPage {
+		m.logAnchors = append(m.logAnchors, "")
+	}
+	m.logAnchors[m.logPage-1] = last
+}
+
+// reloadLogPage refetches the page on screen, keeping the cursor where it is.
+func (m *Model) reloadLogPage() tea.Cmd {
+	return m.loadLogPage(m.logPage)
+}
+
+// nextLogPage and prevLogPage turn the Log panel a page at a time. Turning to an
+// unrelated set of revisions starts at the top, unlike a refetch of the same
+// page, which keeps the selection.
+func (m *Model) nextLogPage() tea.Cmd {
+	if !m.logMore {
+		m.showToast("no older revisions", component.LevelWarning)
+		return nil
+	}
+	m.log.GoTop()
+	return m.loadLogPage(m.logPage + 1)
+}
+
+func (m *Model) prevLogPage() tea.Cmd {
+	if m.logPage <= 1 {
+		m.showToast("already on the first page", component.LevelWarning)
+		return nil
+	}
+	m.log.GoTop()
+	return m.loadLogPage(m.logPage - 1)
+}
+
+// logFooter is the Log panel's position indicator: where the cursor sits within
+// the page, how many revisions the page holds, and the page number.
+func (m *Model) logFooter() string {
+	label := countLabel(m.log.Index()+1, len(m.log.Items()), len(m.logEntries))
+	if label == "" {
+		return ""
+	}
+	return label + " · " + strconv.Itoa(m.logPage)
 }
 
 // layout sizes the panels and bar for the current terminal dimensions.
@@ -2834,7 +2943,7 @@ func (m *Model) panelHints(p int) []string {
 	case panelFiles:
 		return m.filesHints()
 	case panelLog:
-		return []string{"space update to rev", "c commit", "/ filter"}
+		return []string{"space update to rev", "n/p page", "c commit", "/ filter"}
 	}
 	// The command log only scrolls; it has no actions of its own.
 	return nil

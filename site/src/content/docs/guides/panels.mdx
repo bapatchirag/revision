@@ -96,13 +96,22 @@ This view is read-only: stage, revert and delete do nothing here.
 
 ## Log
 
-Revision history, newest first, capped at the 50 most recent revisions. Each row carries
-the full revision number, the author, and the first line of the message. An asterisk marks
-where the working copy sits.
+Revision history, newest first, a page at a time. Each row carries the full revision
+number, the author, and the first line of the message. An asterisk marks where the working
+copy sits.
 
 Selecting a revision shows its date, full message and changed paths in Main.
 <KeyCap key="space" /> [updates the working copy](/workflows/updating/) to the selected
 revision.
+
+A page holds [`logLimit`](/reference/configuration/#loglimit) revisions — 100 by default.
+<KeyCap key="n" /> loads the next page and <KeyCap key="p" /> the previous one. The footer
+shows where the cursor sits within the page and which page you are on, so `12 of 100 · 3`
+is the twelfth revision of the third page.
+
+Filtering with <KeyCap key="/" /> searches the page on screen, not the whole history; the
+filter stays applied as you turn pages. Committing returns the panel to the first page, so
+the new revision is in view.
 
 ## Command Log
 

@@ -43,7 +43,7 @@ func hasFileLeaf(nodes []fileNode, path string) bool {
 
 func TestFilterLogByParams(t *testing.T) {
 	m := loadItems(t, sizedModel(t), nil)
-	m = stepModel(t, m, logLoadedMsg{entries: []svn.LogEntry{
+	m = stepModel(t, m, logLoadedMsg{page: 1, entries: []svn.LogEntry{
 		{Revision: "42", Author: "alice", Message: "Fix crash\n\nnull pointer in parser"},
 		{Revision: "41", Author: "bob", Message: "Add feature"},
 		{Revision: "40", Author: "alice", Message: "Docs update"},
@@ -81,7 +81,7 @@ func TestFilterLogByParams(t *testing.T) {
 
 func TestFilterLogEscClears(t *testing.T) {
 	m := loadItems(t, sizedModel(t), nil)
-	m = stepModel(t, m, logLoadedMsg{entries: []svn.LogEntry{
+	m = stepModel(t, m, logLoadedMsg{page: 1, entries: []svn.LogEntry{
 		{Revision: "42", Author: "alice", Message: "one"},
 		{Revision: "41", Author: "bob", Message: "two"},
 		{Revision: "40", Author: "carol", Message: "three"},
@@ -239,7 +239,7 @@ func TestSearchMainNoMatchToasts(t *testing.T) {
 
 func TestFilterInputVisibleWhileTyping(t *testing.T) {
 	m := loadItems(t, sizedModel(t), nil)
-	m = stepModel(t, m, logLoadedMsg{entries: []svn.LogEntry{{Revision: "1", Author: "a", Message: "m"}}})
+	m = stepModel(t, m, logLoadedMsg{page: 1, entries: []svn.LogEntry{{Revision: "1", Author: "a", Message: "m"}}})
 	m = stepModel(t, m, keyRunes("3"))
 	m = stepModel(t, m, keyRunes("/"))
 	m = stepModel(t, m, keyRunes("rev:1"))

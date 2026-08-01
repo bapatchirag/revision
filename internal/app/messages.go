@@ -64,9 +64,13 @@ type editedMsg struct {
 	err      error
 }
 
-// logLoadedMsg carries the result of a `svn log` load.
+// logLoadedMsg carries the result of a `svn log` load. page is the 1-based page
+// it was requested for, so a response overtaken by a later page turn can be
+// discarded; more reports whether a further page exists.
 type logLoadedMsg struct {
 	entries []svn.LogEntry
+	page    int
+	more    bool
 	err     error
 }
 
@@ -96,10 +100,14 @@ type deletedMsg struct {
 	err  error
 }
 
-// updatedMsg carries the result of an `svn update`.
+// updatedMsg carries the result of an `svn update`. toRevision distinguishes an
+// update to a revision picked in the Log — which was necessarily on the page on
+// screen, so the Log stays there — from a plain update to HEAD, which lands on
+// the first page.
 type updatedMsg struct {
-	revision string
-	err      error
+	revision   string
+	toRevision bool
+	err        error
 }
 
 // updateAvailableMsg is emitted when the startup check finds a newer release
@@ -263,14 +271,16 @@ func writeDiff(dir, name, diff string) diffSavedMsg {
 	return diffSavedMsg{path: path}
 }
 
-// loadLogCmd runs `svn log` off the UI goroutine. Errors are carried on the
-// message so history-load failures stay confined to the Log panel.
-func loadLogCmd(client *svn.Client) tea.Cmd {
+// loadLogCmd runs `svn log` off the UI goroutine for one page of history: anchor
+// is the revision the previous page ended on (empty for the first page) and page
+// is the 1-based number the result belongs to. Errors are carried on the message
+// so history-load failures stay confined to the Log panel.
+func loadLogCmd(client *svn.Client, anchor string, page, limit int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		entries, err := client.Log(ctx, logLimit)
-		return logLoadedMsg{entries: entries, err: err}
+		entries, more, err := client.LogPage(ctx, anchor, limit)
+		return logLoadedMsg{entries: entries, page: page, more: more, err: err}
 	}
 }
 
@@ -459,6 +469,6 @@ func updateToRevisionCmd(client *svn.Client, rev string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		r, err := client.UpdateToRevision(ctx, rev)
-		return updatedMsg{revision: r, err: err}
+		return updatedMsg{revision: r, toRevision: true, err: err}
 	}
 }

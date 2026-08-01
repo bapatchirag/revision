@@ -944,7 +944,7 @@ func TestColorizeDiff(t *testing.T) {
 
 func TestLogPanelSelectionUpdatesMain(t *testing.T) {
 	m := loadItems(t, sizedModel(t), nil)
-	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{
 		{Revision: "42", Author: "alice", Message: "first commit"},
 		{Revision: "41", Author: "bob", Message: "second commit"},
 	}})
@@ -982,7 +982,7 @@ func TestModelGoldenLayout(t *testing.T) {
 		{Path: "gone.txt", State: svn.StateDeleted},
 	})
 	// History reveals HEAD (r50) so the Status panel shows every field.
-	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{{Revision: "50"}, {Revision: "42"}}})
+	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{{Revision: "50"}, {Revision: "42"}}})
 	m = next.(*Model)
 	golden.RequireEqual(t, []byte(m.View()))
 }
@@ -1822,7 +1822,7 @@ func TestUpdateResultShowsToast(t *testing.T) {
 func TestRevisionIndicatorTracksUpdate(t *testing.T) {
 	m := loadItems(t, sizedModel(t), nil)
 	// History (newest first) reveals HEAD as r50; the working copy opens at r42.
-	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{
 		{Revision: "50"}, {Revision: "49"}, {Revision: "42"},
 	}})
 	m = next.(*Model)
@@ -1842,7 +1842,7 @@ func TestRevisionIndicatorTracksUpdate(t *testing.T) {
 func TestLogStarsWorkingCopyRevision(t *testing.T) {
 	m := loadItems(t, sizedModel(t), nil)
 	// The working copy opens at r42 (from info); history includes it.
-	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{
 		{Revision: "50"}, {Revision: "42"}, {Revision: "41"},
 	}})
 	m = next.(*Model)
@@ -1886,7 +1886,7 @@ func TestRenderLogRowColorsWorkingCopyAsterisk(t *testing.T) {
 func TestUpdateShowsProgressModal(t *testing.T) {
 	m := loadItems(t, sizedModel(t), nil)
 	// History reveals HEAD r50; the working copy opens at r42.
-	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{
 		{Revision: "50"}, {Revision: "42"},
 	}})
 	m = next.(*Model)
@@ -1923,9 +1923,215 @@ func TestUpdateShowsProgressModal(t *testing.T) {
 	}
 }
 
+// logPagedModel loads a first page of two revisions with a further page
+// available, and focuses the Log panel.
+func logPagedModel(t *testing.T) *Model {
+	t.Helper()
+	m := loadItems(t, sizedModel(t), nil)
+	next, _ := m.Update(logLoadedMsg{page: 1, more: true, entries: []svn.LogEntry{
+		{Revision: "50", Author: "alice", Message: "fifty"},
+		{Revision: "49", Author: "bob", Message: "forty-nine"},
+	}})
+	m = next.(*Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	return next.(*Model)
+}
+
+func pressRune(t *testing.T, m *Model, r rune) (*Model, tea.Cmd) {
+	t.Helper()
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	return next.(*Model), cmd
+}
+
+func TestLogPagingWalksForwardAndBack(t *testing.T) {
+	m := logPagedModel(t)
+
+	// The page the first load ended on anchors the next one.
+	m, cmd := pressRune(t, m, 'n')
+	if cmd == nil {
+		t.Fatal("n should load the next page")
+	}
+	if m.logPage != 2 {
+		t.Fatalf("logPage = %d, want 2", m.logPage)
+	}
+	if got := m.logAnchors[0]; got != "49" {
+		t.Errorf("anchor for page 2 = %q, want 49", got)
+	}
+
+	next, _ := m.Update(logLoadedMsg{page: 2, entries: []svn.LogEntry{{Revision: "48"}}})
+	m = next.(*Model)
+	if len(m.logEntries) != 1 || m.logEntries[0].Revision != "48" {
+		t.Fatalf("page 2 entries = %+v, want just r48", m.logEntries)
+	}
+	if m.logMore {
+		t.Error("a short page is the last page")
+	}
+
+	// n at the end warns rather than advancing past it.
+	m, cmd = pressRune(t, m, 'n')
+	if cmd != nil {
+		t.Error("n on the last page should not load anything")
+	}
+	if m.logPage != 2 {
+		t.Errorf("logPage = %d, want 2", m.logPage)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "no older revisions") {
+		t.Errorf("expected a guard toast, got:\n%s", view)
+	}
+
+	// p returns to the first page, which needs no anchor.
+	m, cmd = pressRune(t, m, 'p')
+	if cmd == nil {
+		t.Fatal("p should load the previous page")
+	}
+	if m.logPage != 1 {
+		t.Errorf("logPage = %d, want 1", m.logPage)
+	}
+	if msg, ok := cmd().(logLoadedMsg); ok && msg.page != 1 {
+		t.Errorf("loaded page %d, want 1", msg.page)
+	}
+
+	// p on the first page warns too.
+	next, _ = m.Update(logLoadedMsg{page: 1, more: true, entries: []svn.LogEntry{{Revision: "50"}, {Revision: "49"}}})
+	m = next.(*Model)
+	m, cmd = pressRune(t, m, 'p')
+	if cmd != nil {
+		t.Error("p on the first page should not load anything")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "already on the first page") {
+		t.Errorf("expected a guard toast, got:\n%s", view)
+	}
+}
+
+func TestLogPagingIgnoresSupersededLoad(t *testing.T) {
+	m := logPagedModel(t)
+	m, _ = pressRune(t, m, 'n')
+
+	// A page-1 response arriving after the turn to page 2 is stale.
+	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{{Revision: "1"}}})
+	m = next.(*Model)
+	if len(m.logEntries) != 2 || m.logEntries[0].Revision != "50" {
+		t.Errorf("a superseded load overwrote the page: %+v", m.logEntries)
+	}
+}
+
+func TestLogPageTurnStartsAtTheTop(t *testing.T) {
+	m := logPagedModel(t)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(*Model)
+	if m.log.Index() != 1 {
+		t.Fatalf("cursor = %d, want 1", m.log.Index())
+	}
+
+	m, _ = pressRune(t, m, 'n')
+	next, _ = m.Update(logLoadedMsg{page: 2, entries: []svn.LogEntry{{Revision: "48"}, {Revision: "47"}}})
+	m = next.(*Model)
+	if m.log.Index() != 0 {
+		t.Errorf("cursor = %d after a page turn, want 0", m.log.Index())
+	}
+}
+
+func TestLogRefreshKeepsPageAndCursor(t *testing.T) {
+	m := logPagedModel(t)
+	m, _ = pressRune(t, m, 'n')
+	next, _ := m.Update(logLoadedMsg{page: 2, more: true, entries: []svn.LogEntry{{Revision: "48"}, {Revision: "47"}}})
+	m = next.(*Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(*Model)
+
+	m, cmd := pressRune(t, m, 'R')
+	if cmd == nil {
+		t.Fatal("R should reload")
+	}
+	if m.logPage != 2 {
+		t.Errorf("logPage = %d after refresh, want 2", m.logPage)
+	}
+	if m.log.Index() != 1 {
+		t.Errorf("cursor = %d after refresh, want 1 (kept)", m.log.Index())
+	}
+}
+
+func TestUpdateToRevisionStaysOnPageButPlainUpdateResets(t *testing.T) {
+	onPageTwo := func(t *testing.T) *Model {
+		t.Helper()
+		m := logPagedModel(t)
+		m, _ = pressRune(t, m, 'n')
+		next, _ := m.Update(logLoadedMsg{page: 2, more: true, entries: []svn.LogEntry{{Revision: "48"}}})
+		return next.(*Model)
+	}
+
+	m := onPageTwo(t)
+	next, _ := m.Update(updatedMsg{revision: "48", toRevision: true})
+	if got := next.(*Model).logPage; got != 2 {
+		t.Errorf("logPage = %d after updating to a revision on page 2, want 2", got)
+	}
+
+	m = onPageTwo(t)
+	next, _ = m.Update(updatedMsg{revision: "50"})
+	m = next.(*Model)
+	if m.logPage != 1 {
+		t.Errorf("logPage = %d after a plain update, want 1", m.logPage)
+	}
+	if m.logAnchors != nil {
+		t.Errorf("anchors = %q, want cleared", m.logAnchors)
+	}
+}
+
+func TestCommitResetsToFirstLogPage(t *testing.T) {
+	m := logPagedModel(t)
+	m, _ = pressRune(t, m, 'n')
+	next, _ := m.Update(logLoadedMsg{page: 2, more: true, entries: []svn.LogEntry{{Revision: "48"}}})
+	m = next.(*Model)
+
+	next, _ = m.Update(committedMsg{revision: "51"})
+	if got := next.(*Model).logPage; got != 1 {
+		t.Errorf("logPage = %d after a commit, want 1", got)
+	}
+}
+
+func TestLogFooterShowsPositionAndPage(t *testing.T) {
+	m := logPagedModel(t)
+	if got := m.logFooter(); got != "1 of 2 · 1" {
+		t.Errorf("footer = %q, want %q", got, "1 of 2 · 1")
+	}
+
+	// The filter narrows the page, and the full page size stays visible.
+	m.filters[panelLog] = "user:alice"
+	m.applyLogFilter()
+	if got := m.logFooter(); got != "1 of 1 (2) · 1" {
+		t.Errorf("filtered footer = %q, want %q", got, "1 of 1 (2) · 1")
+	}
+
+	// A page no revision matches still reports the page it is on.
+	m.filters[panelLog] = "user:nobody"
+	m.applyLogFilter()
+	if got := m.logFooter(); got != "0 of 0 (2) · 1" {
+		t.Errorf("empty-filter footer = %q, want %q", got, "0 of 0 (2) · 1")
+	}
+}
+
+func TestLogFilterSurvivesPageTurn(t *testing.T) {
+	m := logPagedModel(t)
+	m.filters[panelLog] = "user:alice"
+	m.applyLogFilter()
+
+	m, _ = pressRune(t, m, 'n')
+	next, _ := m.Update(logLoadedMsg{page: 2, entries: []svn.LogEntry{
+		{Revision: "48", Author: "alice", Message: "forty-eight"},
+		{Revision: "47", Author: "bob", Message: "forty-seven"},
+	}})
+	m = next.(*Model)
+	if got := m.filters[panelLog]; got != "user:alice" {
+		t.Errorf("filter = %q after a page turn, want it kept", got)
+	}
+	if items := m.log.Items(); len(items) != 1 || items[0].Revision != "48" {
+		t.Errorf("filtered page 2 = %+v, want just r48", items)
+	}
+}
+
 func TestUpdateToRevisionProgressShowsTarget(t *testing.T) {
 	m := loadItems(t, sizedModel(t), nil)
-	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{
 		{Revision: "50"}, {Revision: "42"},
 	}})
 	m = next.(*Model)
@@ -1943,7 +2149,7 @@ func TestUpdateToRevisionProgressShowsTarget(t *testing.T) {
 
 func TestUpdateToRevisionConfirms(t *testing.T) {
 	m := loadItems(t, sizedModel(t), nil)
-	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{
 		{Revision: "42", Author: "alice", Message: "first"},
 		{Revision: "41", Author: "bob", Message: "second"},
 	}})
@@ -2006,7 +2212,7 @@ func TestUpdateToRevisionNoSelectionWarns(t *testing.T) {
 func focusLogWithRevision(t *testing.T, items []svn.StatusItem) *Model {
 	t.Helper()
 	m := loadItems(t, sizedModel(t), items)
-	next, _ := m.Update(logLoadedMsg{entries: []svn.LogEntry{
+	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{
 		{Revision: "42", Author: "alice", Message: "first"},
 	}})
 	m = next.(*Model)
