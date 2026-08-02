@@ -42,6 +42,9 @@ SVN's command line is powerful but verbose for day-to-day work. `revision` wraps
 - **Named changelists** — group the staged set into real SVN changelists, drill into one in a tabbed view, and commit it on its own
 - **Update** to HEAD with `u`, or to any revision picked in the Log panel — conflicts are spelled out before you confirm
 - **Add, revert and delete** a single file or every change beneath a directory, with confirmation prompts
+- **Instant staging** — the row restyles on the keypress while `svn` confirms behind it, and a failure puts the previous state back; revert, delete and commit mark their rows as in flight rather than claiming a success they do not have yet
+- **Live refresh** — an edit made outside `revision` reaches the Files and diff panels on its own, with the cursor and scroll where you left them; `L` turns the watcher off
+- **Reads once, and only what you look at** — diffs and history pages are cached for the session, so startup costs a single `svn status` and revisiting a file is instant
 - **Filter or search any panel** with `/` — `rev:`, `user:`, `state:` and `cl:` parameters plus free text, and `n` / `N` to jump between matches
 - **Open the highlighted file** in vim, nvim, nano, or the editor around you — including a VS Code tab when `revision` is running on a remote host
 - **Themes and in-app settings** — six colour schemes, edited with `S` and saved to your config file

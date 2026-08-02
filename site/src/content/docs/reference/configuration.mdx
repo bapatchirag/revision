@@ -38,8 +38,8 @@ Press <KeyCap key="S" />:
 
 Cycling the theme applies it live so you can preview each scheme in place;
 <KeyCap key="esc" /> reverts the preview and <KeyCap key="ctrl+s" /> keeps it. Saving
-writes the same `config.json`, and the theme, directory-diff, hide-untracked and
-display-scope changes take effect immediately.
+writes the same `config.json`, and the theme, directory-diff, hide-untracked,
+live-refresh and display-scope changes take effect immediately.
 
 ## Settings
 
@@ -53,6 +53,8 @@ display-scope changes take effect immediately.
 | `diffOutputDir` | string | `""` | Where diffs saved with <KeyCap key="w" /> are written. |
 | `logLimit` | int | `100` | How many revisions the Log panel loads per page. |
 | `editor` | string | `native` | Which editor <KeyCap key="e" /> opens the highlighted file in. |
+| `optimisticUpdates` | bool | `true` | Show an action as done the moment it is asked for, with `svn` confirming afterwards. |
+| `liveRefresh` | bool | `true` | Watch the working copy in the background and pick up changes made outside `revision`. |
 
 ### theme
 
@@ -112,6 +114,32 @@ connection. Changing it returns the panel to the first page.
 One of `native`, `vim` (`vi` is accepted as a spelling of it), `nvim`, or `nano`. See
 [Opening files in an editor](/workflows/editor/).
 
+### optimisticUpdates
+
+With `optimisticUpdates` on, staging, unstaging and changelist assignment restyle the row
+on the keypress and `svn` confirms behind it; if `svn` disagrees, the previous state comes
+back with an error toast. Revert, delete and commit are never shown as having succeeded
+before they have — their rows are marked as [in flight](/workflows/staging-and-commit/#rows-in-flight)
+instead.
+
+Set it to `false` and every action waits for `svn` before anything on screen moves.
+
+### liveRefresh
+
+With `liveRefresh` on, `revision` watches the working copy in the background, so a file
+saved in your editor, a build, or an `svn` command run in another terminal reaches the
+Files and diff panels within a couple of seconds — without <KeyCap key="R" />. The cursor
+stays on the same file and Main keeps its scroll position.
+
+Pressing <KeyCap key="L" /> toggles the watcher for the current session, so you can turn it
+off during an expensive build without changing the file. Nothing is re-read while a prompt,
+the commit editor or the settings form is open — the refresh waits for the screen. See
+[Keeping up with the working copy](/guides/panels/#keeping-up-with-the-working-copy).
+
+Turn it off on a network filesystem or a very large working copy, where the periodic scan
+costs more than it is worth — see
+[troubleshooting](/operations/troubleshooting/#live-refresh-is-expensive-on-my-working-copy).
+
 ## Example
 
 ```json title="~/.config/revision/config.json"
@@ -120,7 +148,8 @@ One of `native`, `vim` (`vi` is accepted as a spelling of it), `nvim`, or `nano`
   "directoryDiff": false,
   "hideUntracked": true,
   "displayFrom": "root",
-  "diffOutputDir": "~/patches"
+  "diffOutputDir": "~/patches",
+  "liveRefresh": false
 }
 ```
 
