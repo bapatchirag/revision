@@ -3,6 +3,7 @@ package svn
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -75,7 +76,8 @@ func (c *Client) binary() string {
 }
 
 // run executes `svn <args...> --non-interactive` in the client's directory and
-// returns stdout. On failure it returns an error that includes svn's stderr.
+// returns stdout. On failure it returns an error that includes svn's stderr, or
+// the deadline it overran when ctx timed out (see failureText).
 // --non-interactive is always appended so svn never blocks on a credential prompt.
 // When a Recorder is set it receives one CommandRecord per invocation.
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
@@ -91,32 +93,42 @@ func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 	runErr := cmd.Run()
 	elapsed := time.Since(start)
 
+	var msg string
+	if runErr != nil {
+		msg = failureText(ctx, stderr.String(), runErr, elapsed)
+	}
+
 	if c.Recorder != nil {
 		rec := CommandRecord{
 			Command:    c.binary() + " " + strings.Join(full, " "),
 			Output:     strings.TrimRight(stdout.String(), "\n"),
 			UserAction: isUserAction(ctx),
 			Duration:   elapsed,
+			Err:        msg,
 		}
 		if len(args) > 0 {
 			rec.Subcommand = args[0]
-		}
-		if runErr != nil {
-			errText := strings.TrimSpace(stderr.String())
-			if errText == "" {
-				errText = runErr.Error()
-			}
-			rec.Err = errText
 		}
 		c.Recorder(rec)
 	}
 
 	if runErr != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = runErr.Error()
-		}
 		return nil, fmt.Errorf("svn %s: %s", strings.Join(args, " "), msg)
 	}
 	return stdout.Bytes(), nil
+}
+
+// failureText explains why a command failed. A deadline that expired is reported
+// as the timeout it was: exec kills the process with SIGKILL, so svn dies before
+// it can say anything and runErr is a bare "signal: killed" that names the signal
+// rather than the cause. Otherwise svn's own stderr stands, falling back to the
+// exec error when it died without a word.
+func failureText(ctx context.Context, stderr string, runErr error, elapsed time.Duration) string {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fmt.Sprintf("timed out after %s", elapsed.Round(time.Second))
+	}
+	if msg := strings.TrimSpace(stderr); msg != "" {
+		return msg
+	}
+	return runErr.Error()
 }
