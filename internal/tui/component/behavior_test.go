@@ -415,6 +415,54 @@ func TestModalSetPromptUpdatesView(t *testing.T) {
 	}
 }
 
+// TestToastWrapsToItsWidth guards the notice box against a long svn error: once
+// sized, no row may be wider than the box, or the terminal wraps it and the
+// border breaks.
+func TestToastWrapsToItsWidth(t *testing.T) {
+	to := component.NewToast(testTheme())
+	to.Show("commit failed: svn: E155007: '/home/alice/work/wc/deeply/nested/file.go' is not a working copy", component.LevelError)
+	to.SetSize(40, 20)
+
+	lines := strings.Split(to.View(), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("expected the message to wrap over several rows, got:\n%s", to.View())
+	}
+	for i, ln := range lines {
+		if w := ansi.StringWidth(ln); w != 40 {
+			t.Errorf("row %d width = %d, want 40:\n%s", i, w, ln)
+		}
+	}
+}
+
+// TestToastClipsToItsHeight covers the other axis: a message too tall for the
+// box loses its tail to an ellipsis rather than pushing the border off-screen.
+func TestToastClipsToItsHeight(t *testing.T) {
+	to := component.NewToast(testTheme())
+	to.Show(strings.Repeat("a bcdefghij", 40), component.LevelError)
+	to.SetSize(20, 6)
+
+	view := to.View()
+	if h := strings.Count(view, "\n") + 1; h != 6 {
+		t.Errorf("height = %d, want 6:\n%s", h, view)
+	}
+	if !strings.Contains(view, "…") {
+		t.Errorf("clipped message should end in an ellipsis, got:\n%s", view)
+	}
+}
+
+// TestToastUnsizedHugsItsMessage keeps the pre-sizing behavior for the gallery
+// and any caller that never sets a size: the box grows to fit.
+func TestToastUnsizedHugsItsMessage(t *testing.T) {
+	to := component.NewToast(testTheme())
+	to.Show("committed r128", component.LevelSuccess)
+
+	for i, ln := range strings.Split(to.View(), "\n") {
+		if w := ansi.StringWidth(ln); w != 18 {
+			t.Errorf("row %d width = %d, want 18", i, w)
+		}
+	}
+}
+
 func TestTextAreaEmitsSubmit(t *testing.T) {
 	ta := component.NewTextArea("commit", "Commit", "", testTheme(), testKeys())
 	ta.SetSize(30, 6)

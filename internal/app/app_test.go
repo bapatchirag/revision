@@ -1774,6 +1774,26 @@ func TestCommitResultShowsToast(t *testing.T) {
 	}
 }
 
+// TestLongErrorToastStaysOnScreen guards the composed view against a raw svn
+// error: the notice box must wrap inside the terminal rather than draw past its
+// right edge, which the terminal would wrap and the border break.
+func TestLongErrorToastStaysOnScreen(t *testing.T) {
+	m := sizedModel(t)
+	err := errors.New("svn: E155007: '/home/alice/work/wc/some/deeply/nested/path/to/a/file.go' is not a working copy; run 'svn cleanup' and try again")
+	next, _ := m.Update(committedMsg{err: err})
+	m = next.(*Model)
+
+	view := m.View()
+	if !strings.Contains(stripANSI(view), "E155007") {
+		t.Fatalf("expected the failure toast, got:\n%s", stripANSI(view))
+	}
+	for i, ln := range strings.Split(view, "\n") {
+		if w := ansi.StringWidth(ln); w > m.width {
+			t.Errorf("row %d width = %d, wider than the %d-column terminal:\n%s", i, w, m.width, stripANSI(ln))
+		}
+	}
+}
+
 func TestConfigValidatorResetsUnknownTheme(t *testing.T) {
 	validate := ConfigValidator()
 
