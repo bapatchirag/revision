@@ -116,6 +116,23 @@ func buildFileTree(items []svn.StatusItem, collapsed map[string]bool) []fileNode
 	return rows
 }
 
+// fileTree is buildFileTree memoized over the session: the same status items
+// with the same directories collapsed yield the rows built for them last time.
+// The tree is re-derived whenever the Files panel is rebuilt and again for the
+// footer's count on every frame, so the work is otherwise repeated many times
+// over a row set that has not moved — a filter keystroke that narrows nothing,
+// or a redraw. The returned rows are shared, so callers must treat them (and the
+// status items they point at) as read-only.
+func (m *Model) fileTree(items []svn.StatusItem, collapsed map[string]bool) []fileNode {
+	key := treeKey{items: itemsDigest(items), collapsed: collapsedDigest(collapsed)}
+	if rows, ok := m.session.Tree(key); ok {
+		return rows
+	}
+	rows := buildFileTree(items, collapsed)
+	m.session.PutTree(key, rows)
+	return rows
+}
+
 // firstFileIndex returns the index of the first file leaf in rows, or -1 when
 // the tree holds no files (empty, or only directory rows).
 func firstFileIndex(rows []fileNode) int {

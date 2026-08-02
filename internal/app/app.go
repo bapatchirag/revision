@@ -110,8 +110,11 @@ type Model struct {
 	info   *svn.Info
 
 	theme theme.Theme
-	keys  keymap.KeyMap
-	cfg   config.Config
+	// themeName is the palette currently applied, which the persisted config's
+	// name does not track while the settings editor previews another one.
+	themeName string
+	keys      keymap.KeyMap
+	cfg       config.Config
 
 	status      *component.Viewport
 	files       *component.List[fileNode]
@@ -340,6 +343,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		client:          client,
 		info:            info,
 		theme:           th,
+		themeName:       cfg.Theme,
 		keys:            keys,
 		cfg:             cfg,
 		status:          status,
@@ -1439,7 +1443,7 @@ func (m *Model) selectedFile() (svn.StatusItem, bool) {
 // the user on the same file rather than the same row number.
 func (m *Model) rebuildFileTree() {
 	path := selectedNodePath(m.files)
-	m.files.SetItems(buildFileTree(m.filteredStatusItems(m.fileItems), m.collapsedDirs))
+	m.files.SetItems(m.fileTree(m.filteredStatusItems(m.fileItems), m.collapsedDirs))
 	selectNodePath(m.files, path)
 }
 
@@ -1508,7 +1512,7 @@ func (m *Model) toggleCollapse() tea.Cmd {
 // on the same file across the rebuild.
 func (m *Model) rebuildClTree() {
 	path := selectedNodePath(m.clFiles)
-	m.clFiles.SetItems(buildFileTree(m.filteredStatusItems(m.clItems), m.clCollapsedDirs))
+	m.clFiles.SetItems(m.fileTree(m.filteredStatusItems(m.clItems), m.clCollapsedDirs))
 	selectNodePath(m.clFiles, path)
 }
 
@@ -1564,7 +1568,7 @@ func (m *Model) filesFooter() string {
 		index, shown := fileLeafStats(m.clFiles.Items(), m.clFiles.Index())
 		full := shown
 		if hiding {
-			full = leafCount(buildFileTree(m.clItems, m.clCollapsedDirs))
+			full = leafCount(m.fileTree(m.clItems, m.clCollapsedDirs))
 		}
 		return countLabel(index, shown, full)
 	case m.filesViewIsChangelists():
@@ -1578,7 +1582,7 @@ func (m *Model) filesFooter() string {
 		index, shown := fileLeafStats(m.files.Items(), m.files.Index())
 		full := shown
 		if hiding {
-			full = leafCount(buildFileTree(m.fileItems, m.collapsedDirs))
+			full = leafCount(m.fileTree(m.fileItems, m.collapsedDirs))
 		}
 		return countLabel(index, shown, full)
 	}
@@ -2018,6 +2022,7 @@ func (m *Model) chooseUpdate(index int) tea.Cmd {
 func (m *Model) previewTheme(name string) {
 	th, _ := theme.ByName(name)
 	m.theme = th
+	m.themeName = name
 	// Pin the color profile before re-theming so the palette (and the diff
 	// re-colorized by refreshChrome) renders in the profile the theme expects.
 	theme.ApplyColorProfile(name)
@@ -3335,7 +3340,7 @@ func (m *Model) directoryDetail(n fileNode) string {
 	case strings.TrimSpace(m.diffText) == "":
 		return "(no textual changes under this directory)"
 	default:
-		return colorizeDiff(m.theme, m.diffText)
+		return m.colorize(m.diffText)
 	}
 }
 
@@ -3359,7 +3364,7 @@ func (m *Model) fileDetail() string {
 	case strings.TrimSpace(m.diffText) == "":
 		return strings.Join(append(head, "(no changes to display)"), "\n")
 	default:
-		return strings.Join(append(head, colorizeDiff(m.theme, m.diffText)), "\n")
+		return strings.Join(append(head, m.colorize(m.diffText)), "\n")
 	}
 }
 

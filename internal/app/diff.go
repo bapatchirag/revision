@@ -167,6 +167,23 @@ func diffSaveName(entered, fallback string) string {
 	return name
 }
 
+// colorize is colorizeDiff memoized over the session. Main is rebuilt on every
+// filter keystroke, focus change and reload, and re-styling a large patch line
+// by line dominates that work; the theme is part of the key, so a switch of
+// palette is never served the previous one's colors.
+func (m *Model) colorize(diff string) string {
+	if diff == "" {
+		return ""
+	}
+	key := renderKey{digest: digestString(diff), theme: m.themeName}
+	if text, ok := m.session.Rendered(key); ok {
+		return text
+	}
+	text := colorizeDiff(m.theme, diff)
+	m.session.PutRendered(key, text)
+	return text
+}
+
 // colorizeDiff is the domain adapter that maps the role of each unified-diff
 // line onto a theme color, giving the Main viewport familiar diff syntax
 // highlighting. It is the only place SVN diff structure is mapped onto colors,

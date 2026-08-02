@@ -35,12 +35,12 @@ var ansiRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
 
-func sizedModel(t *testing.T) *Model {
+func sizedModel(t testing.TB) *Model {
 	t.Helper()
 	return sizedModelCfg(t, config.Default())
 }
 
-func sizedModelCfg(t *testing.T, cfg config.Config) *Model {
+func sizedModelCfg(t testing.TB, cfg config.Config) *Model {
 	t.Helper()
 	info := &svn.Info{
 		URL:             "https://svn.example.com/repo/trunk",
@@ -54,7 +54,7 @@ func sizedModelCfg(t *testing.T, cfg config.Config) *Model {
 	return next.(*Model)
 }
 
-func loadItems(t *testing.T, m *Model, items []svn.StatusItem) *Model {
+func loadItems(t testing.TB, m *Model, items []svn.StatusItem) *Model {
 	t.Helper()
 	next, _ := m.Update(statusLoadedMsg{items: items})
 	return next.(*Model)
@@ -1190,6 +1190,118 @@ func TestColorizeDiff(t *testing.T) {
 			t.Errorf("line %q colored=%v, want %v", plain, colored, want)
 		}
 	}
+}
+
+// diffFixture is a unified diff of n changed lines, big enough that colorizing
+// it is measurable work.
+func diffFixture(n int) string {
+	lines := []string{"Index: big.txt", "===================================================================",
+		"--- big.txt\t(revision 1)", "+++ big.txt\t(working copy)", "@@ -1,%d +1,%d @@"}
+	for i := 0; i < n; i++ {
+		lines = append(lines,
+			fmt.Sprintf(" context line %d", i),
+			fmt.Sprintf("-old line %d", i),
+			fmt.Sprintf("+new line %d", i))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func TestColorizedDiffIsServedFromTheSession(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	m := sizedModel(t)
+	diff := diffFixture(3)
+	want := colorizeDiff(m.theme, diff)
+
+	// The cached path must be indistinguishable from the pure one, first time
+	// (a miss, which fills the cache) and second (a hit).
+	for _, pass := range []string{"miss", "hit"} {
+		if got := m.colorize(diff); got != want {
+			t.Errorf("%s: cached colorization differs from the direct render", pass)
+		}
+	}
+	if n := m.session.rendered.Len(); n != 1 {
+		t.Errorf("the same patch cached %d times, want 1", n)
+	}
+}
+
+func TestColorizedDiffFollowsTheTheme(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	m := sizedModel(t)
+	diff := diffFixture(3)
+	before := m.colorize(diff)
+
+	m.previewTheme("dracula")
+	after := m.colorize(diff)
+	if after == before {
+		t.Error("a theme switch was served the previous palette's colors")
+	}
+	if want := colorizeDiff(m.theme, diff); after != want {
+		t.Error("the switched theme's diff differs from a direct render")
+	}
+	// The entry for the previous theme is still there to switch back to.
+	if n := m.session.rendered.Len(); n != 2 {
+		t.Errorf("rendered cache holds %d entries, want one per theme", n)
+	}
+}
+
+func BenchmarkColorizeDiff(b *testing.B) {
+	m := sizedModel(b)
+	diff := diffFixture(500)
+	b.Run("uncached", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = colorizeDiff(m.theme, diff)
+		}
+	})
+	b.Run("cached", func(b *testing.B) {
+		m.colorize(diff)
+		for i := 0; i < b.N; i++ {
+			_ = m.colorize(diff)
+		}
+	})
+}
+
+func BenchmarkUpdateMain(b *testing.B) {
+	items := make([]svn.StatusItem, 0, 200)
+	for i := 0; i < 200; i++ {
+		items = append(items, svn.StatusItem{
+			Path:  fmt.Sprintf("internal/pkg%02d/file%03d.go", i%10, i),
+			State: svn.StateModified,
+		})
+	}
+	m := loadItems(b, sizedModel(b), items)
+	m.diffPath, m.diffText = items[0].Path, diffFixture(500)
+	m.files.SetIndex(firstFileIndex(m.files.Items()))
+	m.updateMain()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		m.updateMain()
+	}
+}
+
+func BenchmarkRebuildFileTree(b *testing.B) {
+	items := make([]svn.StatusItem, 0, 500)
+	for i := 0; i < 500; i++ {
+		items = append(items, svn.StatusItem{
+			Path:  fmt.Sprintf("internal/pkg%02d/sub%02d/file%03d.go", i%10, i%7, i),
+			State: svn.StateModified,
+		})
+	}
+	m := loadItems(b, sizedModel(b), items)
+	b.Run("uncached", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = buildFileTree(items, m.collapsedDirs)
+		}
+	})
+	b.Run("cached", func(b *testing.B) {
+		m.fileTree(items, m.collapsedDirs)
+		for i := 0; i < b.N; i++ {
+			_ = m.fileTree(items, m.collapsedDirs)
+		}
+	})
 }
 
 func TestLogPanelSelectionUpdatesMain(t *testing.T) {

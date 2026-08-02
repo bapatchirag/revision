@@ -2,9 +2,11 @@ package app
 
 import (
 	"hash/fnv"
+	"hash/maphash"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +33,19 @@ const (
 	logPageCacheBytes   = 4 << 20 // 4 MiB
 	revDetailEntries    = 512
 	revDetailBytes      = 4 << 20 // 4 MiB
+)
+
+// Render cache bounds. Both hold work that is re-derived whenever the screen is
+// rebuilt — every filter keystroke, focus change and reload — so only the
+// handful of subjects being flipped between need to fit.
+const (
+	renderCacheEntries = 64
+	renderCacheBytes   = 8 << 20 // 8 MiB
+	treeCacheEntries   = 16
+	treeCacheBytes     = 4 << 20 // 4 MiB
+	// fileNodeOverhead is what one cached row weighs beyond its strings: the row
+	// itself plus the status item it copies.
+	fileNodeOverhead = 64
 )
 
 // diffKey identifies a cached diff: the path it was produced for, and whether
@@ -67,6 +82,22 @@ type historyPage struct {
 	more    bool
 }
 
+// renderKey identifies a colorized diff: a digest of the patch it was styled
+// from, and the theme it was styled with — the same patch takes different colors
+// under each palette, and the palette also fixes the color profile it renders
+// in.
+type renderKey struct {
+	digest uint64
+	theme  string
+}
+
+// treeKey identifies a flattened file tree: a digest of the status items it was
+// built from and of the directories collapsed while building it.
+type treeKey struct {
+	items     uint64
+	collapsed uint64
+}
+
 // sessionStore holds what revision can reuse for the life of the process. It is
 // in-memory only, so Close leaves nothing behind. It is owned by Model and only
 // touched from Update, so it needs no locking of its own.
@@ -74,6 +105,8 @@ type sessionStore struct {
 	diffs      *cache.LRU[diffKey, diffEntry]
 	logPages   *cache.LRU[logKey, historyPage]
 	revDetails *cache.LRU[string, []svn.ChangedPath]
+	rendered   *cache.LRU[renderKey, string]
+	trees      *cache.LRU[treeKey, []fileNode]
 }
 
 // newSessionStore returns an empty store with the caches bounded.
@@ -84,6 +117,8 @@ func newSessionStore() *sessionStore {
 		}),
 		logPages:   cache.New[logKey, historyPage](logPageCacheEntries, logPageCacheBytes, historyPageSize),
 		revDetails: cache.New[string, []svn.ChangedPath](revDetailEntries, revDetailBytes, changedPathsSize),
+		rendered:   cache.New[renderKey, string](renderCacheEntries, renderCacheBytes, func(s string) int { return len(s) }),
+		trees:      cache.New[treeKey, []fileNode](treeCacheEntries, treeCacheBytes, fileTreeSize),
 	}
 }
 
@@ -99,6 +134,17 @@ func changedPathsSize(paths []svn.ChangedPath) int {
 	n := 0
 	for _, p := range paths {
 		n += len(p.Action) + len(p.Path)
+	}
+	return n
+}
+
+func fileTreeSize(rows []fileNode) int {
+	n := 0
+	for i := range rows {
+		n += len(rows[i].Name) + len(rows[i].Path) + fileNodeOverhead
+		if it := rows[i].Item; it != nil {
+			n += len(it.Path) + len(it.Revision) + len(it.Changelist)
+		}
 	}
 	return n
 }
@@ -147,11 +193,27 @@ func (s *sessionStore) PutRevDetail(rev string, paths []svn.ChangedPath) {
 	s.revDetails.Put(rev, paths)
 }
 
+// Rendered returns the colorized form of a patch already styled for k's theme.
+func (s *sessionStore) Rendered(k renderKey) (string, bool) { return s.rendered.Get(k) }
+
+// PutRendered records a colorized patch.
+func (s *sessionStore) PutRendered(k renderKey, text string) { s.rendered.Put(k, text) }
+
+// Tree returns the display rows already flattened for k. The rows are shared
+// with every later caller, so they — and the status items they point at — are
+// read-only.
+func (s *sessionStore) Tree(k treeKey) ([]fileNode, bool) { return s.trees.Get(k) }
+
+// PutTree records a flattened file tree.
+func (s *sessionStore) PutTree(k treeKey, rows []fileNode) { s.trees.Put(k, rows) }
+
 // Purge empties every cache, so the next look at anything is answered by svn.
 func (s *sessionStore) Purge() {
 	s.diffs.Purge()
 	s.logPages.Purge()
 	s.revDetails.Purge()
+	s.rendered.Purge()
+	s.trees.Purge()
 }
 
 // Close releases the session. Nothing is written to disk, so purging the caches
@@ -206,6 +268,61 @@ func writeItemStamp(h io.Writer, root, path string, it *svn.StatusItem) {
 // writeStamp folds one field into the digest, delimited so neighbouring fields
 // cannot run together into the same bytes.
 func writeStamp(h io.Writer, s string) { _, _ = io.WriteString(h, s+"\x00") }
+
+// digestSeed seeds the digests the render caches are keyed by. It is per-process
+// and random, which is all a cache that never leaves memory needs.
+var digestSeed = maphash.MakeSeed()
+
+// digestString fingerprints s as a cache key, so an entry is keyed by one word
+// rather than by a patch that can run to megabytes. It hashes in place: the
+// digest is taken on every frame Main is rebuilt, so it must not copy what it
+// reads.
+func digestString(s string) uint64 { return maphash.String(digestSeed, s) }
+
+// itemsDigest fingerprints the status items a file tree would be built from,
+// covering every field that shapes a row or the way it renders — so a staged
+// file, which moves nothing but its changelist, still rebuilds the tree.
+func itemsDigest(items []svn.StatusItem) uint64 {
+	var h maphash.Hash
+	h.SetSeed(digestSeed)
+	for i := range items {
+		writeDigest(&h, items[i].Path)
+		writeDigest(&h, string(items[i].State))
+		writeDigest(&h, string(items[i].PropState))
+		writeDigest(&h, items[i].Revision)
+		writeDigest(&h, items[i].Changelist)
+	}
+	return h.Sum64()
+}
+
+// collapsedDigest fingerprints the set of collapsed directories. Only the
+// collapsed paths are folded in, and in sorted order, so the digest describes
+// the set rather than the map that happens to hold it.
+func collapsedDigest(collapsed map[string]bool) uint64 {
+	paths := make([]string, 0, len(collapsed))
+	for path, isCollapsed := range collapsed {
+		if isCollapsed {
+			paths = append(paths, path)
+		}
+	}
+	if len(paths) == 0 {
+		return 0
+	}
+	sort.Strings(paths)
+	var h maphash.Hash
+	h.SetSeed(digestSeed)
+	for _, path := range paths {
+		writeDigest(&h, path)
+	}
+	return h.Sum64()
+}
+
+// writeDigest folds one field into a digest, delimited so neighbouring fields
+// cannot run together into the same bytes. maphash never fails.
+func writeDigest(h *maphash.Hash, s string) {
+	_, _ = h.WriteString(s)
+	_ = h.WriteByte(0)
+}
 
 // findItem returns the status item for path, or nil when svn status no longer
 // reports it.

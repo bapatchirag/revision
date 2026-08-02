@@ -156,6 +156,6 @@ func (m *Model) savedDiffDetail() string {
 	case strings.TrimSpace(m.savedText) == "":
 		return "(" + d.Name + " is empty)"
 	default:
-		return colorizeDiff(m.theme, m.savedText)
+		return m.colorize(m.savedText)
 	}
 }
