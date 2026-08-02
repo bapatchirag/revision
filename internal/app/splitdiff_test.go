@@ -118,7 +118,7 @@ func TestSplitDiffCoversDirectorySubtree(t *testing.T) {
 		{Path: "src/b.go", State: svn.StateModified},
 	})
 	selectDirRow(t, m, "src")
-	next, _ := m.Update(diffLoadedMsg{path: "src", diff: fileDiff})
+	next, _ := m.Update(diffLoadedMsg{path: "src", dir: true, diff: fileDiff})
 	m = splitKey(t, next.(*Model))
 	if !m.splitting {
 		t.Fatal("expected the overlay to open for a directory row")
@@ -153,7 +153,7 @@ func multiFileModel(t *testing.T) *Model {
 		{Path: "src/b.go", State: svn.StateModified},
 	})
 	selectDirRow(t, m, "src")
-	next, _ := m.Update(diffLoadedMsg{path: "src", diff: dirDiff()})
+	next, _ := m.Update(diffLoadedMsg{path: "src", dir: true, diff: dirDiff()})
 	return splitKey(t, next.(*Model))
 }
 

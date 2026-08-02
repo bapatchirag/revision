@@ -64,18 +64,18 @@ func TestLogPageArgs(t *testing.T) {
 		{
 			name:  "first page over-fetches one row to detect a further page",
 			limit: 50,
-			want:  []string{"log", "--xml", "--verbose", "--limit", "51", ".@HEAD"},
+			want:  []string{"log", "--xml", "--limit", "51", ".@HEAD"},
 		},
 		{
 			name:   "anchored page also covers the repeated anchor revision",
 			anchor: "31",
 			limit:  50,
-			want:   []string{"log", "--xml", "--verbose", "-r", "31:1", "--limit", "52", ".@HEAD"},
+			want:   []string{"log", "--xml", "-r", "31:1", "--limit", "52", ".@HEAD"},
 		},
 		{
 			name:  "no limit leaves it to svn",
 			limit: 0,
-			want:  []string{"log", "--xml", "--verbose", ".@HEAD"},
+			want:  []string{"log", "--xml", ".@HEAD"},
 		},
 	}
 	for _, tc := range cases {
@@ -90,6 +90,42 @@ func TestLogPageArgs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A page of history is the most-run log command, so it must stay cheap: the
+// changed paths --verbose adds are fetched one revision at a time instead.
+func TestLogPageArgsAreNotVerbose(t *testing.T) {
+	for _, arg := range logPageArgs("31", 50) {
+		if arg == "--verbose" {
+			t.Fatalf("a log page must not be verbose: %q", logPageArgs("31", 50))
+		}
+	}
+}
+
+func TestRevisionDetailArgs(t *testing.T) {
+	want := []string{"log", "--xml", "--verbose", "-r", "42", "--limit", "1", ".@HEAD"}
+	got := revisionDetailArgs("42")
+	if len(got) != len(want) {
+		t.Fatalf("args = %q, want %q", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("args = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestHeadRevisionArgs(t *testing.T) {
+	want := []string{"log", "--xml", "--limit", "1", ".@HEAD"}
+	got := headRevisionArgs()
+	if len(got) != len(want) {
+		t.Fatalf("args = %q, want %q", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("args = %q, want %q", got, want)
+		}
 	}
 }
 

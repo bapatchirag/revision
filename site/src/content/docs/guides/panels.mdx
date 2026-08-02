@@ -76,6 +76,11 @@ The footer counts the position and the number of files in view. When a
 [`hideUntracked`](/reference/configuration/#hideuntracked) hides some, the full count
 follows in brackets — `1 of 16 (29)`.
 
+A row waiting on a revert, a delete or a commit is dimmed and tailed with `…`, and the
+directories above it carry the count of what is in flight beneath them. Those rows are
+inert until `svn` answers — see [rows in
+flight](/workflows/staging-and-commit/#rows-in-flight).
+
 ### Changelists
 
 The same changes bucketed by [changelist](/workflows/changelists/): named lists first,
@@ -116,8 +121,8 @@ the new revision is in view.
 ## Command Log
 
 Every `svn` command `revision` ran on your behalf, newest first, each marked ✓ or ✗.
-Read-only queries — the status and log refreshes that happen constantly — are left out, so
-the list stays a record of what actually changed.
+Read-only queries — the status and log refreshes that happen constantly, including the
+background ones — are left out, so the list stays a record of what actually changed.
 
 Toggle the panel with <KeyCap key="x" />.
 
@@ -135,3 +140,22 @@ Detail for the current selection, and the target of the
 | A saved patch | The patch file's contents. |
 | A revision | Date, author, full message, and changed paths. |
 | The Status panel | Project links and version information. |
+
+A diff is fetched once and reused for the rest of the session, so stepping back to a file
+you have already read costs no `svn` at all.
+
+## Keeping up with the working copy
+
+`revision` watches the working copy in the background, so a file saved in your editor, a
+build, or an `svn` command run in another terminal reaches the Files panel and the diff on
+screen within a couple of seconds. The cursor stays on the same file and Main keeps its
+scroll position — a refresh you did not ask for never moves the screen under you.
+
+Nothing is re-read while a prompt, the commit editor, the settings form, the help menu or
+the side-by-side overlay owns the screen. The refresh is held and taken once the screen is
+free, so closing a dialog costs exactly one reload.
+
+<KeyCap key="L" /> turns the watcher off and on for the session;
+[`liveRefresh`](/reference/configuration/#liverefresh) sets the default.
+<KeyCap key="R" /> still re-reads status and history on demand, whether the watcher is
+running or not.

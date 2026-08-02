@@ -44,7 +44,7 @@ func diffStoreModel(t *testing.T, names ...string) (*Model, string) {
 // commands that populate it, returning the settled model.
 func showDiffsView(t *testing.T, m *Model) *Model {
 	t.Helper()
-	next, _ := m.Update(loadSavedDiffsCmd(m.diffDir())())
+	next, _ := m.Update(m.reloadSavedDiffs()())
 	m = next.(*Model)
 	// ] cycles Changes → Changelists → Diffs.
 	for range 2 {

@@ -27,13 +27,21 @@ func logColumns() []component.Column {
 // the reusable Table renders, keeping the Table component domain-agnostic. The
 // revision the working copy currently sits at (wcRevision) is marked with a
 // leading coloured asterisk; every other row gets the same two-cell blank prefix
-// so the Rev column stays aligned.
-func renderLogRow(it svn.LogEntry, wcRevision string, th theme.Theme) []string {
+// so the Rev column stays aligned. While a page turn is in flight the rows still
+// on screen belong to the page being left, so they are dimmed.
+func renderLogRow(it svn.LogEntry, wcRevision string, stale bool, th theme.Theme) []string {
 	marker := "  "
 	if wcRevision != "" && it.Revision == wcRevision {
 		marker = lipgloss.NewStyle().Foreground(th.Accent).Render("*") + " "
 	}
-	return []string{marker + "r" + it.Revision, it.Author, firstLine(it.Message)}
+	cells := []string{marker + "r" + it.Revision, it.Author, firstLine(it.Message)}
+	if stale {
+		dim := lipgloss.NewStyle().Foreground(th.Muted)
+		for i, c := range cells {
+			cells[i] = dim.Render(c)
+		}
+	}
+	return cells
 }
 
 // firstLine returns the first line of s, used to keep multi-line commit messages

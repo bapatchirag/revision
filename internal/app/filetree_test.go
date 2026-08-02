@@ -130,3 +130,50 @@ func TestBuildFileTreeCollapseRootHidesEverything(t *testing.T) {
 		t.Fatalf("collapsing / should leave only the collapsed root row, got %+v", rows)
 	}
 }
+
+func TestFileTreeIsFlattenedOnceForAnUnchangedRowSet(t *testing.T) {
+	m := sizedModel(t)
+	items := []svn.StatusItem{
+		{Path: "internal/app/app.go", State: svn.StateModified},
+		{Path: "README.md", State: svn.StateModified},
+	}
+
+	first := m.fileTree(items, nil)
+	second := m.fileTree(items, nil)
+	if len(first) != len(buildFileTree(items, nil)) {
+		t.Fatalf("memoized tree has %d rows, want %d", len(first), len(buildFileTree(items, nil)))
+	}
+	// Same backing array: the second call was answered without rebuilding.
+	if &first[0] != &second[0] {
+		t.Error("an unchanged row set should be served from the session, not re-flattened")
+	}
+}
+
+func TestFileTreeIsRebuiltWhenItsInputsMove(t *testing.T) {
+	m := sizedModel(t)
+	items := []svn.StatusItem{
+		{Path: "internal/app/app.go", State: svn.StateModified},
+		{Path: "README.md", State: svn.StateModified},
+	}
+	base := m.fileTree(items, nil)
+
+	// Collapsing a directory is not visible in the items, only in the tree.
+	if collapsed := m.fileTree(items, map[string]bool{"internal": true}); len(collapsed) >= len(base) {
+		t.Errorf("collapsing internal/ should hide rows, got %d of %d", len(collapsed), len(base))
+	}
+
+	// Staging moves nothing but a changelist, which the rows still render.
+	staged := []svn.StatusItem{
+		{Path: "internal/app/app.go", State: svn.StateModified, Changelist: stagedChangelist},
+		{Path: "README.md", State: svn.StateModified},
+	}
+	rows := m.fileTree(staged, nil)
+	if len(rows) != len(base) {
+		t.Fatalf("staging should not change the shape of the tree, got %d rows, want %d", len(rows), len(base))
+	}
+	for _, n := range rows {
+		if n.Path == "internal/app/app.go" && n.Item.Changelist != stagedChangelist {
+			t.Error("a staged file was served from a tree built before it was staged")
+		}
+	}
+}

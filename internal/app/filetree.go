@@ -116,6 +116,23 @@ func buildFileTree(items []svn.StatusItem, collapsed map[string]bool) []fileNode
 	return rows
 }
 
+// fileTree is buildFileTree memoized over the session: the same status items
+// with the same directories collapsed yield the rows built for them last time.
+// The tree is re-derived whenever the Files panel is rebuilt and again for the
+// footer's count on every frame, so the work is otherwise repeated many times
+// over a row set that has not moved — a filter keystroke that narrows nothing,
+// or a redraw. The returned rows are shared, so callers must treat them (and the
+// status items they point at) as read-only.
+func (m *Model) fileTree(items []svn.StatusItem, collapsed map[string]bool) []fileNode {
+	key := treeKey{items: itemsDigest(items), collapsed: collapsedDigest(collapsed)}
+	if rows, ok := m.session.Tree(key); ok {
+		return rows
+	}
+	rows := buildFileTree(items, collapsed)
+	m.session.PutTree(key, rows)
+	return rows
+}
+
 // firstFileIndex returns the index of the first file leaf in rows, or -1 when
 // the tree holds no files (empty, or only directory rows).
 func firstFileIndex(rows []fileNode) int {
@@ -184,10 +201,13 @@ func filesUnder(n fileNode, items []svn.StatusItem) []svn.StatusItem {
 // renderFileNode adapts a tree row for the reusable List: directory rows show a
 // chevron (▾ expanded, ▸ collapsed) and the segment name with a trailing slash
 // (the root row shows just "/"); file rows reuse the flat status rendering
-// (marker + code + name) indented by depth.
-func renderFileNode(th theme.Theme) func(fileNode) string {
+// (marker + code + name) indented by depth. pending reports how many files the
+// row covers that svn is still working on: a file leaf is dimmed and marked, a
+// directory row carries the count.
+func renderFileNode(th theme.Theme, pending func(fileNode) int) func(fileNode) string {
 	return func(n fileNode) string {
 		indent := strings.Repeat("  ", n.Depth)
+		count := pending(n)
 		if n.Item == nil {
 			chevron := "▾"
 			if n.Collapsed {
@@ -195,7 +215,14 @@ func renderFileNode(th theme.Theme) func(fileNode) string {
 			}
 			marker := lipgloss.NewStyle().Foreground(th.Muted).Render(chevron)
 			name := lipgloss.NewStyle().Foreground(th.Info).Bold(true).Render(dirLabel(n))
-			return indent + marker + " " + name
+			row := indent + marker + " " + name
+			if count > 0 {
+				row += lipgloss.NewStyle().Foreground(th.Muted).Render(pendingLabel(count))
+			}
+			return row
+		}
+		if count > 0 {
+			return indent + pendingStatusRow(th, *n.Item, n.Name)
 		}
 		return indent + statusRow(th, *n.Item, n.Name)
 	}

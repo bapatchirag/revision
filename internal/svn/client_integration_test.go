@@ -116,8 +116,24 @@ func TestIntegrationLogAndDiff(t *testing.T) {
 	if entries[0].Message != "initial import" {
 		t.Errorf("latest message = %q, want %q", entries[0].Message, "initial import")
 	}
-	if len(entries[0].Paths) == 0 {
-		t.Error("expected changed paths in verbose log")
+	if len(entries[0].Paths) != 0 {
+		t.Error("a log page should not carry changed paths; they come from RevisionDetail")
+	}
+
+	head, err := c.HeadRevision(ctx)
+	if err != nil {
+		t.Fatalf("HeadRevision: %v", err)
+	}
+	if head != entries[0].Revision {
+		t.Errorf("HeadRevision = %q, want %q", head, entries[0].Revision)
+	}
+
+	detail, err := c.RevisionDetail(ctx, entries[0].Revision)
+	if err != nil {
+		t.Fatalf("RevisionDetail: %v", err)
+	}
+	if len(detail.Paths) == 0 {
+		t.Error("expected changed paths in the per-revision detail")
 	}
 
 	writeFile(t, filepath.Join(wc, "committed.txt"), "hello\nworld\n")

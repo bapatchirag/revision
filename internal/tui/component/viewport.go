@@ -53,17 +53,34 @@ func (v *Viewport) Init() tea.Cmd { return nil }
 // active search is re-evaluated against the new content so its highlights stay
 // valid, though no match is left selected until the next SetSearch or jump.
 func (v *Viewport) SetContent(content string) {
+	v.setLines(content)
+	v.offset = 0
+	v.xOffset = 0
+	v.recomputeMatches()
+	v.clampOffset()
+	v.clampXOffset()
+}
+
+// SetContentPreservingScroll replaces the viewport text but keeps the scroll
+// position, clamping it to the new content rather than jumping back to the top.
+// It is for a refresh of what is already on screen, where the reader's place is
+// still meaningful; SetContent remains the right call for new content.
+func (v *Viewport) SetContentPreservingScroll(content string) {
+	v.setLines(content)
+	v.recomputeMatches()
+	v.clampOffset()
+	v.clampXOffset()
+}
+
+// setLines splits content into the rendered lines and re-measures the horizontal
+// extent, leaving the scroll offsets to the caller.
+func (v *Viewport) setLines(content string) {
 	if content == "" {
 		v.lines = nil
 	} else {
 		v.lines = strings.Split(content, "\n")
 	}
-	v.offset = 0
-	v.xOffset = 0
 	v.contentWidth = v.measureWidth()
-	v.recomputeMatches()
-	v.clampOffset()
-	v.clampXOffset()
 }
 
 // SetSize implements tui.Sizeable.

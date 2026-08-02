@@ -87,6 +87,23 @@ func TestCommandLogOmitsReadOnlyCommands(t *testing.T) {
 	}
 }
 
+func TestCommandLogKeepsUserRequestedReadOnlyCommands(t *testing.T) {
+	m := sizedModel(t)
+	// Writing a patch out runs the same subcommand the Files panel loads on its
+	// own; only the one the user asked for is reported.
+	m.client.Recorder(svn.CommandRecord{Command: "svn diff a.go --non-interactive", Subcommand: "diff"})
+	m.client.Recorder(svn.CommandRecord{Command: "svn diff b.go --non-interactive", Subcommand: "diff", UserAction: true})
+	m.syncCommandLog()
+
+	view := stripANSI(m.cmdLogView.View())
+	if strings.Contains(view, "diff a.go") {
+		t.Errorf("an automatic diff should stay out of the command log:\n%s", view)
+	}
+	if !strings.Contains(view, "svn diff b.go --non-interactive") {
+		t.Errorf("a user-requested diff should be reported:\n%s", view)
+	}
+}
+
 func TestFocusCommandLogPanel(t *testing.T) {
 	m := sizedModel(t)
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})

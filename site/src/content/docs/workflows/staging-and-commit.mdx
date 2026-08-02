@@ -50,6 +50,19 @@ pressing <KeyCap key="space" /> on a single file.
 	label="Staging a single file with space and unstaging it again, then staging a whole directory subtree, then the root row staging every pending change including the untracked files"
 />
 
+## Instant, then confirmed
+
+Staging, unstaging and [changelist](/workflows/changelists/) assignment restyle the row on
+the keypress. The `svn changelist` call runs behind it and reconciles when it answers, so
+holding <KeyCap key="space" /> down a long list never waits on the working copy.
+
+If `svn` refuses, the previous state comes back and an error toast says why — nothing is
+left claiming to be staged when it is not. The reconciling status read is authoritative:
+when it disagrees with what is on screen, the working copy wins, silently.
+
+Setting [`optimisticUpdates`](/reference/configuration/#optimisticupdates) to `false` makes
+every action wait for `svn` before anything moves.
+
 ## Reviewing before you commit
 
 Staged files carry a green `●` in the Changes tree. Switch to the Changelists view with
@@ -82,6 +95,9 @@ An empty message is rejected — SVN requires one. The result appears as a toast
 Status and history reload automatically, so the committed files leave the tree and the new
 revision appears at the top of the Log panel.
 
+The files going in are marked as [in flight](#rows-in-flight) while `svn` works, and
+<KeyCap key="c" /> is held until it answers, so a commit cannot be sent twice.
+
 <DemoVideo
 	name="commit"
 	width={1200}
@@ -103,6 +119,20 @@ Both are destructive, so both confirm first:
 <KeyCap key="enter" /> or <KeyCap key="y" /> confirms; <KeyCap key="esc" /> or
 <KeyCap key="n" /> cancels. Reverting discards uncommitted work and cannot be undone —
 save the diff with <KeyCap key="w" /> first if you might want it back.
+
+## Rows in flight
+
+A revert, a delete or a commit is destructive, so — unlike staging — it is never shown as
+having succeeded before it has. The rows it touches are dimmed and tailed with `…` the
+moment the prompt is confirmed, and the directories above them carry the count:
+
+<AppScreen golden="TestPendingRowsGolden" />
+
+A row in flight is inert: staging, reverting or deleting it again does nothing, and a
+directory action skips over it rather than acting on it twice. The marks clear when `svn`
+answers — on success and on failure alike, with a toast either way.
+
+Cancelling the confirmation prompt marks nothing.
 
 Every key on this page is in the
 [Changes section](/reference/keybindings/#changes) of the keybindings reference.

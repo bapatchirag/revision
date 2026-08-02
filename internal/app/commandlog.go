@@ -13,8 +13,9 @@ import (
 const commandLogLimit = 100
 
 // readOnlyCommands are the svn subcommands revision runs on its own to read
-// state, never as a user-initiated action. The command log omits them so it
-// shows only the actions the user performed.
+// state. The command log omits them so it shows only the actions the user
+// performed — unless the invocation was one the user asked for, which svn
+// reports through CommandRecord.UserAction.
 var readOnlyCommands = map[string]bool{
 	"diff":   true,
 	"status": true,
@@ -25,6 +26,14 @@ var readOnlyCommands = map[string]bool{
 // isReadOnlyCommand reports whether sub is one of the automatic read-only
 // queries the command log should not show.
 func isReadOnlyCommand(sub string) bool { return readOnlyCommands[sub] }
+
+// loggedCommand reports whether an invocation belongs in the command log: every
+// action the user performed, including a read-only query they asked for — the
+// `svn diff` behind writing a patch out — but none of the ones revision runs on
+// its own to fill a panel.
+func loggedCommand(r svn.CommandRecord) bool {
+	return r.UserAction || !isReadOnlyCommand(r.Subcommand)
+}
 
 // commandLog is a bounded, concurrency-safe ring of the svn invocations revision
 // has run. svn commands complete on background goroutines, so record may be
@@ -76,6 +85,13 @@ func (l *commandLog) seq() int64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.total
+}
+
+// clear drops every retained entry, releasing the log at shutdown.
+func (l *commandLog) clear() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.entries = nil
 }
 
 // syncCommandLog refreshes the command-log viewport from the recorder when a new

@@ -179,6 +179,38 @@ If that finds nothing inside a Remote-SSH terminal, the environment was not inhe
 
 See [Opening files in an editor](/workflows/editor/#in-vs-code-over-a-remote-connection).
 
+## Live refresh is expensive on my working copy
+
+```text
+live refresh: too large to scan — watching current changes only
+```
+
+While [`liveRefresh`](/reference/configuration/#liverefresh) is on, `revision` looks at the
+working copy every second and a half. Each look stats SVN's metadata database and the files
+`svn status` already reports, which costs the same whether the tree holds ten files or half
+a million. A full walk of the tree — what catches a brand-new file in a directory SVN has
+not been asked about yet — runs on a slower cadence, paced by how long the last one took,
+and is dropped entirely when it cannot finish inside its budget. That is what the toast
+above reports: the cheap look continues, so changes to the files on screen are still picked
+up.
+
+On a network filesystem (NFS, SMB, sshfs) even the cheap look crosses the network, and the
+walk can be slow enough to be noticeable. Turn the watcher off:
+
+- <KeyCap key="L" /> — off for this session only.
+- <KeyCap key="S" /> → **Live refresh** → `off`, or `"liveRefresh": false` in the config
+  file — off by default.
+
+<KeyCap key="R" /> still refreshes on demand.
+
+```text
+watch working copy failed: …
+```
+
+The directory being watched became unreadable — it was deleted, renamed, or an unmounted
+network share went away. `revision` reports it once, then retries every fifteen seconds
+instead of every tick. It recovers on its own when the directory comes back.
+
 ## Where is my config file?
 
 ```text

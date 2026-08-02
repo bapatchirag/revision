@@ -25,8 +25,28 @@ type CommandRecord struct {
 	// Err is the trimmed stderr (or error text) when the command failed; empty
 	// on success.
 	Err string
+	// UserAction reports that the invocation ran under a context marked by
+	// WithUserAction: something the user asked for, rather than a query the
+	// caller runs on its own.
+	UserAction bool
 	// Duration is how long the command took to run.
 	Duration time.Duration
+}
+
+// userActionKey marks a context as carrying a user-requested command.
+type userActionKey struct{}
+
+// WithUserAction marks every svn command run under the returned context as one
+// the user asked for. It lets a caller tell its own background queries apart
+// from the same subcommand run on demand — a diff loaded to fill a panel from
+// one the user asked to be written out.
+func WithUserAction(ctx context.Context) context.Context {
+	return context.WithValue(ctx, userActionKey{}, true)
+}
+
+func isUserAction(ctx context.Context) bool {
+	v, _ := ctx.Value(userActionKey{}).(bool)
+	return v
 }
 
 // Client runs svn commands against a working-copy directory.
@@ -73,9 +93,10 @@ func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 
 	if c.Recorder != nil {
 		rec := CommandRecord{
-			Command:  c.binary() + " " + strings.Join(full, " "),
-			Output:   strings.TrimRight(stdout.String(), "\n"),
-			Duration: elapsed,
+			Command:    c.binary() + " " + strings.Join(full, " "),
+			Output:     strings.TrimRight(stdout.String(), "\n"),
+			UserAction: isUserAction(ctx),
+			Duration:   elapsed,
 		}
 		if len(args) > 0 {
 			rec.Subcommand = args[0]

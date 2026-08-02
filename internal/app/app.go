@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -87,6 +88,11 @@ const settingsFormID = "settings"
 // searchBarID identifies the panel filter input on emitted messages.
 const searchBarID = "search"
 
+// diffDebounce is how long the cursor must rest on a selection before its diff
+// is asked of svn, so holding j/k through a tree runs one `svn diff` instead of
+// one per row. A diff already cached is shown immediately, debounce or not.
+const diffDebounce = 90 * time.Millisecond
+
 // mainSource selects which side panel's selection drives the Main viewport.
 type mainSource int
 
@@ -104,8 +110,11 @@ type Model struct {
 	info   *svn.Info
 
 	theme theme.Theme
-	keys  keymap.KeyMap
-	cfg   config.Config
+	// themeName is the palette currently applied, which the persisted config's
+	// name does not track while the settings editor previews another one.
+	themeName string
+	keys      keymap.KeyMap
+	cfg       config.Config
 
 	status      *component.Viewport
 	files       *component.List[fileNode]
@@ -152,6 +161,15 @@ type Model struct {
 	logPage    int
 	logAnchors []string
 	logMore    bool
+	// logRequested records that the first page of history has been asked for, so
+	// the prefetch that follows the first status and the load that follows the
+	// first look at the Log panel cannot both fetch it. logLoading is true while a
+	// page is in flight, which dims the rows of the page being left.
+	logRequested bool
+	logLoading   bool
+	// headRev is the repository's newest revision, read at startup and refreshed
+	// whenever the first page of history lands.
+	headRev    string
 	wcRevision string
 	// workDir is the directory revision was launched from (os.Getwd at startup).
 	workDir string
@@ -173,6 +191,30 @@ type Model struct {
 	source   mainSource
 	diffPath string
 	diffText string
+	// diffOfDir records that the diff on screen was produced for a directory row
+	// rather than a file, so it can be matched to its cache entry after the fact.
+	diffOfDir bool
+	// session caches what is reusable for the life of the process — diffs, so
+	// far. It is in-memory only and is emptied by Close.
+	session *sessionStore
+	// optimistic holds the status svn last reported while a change already shown
+	// on screen is still in flight, so a failure can put it back; optimisticTok
+	// stamps each such change so a reply can be matched to the state it belongs to.
+	optimistic    *optimisticState
+	optimisticTok uint64
+	// diffGen, statusGen, logGen and savedGen stamp the loads whose replies can
+	// be overtaken by a later request, so a superseded reply is dropped instead
+	// of rendered. diffGen covers both diff sources feeding Main — the working
+	// copy and the saved-patch reader — since only one of them is on screen.
+	diffGen   loadGen
+	statusGen loadGen
+	logGen    loadGen
+	revGen    loadGen
+	savedGen  loadGen
+	// mainKey identifies the selection mainText was rendered for, so a refresh of
+	// what is already on screen can keep the reader's scroll position.
+	mainKey  string
+	mainText string
 	// diffErr records that diffText is a load-failure notice rather than a patch,
 	// so it is never written out as one.
 	diffErr bool
@@ -182,6 +224,25 @@ type Model struct {
 	diffSrc       diffSource
 	dirDiff       bool
 	hideUntracked bool
+	// liveRefresh is whether the working copy is being watched in the background.
+	// It is seeded from the configuration and toggled at runtime, kept apart from
+	// cfg so a session-only toggle is never persisted.
+	liveRefresh bool
+	// watchGen stamps the live-refresh poller, so a tick from one that has been
+	// stopped or restarted is dropped rather than acted on. watchTrackedFP and
+	// watchFullFP are the last fingerprints taken at each depth, watchFullDue when
+	// the next full scan is affordable and watchScanOff that the working copy is
+	// too large for one at all; watchEvery is the interval the poller is running
+	// at (backed off after a failure), watchQueued a change seen while the screen
+	// was busy, and watchFailed that the failure has already been reported.
+	watchGen       uint64
+	watchTrackedFP string
+	watchFullFP    string
+	watchFullDue   time.Time
+	watchScanOff   bool
+	watchEvery     time.Duration
+	watchQueued    bool
+	watchFailed    bool
 	// showCmdLog controls whether the command-log panel below Main is displayed.
 	// It defaults to on and is toggled at runtime; it is not persisted.
 	showCmdLog bool
@@ -211,6 +272,13 @@ type Model struct {
 	aborting     bool
 	passAttempts int
 	pending      tea.Cmd
+	// pendingOps marks the paths a revert, delete or commit is running on, so
+	// those rows read as in flight rather than done; pendingHold is what the
+	// confirmation prompt on screen will mark once accepted, and pendingTok stamps
+	// each action so its reply clears only its own rows.
+	pendingOps  map[string]pendingOp
+	pendingHold *pendingHold
+	pendingTok  uint64
 	// updateConflictPrompt stages a second "conflicts will be skipped" confirm shown after the default update confirm.
 	updateConflictPrompt string
 	// updatingWC is true while an svn update runs, showing the progress modal.
@@ -245,9 +313,12 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	var m *Model
 
 	status := component.NewViewport(th, keys)
-	files := component.NewList[fileNode]("files", renderFileNode(th), th, keys)
+	// The pending lookup reads through m, which is assigned below before any row
+	// is rendered, so a row marked in flight dims without a rebuild.
+	pending := func(n fileNode) int { return m.pendingCount(n) }
+	files := component.NewList[fileNode]("files", renderFileNode(th, pending), th, keys)
 	changelists := component.NewList[changelistGroup](changelistsListID, renderChangelistGroup(th), th, keys)
-	clFiles := component.NewList[fileNode](changelistFilesID, renderFileNode(th), th, keys)
+	clFiles := component.NewList[fileNode](changelistFilesID, renderFileNode(th, pending), th, keys)
 	savedDiffs := component.NewList[savedDiff](savedDiffsListID, renderSavedDiff(th), th, keys)
 	filesViews := component.NewViews(filesViewsID, []component.View{
 		{Name: "Changes", Content: files},
@@ -255,7 +326,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		{Name: savedDiffsViewName, Content: savedDiffs},
 	}, th, keys)
 	logTable := component.NewTable[svn.LogEntry]("log", logColumns(), func(it svn.LogEntry) []string {
-		return renderLogRow(it, m.wcRevision, m.theme)
+		return renderLogRow(it, m.wcRevision, m.logLoading, m.theme)
 	}, th, keys)
 	main := component.NewViewport(th, keys)
 	cmdLogView := component.NewViewport(th, keys)
@@ -272,6 +343,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		client:          client,
 		info:            info,
 		theme:           th,
+		themeName:       cfg.Theme,
 		keys:            keys,
 		cfg:             cfg,
 		status:          status,
@@ -302,9 +374,12 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		collapsedDirs:   map[string]bool{},
 		clCollapsedDirs: map[string]bool{},
 		filters:         map[int]string{},
+		pendingOps:      map[string]pendingOp{},
+		session:         newSessionStore(),
 		source:          sourceFiles,
 		dirDiff:         cfg.DirectoryDiff,
 		hideUntracked:   cfg.HideUntracked,
+		liveRefresh:     cfg.LiveRefresh,
 		showCmdLog:      true,
 		needsSSHKey:     info != nil && info.IsOverSSH(),
 		commitCL:        stagedChangelist,
@@ -325,7 +400,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	if m.client != nil {
 		log := m.cmdLog
 		m.client.Recorder = func(r svn.CommandRecord) {
-			if isReadOnlyCommand(r.Subcommand) {
+			if !loggedCommand(r) {
 				return
 			}
 			log.record(r)
@@ -365,21 +440,21 @@ func (m *Model) retargetDisplay(scope string) {
 	m.client = &next
 }
 
-// Init loads the initial working-copy status and revision history, and — on a
-// release build — checks GitHub for a newer version in the background. When the
-// working copy is served over svn+ssh, it first ensures the configured SSH key
-// is loaded in the agent, deferring the initial load behind the passphrase
-// overlay when the key still needs unlocking.
+// Init loads the initial working-copy status and the revision the repository is
+// at, and — on a release build — checks GitHub for a newer version in the
+// background. When the working copy is served over svn+ssh, it first ensures the
+// configured SSH key is loaded in the agent, deferring the initial load behind
+// the passphrase overlay when the key still needs unlocking.
+//
+// A page of history and the saved-diff scan are not part of startup: neither can
+// be seen until a panel that shows them is looked at, so both are deferred.
 func (m *Model) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	if m.needsSSHKey {
 		cmds = append(cmds, sshCheckCmd(m.cfg.SSHKeyPath))
 	} else {
-		cmds = append(cmds, loadStatusCmd(m.client), m.resetLogPaging())
+		cmds = append(cmds, m.beginInitialLoad())
 	}
-	// The saved diffs live on local disk, so the Diffs view can be populated
-	// regardless of whether the repository is reachable yet.
-	cmds = append(cmds, loadSavedDiffsCmd(m.diffDir()))
 	if m.build.IsRelease() {
 		cmds = append(cmds, checkUpdateCmd(m.build))
 	}
@@ -387,6 +462,29 @@ func (m *Model) Init() tea.Cmd {
 		cmds = append(cmds, startupNoticeCmd(m.startupNotice))
 	}
 	return tea.Batch(cmds...)
+}
+
+// Close ends the session: every svn command still in flight is abandoned, the
+// caches are purged and the content the panels retained is released. It is the
+// counterpart to New and runs on every exit path, including the one that hands
+// off to a self-update. Nothing was written outside the process, so there is
+// nothing to clean up beyond memory. It is safe to call more than once.
+func (m *Model) Close() {
+	m.diffGen.stop()
+	m.statusGen.stop()
+	m.logGen.stop()
+	m.revGen.stop()
+	m.savedGen.stop()
+	m.stopWatch()
+	m.session.Close()
+	m.clearDiff()
+	m.mainKey, m.mainText = "", ""
+	m.savedPath, m.savedText, m.savedErr = "", "", false
+	m.diffSrc = diffSource{}
+	m.fileItems, m.clItems, m.logEntries, m.savedDiffItems = nil, nil, nil, nil
+	m.dropOptimistic()
+	m.pendingOps, m.pendingHold = nil, nil
+	m.cmdLog.clear()
 }
 
 // Update handles messages, global keys, and forwards the rest to the focused
@@ -435,44 +533,102 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case statusLoadedMsg:
+		if m.statusGen.stale(msg.gen) {
+			return m, nil
+		}
 		m.loading = false
 		m.err = nil
-		m.diffPath, m.diffText = "", ""
 		m.fileItems = msg.items
+		// The poller watches the paths svn reports, so the rows this reload added are
+		// the new baseline rather than a change of their own.
+		m.rebaseWatch()
+		// svn has reported the real status, so anything shown ahead of it is either
+		// confirmed by this or superseded; the snapshot behind it is now two steps back.
+		m.dropOptimistic()
+		// Re-derive what is on screen from the session: a cached diff the status
+		// still stands behind stays put, so a reload no longer blanks a diff it is
+		// about to fetch unchanged. Nothing else in the cache is touched — every
+		// entry is re-checked when it is read, which keeps a routine reload cheap no
+		// matter how much has been browsed.
+		m.rederiveDiff()
 		m.rebuildFileTree()
 		m.focusFirstFile()
 		m.rebuildChangelists()
 		m.syncDrill()
 		m.refreshChrome()
-		return m, m.diffLoadForSelection()
+		// The first paint is done, so the page of history the Log panel needs can
+		// be fetched now without the cost falling on startup.
+		return m, tea.Batch(m.diffLoadForSelection(), m.ensureLogPage())
 
 	case logLoadedMsg:
 		// A page turn taken while this load was in flight supersedes it.
-		if msg.page != m.logPage {
+		if m.logGen.stale(msg.gen) || msg.page != m.logPage {
 			return m, nil
 		}
-		m.logErr = msg.err
-		m.logEntries = msg.entries
-		m.logMore = msg.more
-		m.recordLogAnchor()
-		m.applyLogFilter()
-		// History reveals HEAD, shown by the revision indicator next to the
-		// working-copy revision, so refresh the Status panel and bar.
+		m.logLoading = false
+		if msg.err == nil {
+			m.session.PutLogPage(
+				logKey{anchor: m.logAnchor(msg.page), limit: m.cfg.LogLimit},
+				historyPage{entries: msg.entries, more: msg.more},
+			)
+		}
+		m.applyLogPage(historyPage{entries: msg.entries, more: msg.more}, msg.err)
+		return m, m.revisionDetailForSelection()
+
+	case headLoadedMsg:
+		// The HEAD probe is the only svn command startup runs against the
+		// repository, so its failure is what tells the Log panel it is unreachable.
+		if msg.err != nil {
+			m.logErr = msg.err
+			if m.source == sourceLog {
+				m.updateMain()
+			}
+			return m, nil
+		}
+		m.headRev = msg.rev
 		m.updateStatus()
-		m.updateBar()
+		return m, nil
+
+	case revisionPendingMsg:
+		// The cursor rested long enough for this revision's paths to be worth
+		// asking svn for.
+		if m.revGen.stale(msg.gen) {
+			return m, nil
+		}
+		ctx, gen := m.revGen.begin(loadTimeout)
+		return m, loadRevisionDetailCmd(ctx, m.client, msg.rev, gen)
+
+	case revisionDetailMsg:
+		// A revision that cannot be described leaves its metadata on screen; only
+		// the changed-path list is missing, which is not worth an error for.
+		if m.revGen.stale(msg.gen) || msg.err != nil {
+			return m, nil
+		}
+		m.session.PutRevDetail(msg.rev, msg.paths)
 		if m.source == sourceLog {
 			m.updateMain()
 		}
 		return m, nil
 
-	case diffLoadedMsg:
-		m.diffPath = msg.path
-		m.diffErr = msg.err != nil
-		if msg.err != nil {
-			m.diffText = "Unable to load diff: " + msg.err.Error()
-		} else {
-			m.diffText = msg.diff
+	case diffPendingMsg:
+		// The cursor rested long enough for this diff to be worth asking svn for.
+		if m.diffGen.stale(msg.gen) {
+			return m, nil
 		}
+		ctx, gen := m.diffGen.begin(loadTimeout)
+		return m, loadDiffCmd(ctx, m.client, msg.key, gen)
+
+	case diffLoadedMsg:
+		if m.diffGen.stale(msg.gen) {
+			return m, nil
+		}
+		k := diffKey{path: msg.path, dir: msg.dir}
+		e := diffEntry{text: msg.diff, stamp: m.diffStamp(k)}
+		if msg.err != nil {
+			e.text, e.failed = "Unable to load diff: "+msg.err.Error(), true
+		}
+		m.session.PutDiff(k, e)
+		m.applyDiff(k, e)
 		if m.source == sourceFiles {
 			m.updateMain()
 		}
@@ -485,9 +641,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.showToast("diff saved to "+msg.path, component.LevelSuccess)
 		// The new file belongs in the Diffs view, so re-scan the store.
-		return m, loadSavedDiffsCmd(m.diffDir())
+		return m, m.reloadSavedDiffs()
 
 	case savedDiffsLoadedMsg:
+		if m.savedGen.stale(msg.gen) {
+			return m, nil
+		}
 		m.savedDiffsErr = msg.err
 		m.savedDiffItems = msg.files
 		m.rebuildSavedDiffs()
@@ -498,6 +657,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case savedDiffReadMsg:
+		if m.diffGen.stale(msg.gen) {
+			return m, nil
+		}
 		m.savedPath = msg.path
 		m.savedErr = msg.err != nil
 		if msg.err != nil {
@@ -520,7 +682,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// A terminal editor has exited, so the file may have changed: re-read the
 		// working copy (which reloads the diff on screen) and the saved-diff store.
-		return m, tea.Batch(loadStatusCmd(m.client), loadSavedDiffsCmd(m.diffDir()))
+		return m, tea.Batch(m.reloadStatus(), m.reloadSavedDiffsIfShown())
 
 	case errMsg:
 		m.loading = false
@@ -531,15 +693,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case stagedMsg:
 		if msg.err != nil {
 			m.showToast(failureText("stage", msg.err), component.LevelError)
-			return m, nil
+			if msg.token == 0 {
+				return m, nil
+			}
+			// Put the change back the way it was, then ask svn for the truth: a fan-out
+			// over several files stops at the first failure, so some may have landed.
+			m.settleOptimistic(msg.token, msg.err)
+			return m, m.reloadStatus()
 		}
+		m.settleOptimistic(msg.token, nil)
 		if msg.changelist != "" {
 			m.showToast("added "+msg.path+" to "+msg.changelist, component.LevelSuccess)
 		}
 		// Reload status so the changelist grouping (and staged marker) refresh.
-		return m, loadStatusCmd(m.client)
+		return m, m.reloadStatus()
 
 	case committedMsg:
+		m.clearPending(msg.token)
 		if msg.err != nil {
 			m.loading = false
 			m.showToast(failureText("commit", msg.err), component.LevelError)
@@ -552,29 +722,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.showToast("commit complete", component.LevelSuccess)
 		}
-		m.diffPath, m.diffText = "", ""
+		m.clearDiff()
 		m.refreshChrome()
 		// A commit adds a revision at the head of history: show it.
 		m.log.GoTop()
-		return m, tea.Batch(loadStatusCmd(m.client), m.resetLogPaging())
+		return m, tea.Batch(m.reloadStatus(), m.resetLogPaging())
 
 	case revertedMsg:
+		m.clearPending(msg.token)
 		if msg.err != nil {
 			m.showToast(failureText("revert", msg.err), component.LevelError)
 			return m, nil
 		}
 		m.showToast("reverted "+msg.path, component.LevelSuccess)
-		m.diffPath, m.diffText = "", ""
-		return m, loadStatusCmd(m.client)
+		m.clearDiff()
+		return m, m.reloadStatus()
 
 	case deletedMsg:
+		m.clearPending(msg.token)
 		if msg.err != nil {
 			m.showToast(failureText("delete", msg.err), component.LevelError)
 			return m, nil
 		}
 		m.showToast("deleted "+msg.path, component.LevelSuccess)
-		m.diffPath, m.diffText = "", ""
-		return m, loadStatusCmd(m.client)
+		m.clearDiff()
+		return m, m.reloadStatus()
 
 	case updatedMsg:
 		m.updatingWC = false
@@ -591,7 +763,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.showToast("update complete", component.LevelSuccess)
 		}
-		m.diffPath, m.diffText = "", ""
+		m.clearDiff()
 		m.updateStatus()
 		m.updateBar()
 		// A revision picked in the Log was on the page on screen, so stay there; a
@@ -601,7 +773,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.log.GoTop()
 			log = m.resetLogPaging()
 		}
-		return m, tea.Batch(loadStatusCmd(m.client), log)
+		return m, tea.Batch(m.reloadStatus(), log)
+
+	case workingCopyChangedMsg:
+		return m, m.observeWorkingCopy(msg)
 
 	case updateAvailableMsg:
 		// Offer the update only when nothing else is on screen, so the prompt
@@ -682,7 +857,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.diffLoadForSelection()
 			case savedDiffsViewName:
 				// Re-scan on entry so diffs saved (or removed) elsewhere show up.
-				return m, tea.Batch(loadSavedDiffsCmd(m.diffDir()), m.savedDiffLoadForSelection())
+				return m, tea.Batch(m.reloadSavedDiffs(), m.savedDiffLoadForSelection())
 			}
 		}
 		return m, nil
@@ -728,6 +903,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			cmd := m.pending
 			m.pending = nil
+			// The action is on its way now, so the rows it touches read as in flight.
+			m.markHeldPending()
 			if m.updateProgress != "" {
 				// The pending command is an svn update; show the progress modal
 				// until it completes (cleared in the updatedMsg handler).
@@ -759,6 +936,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case confirmModalID:
 			m.closeConfirm()
 			m.pending = nil
+			m.pendingHold = nil
 			m.updateConflictPrompt = ""
 			m.updateProgress = ""
 		case updateMenuID:
@@ -960,9 +1138,12 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	case key.Matches(k, m.keys.Refresh):
 		m.loading = true
 		m.dismissToast()
-		m.diffPath, m.diffText = "", ""
+		// An explicit refresh asks for fresh data: nothing may be answered from
+		// the session.
+		m.session.Purge()
+		m.clearDiff()
 		m.refreshChrome()
-		return tea.Batch(loadStatusCmd(m.client), m.reloadLogPage(), loadSavedDiffsCmd(m.diffDir())), true
+		return tea.Batch(m.reloadStatus(), m.reloadLogPage(), m.reloadSavedDiffsIfShown()), true
 	case key.Matches(k, m.keys.FocusNext):
 		m.focusNextPanel()
 		return m.afterFocusChange(), true
@@ -977,6 +1158,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return m.openFilter(), true
 	case key.Matches(k, m.keys.ToggleCmdLog):
 		return m.toggleCmdLog(), true
+	case key.Matches(k, m.keys.ToggleLiveRefresh):
+		return m.toggleLiveRefresh(), true
 	case key.Matches(k, m.keys.SaveDiff):
 		return m.saveDiff(), true
 	case key.Matches(k, m.keys.SplitDiff):
@@ -1080,7 +1263,10 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 // stageable).
 func (m *Model) stageSelected() tea.Cmd {
 	if n, items, ok := m.selectedDirectory(); ok {
-		return m.stageDirectory(n, items)
+		return m.stageDirectory(n, m.withoutPending(items))
+	}
+	if m.selectionPending() {
+		return nil
 	}
 	act, ok := m.stageTarget()
 	if !ok {
@@ -1089,7 +1275,8 @@ func (m *Model) stageSelected() tea.Cmd {
 		}
 		return nil
 	}
-	return stageCmd(m.client, stagedChangelist, act)
+	acts := []stageAction{act}
+	return stageCmd(m.client, stagedChangelist, act, m.applyOptimistic(stageMutations(acts, stagedChangelist)))
 }
 
 // stageDirectory toggles staging for the files beneath the selected directory
@@ -1100,14 +1287,15 @@ func (m *Model) stageSelected() tea.Cmd {
 // directory holding only clean or ignored files has nothing to do and warns
 // instead of running svn.
 func (m *Model) stageDirectory(n fileNode, items []svn.StatusItem) tea.Cmd {
-	if acts := directoryStageActions(n, items); len(acts) > 0 {
-		return stageManyCmd(m.client, stagedChangelist, acts)
+	acts := directoryStageActions(n, items)
+	if len(acts) == 0 {
+		acts = directoryUnstageActions(n, items)
 	}
-	if acts := directoryUnstageActions(n, items); len(acts) > 0 {
-		return stageManyCmd(m.client, stagedChangelist, acts)
+	if len(acts) == 0 {
+		m.showToast("nothing to stage or unstage under "+dirLabel(n), component.LevelWarning)
+		return nil
 	}
-	m.showToast("nothing to stage or unstage under "+dirLabel(n), component.LevelWarning)
-	return nil
+	return stageManyCmd(m.client, stagedChangelist, acts, m.applyOptimistic(stageMutations(acts, stagedChangelist)))
 }
 
 // directoryStageActions builds the stage actions that stage every stageable file
@@ -1221,7 +1409,8 @@ func (m *Model) submitChangelist(name string) tea.Cmd {
 	}
 	m.naming = false
 	m.nameEditor.Blur()
-	return assignChangelistCmd(m.client, name, m.nameTargets)
+	targets := m.nameTargets
+	return assignChangelistCmd(m.client, name, targets, m.applyOptimistic(changelistMutations(targets, name)))
 }
 
 // selectedFile returns the file the current Files-panel view points at: the
@@ -1249,10 +1438,38 @@ func (m *Model) selectedFile() (svn.StatusItem, bool) {
 }
 
 // rebuildFileTree re-flattens the current status items into the Changes tree,
-// honoring the remembered per-directory collapse state. The List clamps the
-// cursor, so it stays in range as rows appear or disappear.
+// honoring the remembered per-directory collapse state. The cursor is put back
+// on the row it was on by path, so a rebuild that reorders or drops rows keeps
+// the user on the same file rather than the same row number.
 func (m *Model) rebuildFileTree() {
-	m.files.SetItems(buildFileTree(m.filteredStatusItems(m.fileItems), m.collapsedDirs))
+	path := selectedNodePath(m.files)
+	m.files.SetItems(m.fileTree(m.filteredStatusItems(m.fileItems), m.collapsedDirs))
+	selectNodePath(m.files, path)
+}
+
+// selectedNodePath returns the path of the row a file tree's cursor rests on,
+// for restoring the selection across a rebuild.
+func selectedNodePath(l *component.List[fileNode]) string {
+	n, ok := l.Selected()
+	if !ok {
+		return ""
+	}
+	return n.Path
+}
+
+// selectNodePath moves a file tree's cursor back onto path. A path the rebuild
+// dropped leaves the cursor where the List clamped it — on the row that took its
+// place — which is the nearest thing that survived.
+func selectNodePath(l *component.List[fileNode], path string) {
+	if path == "" {
+		return
+	}
+	for i, n := range l.Items() {
+		if n.Path == path {
+			l.SetIndex(i)
+			return
+		}
+	}
 }
 
 // focusFirstFile parks the Changes-tree cursor on the first file leaf the first
@@ -1291,9 +1508,12 @@ func (m *Model) toggleCollapse() tea.Cmd {
 }
 
 // rebuildClTree re-flattens the drilled-in changelist's items into its tree,
-// honoring the drill's own per-directory collapse state.
+// honoring the drill's own per-directory collapse state and keeping the cursor
+// on the same file across the rebuild.
 func (m *Model) rebuildClTree() {
-	m.clFiles.SetItems(buildFileTree(m.filteredStatusItems(m.clItems), m.clCollapsedDirs))
+	path := selectedNodePath(m.clFiles)
+	m.clFiles.SetItems(m.fileTree(m.filteredStatusItems(m.clItems), m.clCollapsedDirs))
+	selectNodePath(m.clFiles, path)
 }
 
 // toggleClCollapse expands or collapses the directory under the drilled-in
@@ -1348,7 +1568,7 @@ func (m *Model) filesFooter() string {
 		index, shown := fileLeafStats(m.clFiles.Items(), m.clFiles.Index())
 		full := shown
 		if hiding {
-			full = leafCount(buildFileTree(m.clItems, m.clCollapsedDirs))
+			full = leafCount(m.fileTree(m.clItems, m.clCollapsedDirs))
 		}
 		return countLabel(index, shown, full)
 	case m.filesViewIsChangelists():
@@ -1362,7 +1582,7 @@ func (m *Model) filesFooter() string {
 		index, shown := fileLeafStats(m.files.Items(), m.files.Index())
 		full := shown
 		if hiding {
-			full = leafCount(buildFileTree(m.fileItems, m.collapsedDirs))
+			full = leafCount(m.fileTree(m.fileItems, m.collapsedDirs))
 		}
 		return countLabel(index, shown, full)
 	}
@@ -1397,7 +1617,7 @@ func (m *Model) assignChangelist() tea.Cmd {
 	targets := m.stagedTargets()
 	if len(targets) == 0 {
 		it, ok := m.selectedFile()
-		if !ok {
+		if !ok || m.isPending(it.Path) {
 			return nil
 		}
 		if isNamedChangelist(it.Changelist) {
@@ -1422,11 +1642,11 @@ func (m *Model) assignChangelist() tea.Cmd {
 // stagedTargets collects every file currently in the anonymous staged bucket as
 // changelist targets, so naming a changelist moves the whole staged set as a
 // unit. Staged files are already versioned, so in practice none need an
-// `svn add` first.
+// `svn add` first. Files already waiting on svn are left out.
 func (m *Model) stagedTargets() []changelistTarget {
 	var targets []changelistTarget
 	for _, it := range m.fileItems {
-		if it.Changelist == stagedChangelist {
+		if it.Changelist == stagedChangelist && !m.isPending(it.Path) {
 			targets = append(targets, changelistTarget{path: it.Path, add: it.State == svn.StateUnversioned})
 		}
 	}
@@ -1451,8 +1671,13 @@ func (m *Model) syncDrill() {
 
 // openCommit opens the commit-message editor for the current commit target: the
 // selected changelist when in the Changelists view, otherwise the anonymous
-// staged bucket. It refuses an empty target.
+// staged bucket. It refuses an empty target, and one whose commit is still
+// running.
 func (m *Model) openCommit() tea.Cmd {
+	if m.commitPending() {
+		m.showToast("a commit is already running", component.LevelWarning)
+		return nil
+	}
 	target, label, ok := m.commitTarget()
 	if !ok {
 		return nil
@@ -1495,34 +1720,41 @@ func (m *Model) commitTarget() (cl, label string, ok bool) {
 	return stagedChangelist, displayCL(stagedChangelist), true
 }
 
+// pathsInChangelist returns the pending files belonging to the named changelist.
+func (m *Model) pathsInChangelist(name string) []string {
+	var paths []string
+	for _, it := range m.fileItems {
+		if it.Changelist == name {
+			paths = append(paths, it.Path)
+		}
+	}
+	return paths
+}
+
 // countInChangelist returns how many pending files belong to the named
 // changelist.
 func (m *Model) countInChangelist(name string) int {
-	n := 0
-	for _, it := range m.fileItems {
-		if it.Changelist == name {
-			n++
-		}
-	}
-	return n
+	return len(m.pathsInChangelist(name))
 }
 
 // requestRevert asks to discard local changes to the current selection, opening a
 // confirmation modal. On a directory row it reverts every dirty file beneath it;
-// on a file leaf a clean/unversioned selection has nothing to revert.
+// on a file leaf a clean/unversioned selection has nothing to revert. A row
+// already waiting on svn is left alone.
 func (m *Model) requestRevert() tea.Cmd {
 	if n, items, ok := m.selectedDirectory(); ok {
-		return m.requestRevertDirectory(n, items)
+		return m.requestRevertDirectory(n, m.withoutPending(items))
 	}
 	it, ok := m.selectedFile()
-	if !ok {
+	if !ok || m.isPending(it.Path) {
 		return nil
 	}
 	if !it.State.IsDirty() {
 		m.showToast("nothing to revert in "+it.Path, component.LevelWarning)
 		return nil
 	}
-	m.pending = revertCmd(m.client, it.Path)
+	token := m.nextPendingToken()
+	m.confirmAction(revertCmd(m.client, it.Path, token), holdPending(pendingRevert, token, it.Path))
 	m.openConfirm("Revert changes?", "Discard local changes to "+it.Path+"? This cannot be undone.")
 	return nil
 }
@@ -1536,7 +1768,8 @@ func (m *Model) requestRevertDirectory(n fileNode, items []svn.StatusItem) tea.C
 		m.showToast("nothing to revert under "+dirLabel(n), component.LevelWarning)
 		return nil
 	}
-	m.pending = revertManyCmd(m.client, paths)
+	token := m.nextPendingToken()
+	m.confirmAction(revertManyCmd(m.client, paths, token), holdPending(pendingRevert, token, paths...))
 	m.openConfirm("Revert changes?", fmt.Sprintf(
 		"Discard local changes to %d files under %s? This cannot be undone.", len(paths), dirLabel(n)))
 	return nil
@@ -1557,13 +1790,14 @@ func directoryRevertPaths(n fileNode, items []svn.StatusItem) []string {
 // requestDelete asks to remove the current selection, opening a confirmation
 // modal. On a directory row it removes every deletable file beneath it; on a file
 // leaf a versioned file is scheduled for deletion, an unversioned one is removed
-// from disk, and ignored files are left alone.
+// from disk, and ignored files are left alone. A row already waiting on svn is
+// left alone too.
 func (m *Model) requestDelete() tea.Cmd {
 	if n, items, ok := m.selectedDirectory(); ok {
-		return m.requestDeleteDirectory(n, items)
+		return m.requestDeleteDirectory(n, m.withoutPending(items))
 	}
 	it, ok := m.selectedFile()
-	if !ok {
+	if !ok || m.isPending(it.Path) {
 		return nil
 	}
 	if it.State == svn.StateIgnored {
@@ -1575,7 +1809,8 @@ func (m *Model) requestDelete() tea.Cmd {
 	if act.unversioned {
 		message = "Permanently delete untracked " + it.Path + " from disk? This cannot be undone."
 	}
-	m.pending = deleteCmd(m.client, act)
+	token := m.nextPendingToken()
+	m.confirmAction(deleteCmd(m.client, act, token), holdPending(pendingDelete, token, act.path))
 	m.openConfirm("Delete file?", message)
 	return nil
 }
@@ -1590,7 +1825,12 @@ func (m *Model) requestDeleteDirectory(n fileNode, items []svn.StatusItem) tea.C
 		m.showToast("nothing to delete under "+dirLabel(n), component.LevelWarning)
 		return nil
 	}
-	m.pending = deleteManyCmd(m.client, acts)
+	paths := make([]string, 0, len(acts))
+	for _, act := range acts {
+		paths = append(paths, act.path)
+	}
+	token := m.nextPendingToken()
+	m.confirmAction(deleteManyCmd(m.client, acts, token), holdPending(pendingDelete, token, paths...))
 	m.openConfirm("Delete files?", deleteDirectoryMessage(n, acts))
 	return nil
 }
@@ -1636,7 +1876,7 @@ func deleteDirectoryMessage(n fileNode, acts []deleteAction) string {
 // revision. It confirms first — like the update-to-revision flow — and adds a
 // second confirmation when the working copy already holds conflicts svn skips.
 func (m *Model) requestUpdate() tea.Cmd {
-	m.pending = updateCmd(m.client)
+	m.confirmAction(updateCmd(m.client), nil)
 	m.updateConflictPrompt = conflictUpdatePrompt(m.conflictedPaths(), "the latest revision")
 	m.updateProgress = updateProgressText(m.wcRevision, "the latest revision")
 	m.openConfirm("Update working copy?", "Update the working copy to the latest revision? Uncommitted changes are kept and merged.")
@@ -1652,7 +1892,7 @@ func (m *Model) requestUpdateToRevision() tea.Cmd {
 		m.showToast("no revision selected", component.LevelWarning)
 		return nil
 	}
-	m.pending = updateToRevisionCmd(m.client, entry.Revision)
+	m.confirmAction(updateToRevisionCmd(m.client, entry.Revision), nil)
 	m.updateConflictPrompt = conflictUpdatePrompt(m.conflictedPaths(), "r"+entry.Revision)
 	m.updateProgress = updateProgressText(m.wcRevision, "r"+entry.Revision)
 	m.openConfirm("Update to revision?", "Update the working copy to r"+entry.Revision+"? Uncommitted changes are kept and merged.")
@@ -1782,6 +2022,7 @@ func (m *Model) chooseUpdate(index int) tea.Cmd {
 func (m *Model) previewTheme(name string) {
 	th, _ := theme.ByName(name)
 	m.theme = th
+	m.themeName = name
 	// Pin the color profile before re-theming so the palette (and the diff
 	// re-colorized by refreshChrome) renders in the profile the theme expects.
 	theme.ApplyColorProfile(name)
@@ -1799,8 +2040,8 @@ func (m *Model) previewTheme(name string) {
 	m.form.SetTheme(th)
 	m.toast.SetTheme(th)
 	m.splitDiff.SetTheme(th)
-	m.files.SetRender(renderFileNode(th))
-	m.clFiles.SetRender(renderFileNode(th))
+	m.files.SetRender(renderFileNode(th, m.pendingCount))
+	m.clFiles.SetRender(renderFileNode(th, m.pendingCount))
 	m.changelists.SetRender(renderChangelistGroup(th))
 	m.savedDiffs.SetRender(renderSavedDiff(th))
 	m.refreshChrome()
@@ -1855,17 +2096,21 @@ func (m *Model) submitSettings() tea.Cmd {
 	}
 	cfg.DisplayFrom = strings.TrimSpace(vals[6])
 	cfg.DiffOutputDir = strings.TrimSpace(vals[7])
+	cfg.OptimisticUpdates = vals[8] == "true"
+	cfg.LiveRefresh = vals[9] == "true"
 
 	m.closeSettings()
 
 	themeChanged := cfg.Theme != m.cfg.Theme
 	untrackedChanged := cfg.HideUntracked != m.hideUntracked
+	liveChanged := cfg.LiveRefresh != m.liveRefresh
 	displayChanged := cfg.DisplayFrom != m.cfg.DisplayFrom
 	diffDirChanged := cfg.DiffOutputDir != m.cfg.DiffOutputDir
 	logLimitChanged := cfg.LogLimit != m.cfg.LogLimit
 	m.cfg = cfg
 	m.dirDiff = cfg.DirectoryDiff
 	m.hideUntracked = cfg.HideUntracked
+	m.liveRefresh = cfg.LiveRefresh
 	if themeChanged {
 		m.previewTheme(cfg.Theme)
 	}
@@ -1877,16 +2122,28 @@ func (m *Model) submitSettings() tea.Cmd {
 	var reload tea.Cmd
 	if displayChanged {
 		m.retargetDisplay(cfg.DisplayFrom)
-		m.diffPath, m.diffText = "", ""
+		m.session.Purge()
+		m.clearDiff()
 		m.loading = true
 		m.refreshChrome()
 		reload = m.beginInitialLoad()
 	}
+	// A new display scope restarts the poller as part of the reload above; on its
+	// own the setting starts or stops it here.
+	if liveChanged && !displayChanged {
+		if m.liveRefresh {
+			reload = tea.Batch(reload, m.startWatch())
+		} else {
+			m.stopWatch()
+		}
+	}
 	// A new output directory means a different set of saved diffs to browse; the
 	// display scope changes it too, since a blank setting resolves to the root.
 	if diffDirChanged || displayChanged {
+		m.savedDiffItems, m.savedDiffsErr = nil, nil
 		m.savedPath, m.savedText, m.savedErr = "", "", false
-		reload = tea.Batch(reload, loadSavedDiffsCmd(m.diffDir()))
+		m.rebuildSavedDiffs()
+		reload = tea.Batch(reload, m.reloadSavedDiffsIfShown())
 	}
 	// A new page size puts different revisions on every page, so the anchors
 	// reached with the old one no longer address anything.
@@ -2008,11 +2265,14 @@ func settingsFields(cfg config.Config, dirDiff bool) []component.Field {
 		{Label: "SSH key", Kind: component.FieldText, Value: cfg.SSHKeyPath},
 		{Label: "Display from", Kind: component.FieldChoice, Value: cfg.DisplayFrom, Options: config.DisplayFromValues()},
 		{Label: "Diff output", Kind: component.FieldText, Value: cfg.DiffOutputDir},
+		{Label: "Optimistic updates", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.OptimisticUpdates)},
+		{Label: "Live refresh", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.LiveRefresh)},
 	}
 }
 
 // submitCommit closes the editor and commits the target changelist with the
-// entered message, rejecting an empty message.
+// entered message, rejecting an empty message. The files going in are marked as
+// in flight until svn answers.
 func (m *Model) submitCommit(message string) tea.Cmd {
 	if strings.TrimSpace(message) == "" {
 		m.showToast("commit message cannot be empty", component.LevelWarning)
@@ -2021,8 +2281,10 @@ func (m *Model) submitCommit(message string) tea.Cmd {
 	m.editing = false
 	m.editor.Blur()
 	m.loading = true
+	token := m.nextPendingToken()
+	m.markPending(pendingCommit, token, m.pathsInChangelist(m.commitCL))
 	m.refreshChrome()
-	return commitCmd(m.client, message, m.commitCL)
+	return commitCmd(m.client, message, m.commitCL, token)
 }
 
 // sizeEditor sizes the commit editor to a centered portion of the screen.
@@ -2046,11 +2308,15 @@ func (m *Model) sizeDiffEditor() {
 	m.diffEditor.SetSize(w, 0)
 }
 
-// beginInitialLoad kicks off the working-copy status and revision-history loads
-// the rest of the UI depends on. It is deferred until any required svn+ssh key
-// is unlocked, so those remote operations don't fail on a locked key.
+// beginInitialLoad kicks off the loads the first paint depends on: the
+// working-copy status, and the single log entry the HEAD indicator needs. It is
+// deferred until any required svn+ssh key is unlocked, so those remote
+// operations don't fail on a locked key. A page of history is not part of it —
+// that follows the first status, or the first look at the Log panel.
 func (m *Model) beginInitialLoad() tea.Cmd {
-	return tea.Batch(loadStatusCmd(m.client), m.resetLogPaging())
+	m.forgetLogPaging()
+	m.headRev = ""
+	return tea.Batch(m.reloadStatus(), headRevisionCmd(m.client), m.startWatch())
 }
 
 // submitUnlock adds the configured SSH key to the agent with the entered
@@ -2195,6 +2461,7 @@ func (m *Model) handleSelection(sel uimsg.SelectedMsg) tea.Cmd {
 	case "log":
 		if m.source == sourceLog {
 			m.updateMain()
+			return m.revisionDetailForSelection()
 		}
 	}
 	return nil
@@ -2213,13 +2480,19 @@ func (m *Model) afterFocusChange() tea.Cmd {
 	case panelMain, panelCmdLog:
 		// Focusing Main or the command log only scrolls it; keep the current source.
 	}
+	// History is asked for before Main is rendered, so the first look at the Log
+	// panel shows that it is loading rather than that it is empty.
+	var cmd tea.Cmd
+	if m.source == sourceLog {
+		cmd = tea.Batch(m.ensureLogPage(), m.revisionDetailForSelection())
+	}
 	m.syncMainTitle()
 	m.updateBar()
 	m.updateMain()
 	if m.source == sourceFiles {
 		return m.diffLoadForSelection()
 	}
-	return nil
+	return cmd
 }
 
 // focusNextPanel and focusPrevPanel cycle focus like the focus manager but skip
@@ -2255,6 +2528,92 @@ func (m *Model) syncMainTitle() {
 	}
 }
 
+// reloadStatus, loadDiff, reloadSavedDiffs and readSavedDiff issue the loads
+// whose replies can be overtaken by a later request. Each abandons the request
+// still in flight and stamps the new one, so only the reply the model is still
+// waiting for is applied.
+func (m *Model) reloadStatus() tea.Cmd {
+	ctx, gen := m.statusGen.begin(loadTimeout)
+	return loadStatusCmd(ctx, m.client, gen)
+}
+
+// loadDiff puts the diff for k on screen. One the session already holds for the
+// working copy's current state is applied on the spot and costs no command; a
+// miss is debounced, so passing over a row does not spawn an svn process for it.
+func (m *Model) loadDiff(k diffKey) tea.Cmd {
+	if e, ok := m.session.Diff(k, m.diffStamp(k)); ok {
+		// Whatever is in flight was for the row just left; its reply must not
+		// land on top of this one.
+		m.diffGen.next()
+		m.applyDiff(k, e)
+		if m.source == sourceFiles {
+			m.updateMain()
+		}
+		return nil
+	}
+	gen := m.diffGen.next()
+	return tea.Tick(diffDebounce, func(time.Time) tea.Msg {
+		return diffPendingMsg{key: k, gen: gen}
+	})
+}
+
+// diffStamp fingerprints the working-copy state a diff of k would be produced
+// from, as the session store's key to whether a cached diff is still good.
+func (m *Model) diffStamp(k diffKey) string {
+	root := ""
+	if m.client != nil {
+		root = m.client.Dir
+	}
+	return diffStampFor(root, m.wcRevision, m.fileItems, k)
+}
+
+// applyDiff puts a loaded (or cached) diff on screen, recording what it was
+// produced for so a later refresh can be told from a move to another selection.
+func (m *Model) applyDiff(k diffKey, e diffEntry) {
+	m.diffPath, m.diffOfDir = k.path, k.dir
+	m.diffText, m.diffErr = e.text, e.failed
+}
+
+// clearDiff drops the diff on screen, so Main falls back to its placeholder
+// until a fresh one lands.
+func (m *Model) clearDiff() {
+	m.diffPath, m.diffText, m.diffErr, m.diffOfDir = "", "", false, false
+}
+
+// rederiveDiff re-reads the diff on screen from the session once the status
+// behind it has moved: one the session still stands behind stays put, and one it
+// dropped clears, so the load that follows fetches it afresh.
+func (m *Model) rederiveDiff() {
+	if m.diffPath == "" {
+		return
+	}
+	k := diffKey{path: m.diffPath, dir: m.diffOfDir}
+	if e, ok := m.session.Diff(k, m.diffStamp(k)); ok {
+		m.applyDiff(k, e)
+		return
+	}
+	m.clearDiff()
+}
+
+func (m *Model) reloadSavedDiffs() tea.Cmd {
+	return loadSavedDiffsCmd(m.diffDir(), m.savedGen.next())
+}
+
+// reloadSavedDiffsIfShown re-scans the patch files only while the Diffs view is
+// the one on screen. Anywhere else the scan is deferred: that view re-scans
+// whenever it is opened, so the disk is never read for a list nobody is looking
+// at.
+func (m *Model) reloadSavedDiffsIfShown() tea.Cmd {
+	if !m.filesViewIsDiffs() {
+		return nil
+	}
+	return m.reloadSavedDiffs()
+}
+
+func (m *Model) readSavedDiff(path string) tea.Cmd {
+	return readSavedDiffCmd(path, m.diffGen.next())
+}
+
 // diffLoadForSelection returns a command to load the diff that Main should show
 // for the current Files selection when it is not already loaded. In the Diffs
 // view that is the highlighted saved patch file; otherwise a directory row loads
@@ -2264,17 +2623,31 @@ func (m *Model) diffLoadForSelection() tea.Cmd {
 	if m.filesViewIsDiffs() {
 		return m.savedDiffLoadForSelection()
 	}
-	if n, _, ok := m.selectedTreeNode(); ok && n.Item == nil {
-		if !m.dirDiff || m.diffPath == n.Path {
-			return nil
-		}
-		return loadDiffCmd(m.client, n.Path)
-	}
-	it, ok := m.selectedFile()
-	if !ok || !it.State.IsDirty() || m.diffPath == it.Path {
+	k, ok := m.diffSelection()
+	if !ok || m.diffPath == k.path {
+		// There is nothing to fetch, so a load still in flight is for a row that
+		// has been left; its reply must not land on this one.
+		m.diffGen.next()
 		return nil
 	}
-	return loadDiffCmd(m.client, it.Path)
+	return m.loadDiff(k)
+}
+
+// diffSelection returns the diff the Files selection calls for, or ok=false when
+// it calls for none: no selection, a file with no textual diff, or a directory
+// row while directory diffs are off.
+func (m *Model) diffSelection() (diffKey, bool) {
+	if n, _, ok := m.selectedTreeNode(); ok && n.Item == nil {
+		if !m.dirDiff {
+			return diffKey{}, false
+		}
+		return diffKey{path: n.Path, dir: true}, true
+	}
+	it, ok := m.selectedFile()
+	if !ok || !it.State.IsDirty() {
+		return diffKey{}, false
+	}
+	return diffKey{path: it.Path}, true
 }
 
 // toggleDirDiff flips whether directory rows show their combined diff. It lets a
@@ -2569,22 +2942,82 @@ func (m *Model) filteredLogEntries() []svn.LogEntry {
 
 // loadLogPage fetches the given 1-based page of history. The anchor it needs was
 // recorded when the preceding page loaded, so only a page that has been reached
-// before — or the first — can be requested.
+// before — or the first — can be requested. A page the session already holds is
+// rendered on the spot and costs no command, so paging back over ground already
+// covered is instant.
 func (m *Model) loadLogPage(page int) tea.Cmd {
-	anchor := ""
-	if page > 1 {
-		anchor = m.logAnchors[page-2]
-	}
 	m.logPage = page
-	return loadLogCmd(m.client, anchor, page, m.cfg.LogLimit)
+	m.logRequested = true
+	k := logKey{anchor: m.logAnchor(page), limit: m.cfg.LogLimit}
+	if p, ok := m.session.LogPage(k); ok {
+		// Whatever is in flight was for the page just left; its reply must not
+		// land on top of this one.
+		m.logGen.next()
+		m.logLoading = false
+		m.applyLogPage(p, nil)
+		return m.revisionDetailForSelection()
+	}
+	// The rows of the page being left stay on screen, dimmed, until the new page
+	// lands, so the panel never blanks mid-turn.
+	m.logLoading = true
+	ctx, gen := m.logGen.begin(loadTimeout)
+	return loadLogCmd(ctx, m.client, k.anchor, page, m.cfg.LogLimit, gen)
 }
 
-// resetLogPaging returns the Log panel to the first page and forgets the anchors
-// reached from the old history, for when what is being logged changes.
+// logAnchor returns the revision the given 1-based page starts after, recorded
+// when the page before it loaded. The first page needs none.
+func (m *Model) logAnchor(page int) string {
+	if page <= 1 || page-2 >= len(m.logAnchors) {
+		return ""
+	}
+	return m.logAnchors[page-2]
+}
+
+// applyLogPage puts a page of history — freshly loaded or served from the
+// session — on screen, refreshing the Status panel and bar with the HEAD the
+// first page reveals.
+func (m *Model) applyLogPage(p historyPage, err error) {
+	m.logErr = err
+	m.logEntries = p.entries
+	m.logMore = p.more
+	m.recordLogAnchor()
+	m.applyLogFilter()
+	if m.logPage == 1 && len(p.entries) > 0 {
+		m.headRev = p.entries[0].Revision
+	}
+	m.updateStatus()
+	m.updateBar()
+	if m.source == sourceLog {
+		m.updateMain()
+	}
+}
+
+// ensureLogPage fetches the page of history the Log panel needs, once. It is
+// called both when the first status lands and when the panel is first looked at,
+// whichever comes first; the second caller finds the page already asked for and
+// does nothing.
+func (m *Model) ensureLogPage() tea.Cmd {
+	if m.logRequested {
+		return nil
+	}
+	return m.loadLogPage(m.logPage)
+}
+
+// resetLogPaging returns the Log panel to the first page and reloads it, for
+// when what is being logged changes.
 func (m *Model) resetLogPaging() tea.Cmd {
+	m.forgetLogPaging()
+	return m.loadLogPage(1)
+}
+
+// forgetLogPaging drops everything the old history was addressed by: the page on
+// screen, the anchors reached from it and the pages the session held.
+func (m *Model) forgetLogPaging() {
 	m.logAnchors = nil
 	m.logMore = false
-	return m.loadLogPage(1)
+	m.logPage = 1
+	m.logRequested = false
+	m.session.PurgeLogPages()
 }
 
 // recordLogAnchor remembers the revision the page on screen ends on, which is
@@ -2600,8 +3033,10 @@ func (m *Model) recordLogAnchor() {
 	m.logAnchors[m.logPage-1] = last
 }
 
-// reloadLogPage refetches the page on screen, keeping the cursor where it is.
+// reloadLogPage refetches the page on screen, keeping the cursor where it is. It
+// is an explicit refresh, so the cached pages are dropped rather than served.
 func (m *Model) reloadLogPage() tea.Cmd {
+	m.session.PurgeLogPages()
 	return m.loadLogPage(m.logPage)
 }
 
@@ -2714,26 +3149,58 @@ func (m *Model) updateStatus() {
 	m.status.SetContent(strings.Join(lines, "\n"))
 }
 
-// headRevision returns the repository's latest revision, taken from the newest
-// log entry (history is pegged at HEAD, so entry 0 is HEAD). It is empty until
-// history has loaded.
-func (m *Model) headRevision() string {
-	if len(m.logEntries) == 0 {
-		return ""
-	}
-	return m.logEntries[0].Revision
-}
+// headRevision returns the repository's latest revision: read at startup by the
+// one-entry HEAD probe, and refreshed whenever the first page of history lands.
+// It is empty until that probe answers.
+func (m *Model) headRevision() string { return m.headRev }
 
 // updateMain fills the Main panel from whichever side panel currently drives it.
 // The Main and Status panels are searched (not filtered): any active search
 // re-highlights against the new content inside the Viewport, so nothing is set
 // here beyond the content itself.
+//
+// Content identical to what is displayed is not written at all, and a refresh of
+// the same selection keeps the reader's scroll position; only a move to another
+// selection starts back at the top.
 func (m *Model) updateMain() {
 	// Only a unified diff carries the one-column +/-/space marker that must stay
 	// pinned while the body scrolls horizontally; mainContent sets the gutter for
 	// that case, and this baseline clears it for every other view.
 	m.main.SetGutter(0)
-	m.main.SetContent(m.mainContent())
+	content := m.mainContent()
+	key := m.mainSelectionKey()
+	switch {
+	case key == m.mainKey && content == m.mainText:
+		return
+	case key == m.mainKey:
+		m.main.SetContentPreservingScroll(content)
+	default:
+		m.main.SetContent(content)
+	}
+	m.mainKey, m.mainText = key, content
+}
+
+// mainSelectionKey identifies what Main is showing — the driving panel and the
+// row selected in it — so a reload of the same subject can be told from a move
+// to a different one.
+func (m *Model) mainSelectionKey() string {
+	switch m.source {
+	case sourceStatus:
+		return "status"
+	case sourceLog:
+		e, _ := m.log.Selected()
+		return "log:" + e.Revision
+	}
+	switch {
+	case m.filesViewIsDiffs():
+		d, _ := m.savedDiffs.Selected()
+		return "saved:" + d.Path
+	case m.filesViewIsChangelists() && !m.inChangelistDrill():
+		g, _ := m.changelists.Selected()
+		return "changelist:" + g.Name
+	}
+	n, _, _ := m.selectedTreeNode()
+	return "files:" + n.Path
 }
 
 // mainContent computes the raw Main text for the current state, setting the diff
@@ -2873,7 +3340,7 @@ func (m *Model) directoryDetail(n fileNode) string {
 	case strings.TrimSpace(m.diffText) == "":
 		return "(no textual changes under this directory)"
 	default:
-		return colorizeDiff(m.theme, m.diffText)
+		return m.colorize(m.diffText)
 	}
 }
 
@@ -2897,16 +3364,21 @@ func (m *Model) fileDetail() string {
 	case strings.TrimSpace(m.diffText) == "":
 		return strings.Join(append(head, "(no changes to display)"), "\n")
 	default:
-		return strings.Join(append(head, colorizeDiff(m.theme, m.diffText)), "\n")
+		return strings.Join(append(head, m.colorize(m.diffText)), "\n")
 	}
 }
 
 // logDetail renders the metadata, message and changed paths of the selected
-// revision.
+// revision. The changed paths cost their own `svn log --verbose`, so they are
+// filled in from the session when that load has landed and the rest of the
+// detail is shown without waiting for it.
 func (m *Model) logDetail() string {
 	entry, ok := m.log.Selected()
 	if !ok {
-		if m.logErr != nil {
+		switch {
+		case m.logLoading:
+			return "Loading history…"
+		case m.logErr != nil:
 			return "Unable to load history: " + m.logErr.Error()
 		}
 		return "No revision history."
@@ -2920,13 +3392,34 @@ func (m *Model) logDetail() string {
 		lines = append(lines, "date:   "+entry.Date.Format("2006-01-02 15:04"))
 	}
 	lines = append(lines, "", entry.Message)
-	if len(entry.Paths) > 0 {
+	if paths, ok := m.session.RevDetail(entry.Revision); ok && len(paths) > 0 {
 		lines = append(lines, "", "Changed paths:")
-		for _, p := range entry.Paths {
+		for _, p := range paths {
 			lines = append(lines, fmt.Sprintf("  %s %s", p.Action, p.Path))
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// revisionDetailForSelection returns a command to read the changed paths of the
+// selected revision. Revisions are immutable, so one the session already holds
+// costs no command; a miss is debounced like a diff, so walking the Log panel
+// does not spawn an svn process for every row passed over.
+func (m *Model) revisionDetailForSelection() tea.Cmd {
+	// Whatever is in flight was for the row just left; its reply is of no use
+	// now, so it is dropped rather than rendered.
+	gen := m.revGen.next()
+	entry, ok := m.log.Selected()
+	if !ok || entry.Revision == "" {
+		return nil
+	}
+	if _, held := m.session.RevDetail(entry.Revision); held {
+		return nil
+	}
+	rev := entry.Revision
+	return tea.Tick(diffDebounce, func(time.Time) tea.Msg {
+		return revisionPendingMsg{rev: rev, gen: gen}
+	})
 }
 
 // updateBar sets the contextual key hints and the right-aligned load state.

@@ -1,6 +1,7 @@
 package component_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -100,6 +101,59 @@ func TestViewportGutterPinsLeadingColumn(t *testing.T) {
 	v.Update(keyEnd())
 	if got, want := v.View(), "-BCDEFGHIJ"; got != want {
 		t.Fatalf("after End = %q, want %q", got, want)
+	}
+}
+
+// TestViewportPreservesScrollOnRefresh asserts the scroll-preserving content
+// setter keeps the reader's place across a refresh — clamping it when the new
+// content is shorter — while the plain setter still starts at the top.
+func TestViewportPreservesScrollOnRefresh(t *testing.T) {
+	lines := func(n int) string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = fmt.Sprintf("line%02d", i)
+		}
+		return strings.Join(out, "\n")
+	}
+	topLine := func(v *component.Viewport) string {
+		// The first six cells of the top row, past which sit padding and the
+		// vertical scrollbar.
+		return ansi.Cut(strings.SplitN(v.View(), "\n", 2)[0], 0, 6)
+	}
+
+	v := component.NewViewport(testTheme(), testKeys())
+	v.SetContent(lines(20))
+	v.SetSize(12, 4)
+	v.Focus()
+	for range 6 {
+		v.Update(keyDown())
+	}
+	if got, want := topLine(v), "line06"; got != want {
+		t.Fatalf("top line after scrolling = %q, want %q", got, want)
+	}
+
+	// Same length: the offset survives untouched.
+	v.SetContentPreservingScroll(lines(20))
+	if got, want := topLine(v), "line06"; got != want {
+		t.Errorf("top line after an equal-length refresh = %q, want %q", got, want)
+	}
+
+	// Longer content: still untouched.
+	v.SetContentPreservingScroll(lines(40))
+	if got, want := topLine(v), "line06"; got != want {
+		t.Errorf("top line after a longer refresh = %q, want %q", got, want)
+	}
+
+	// Shorter content: the offset clamps to the last full window.
+	v.SetContentPreservingScroll(lines(8))
+	if got, want := topLine(v), "line04"; got != want {
+		t.Errorf("top line after a shorter refresh = %q, want %q", got, want)
+	}
+
+	// The plain setter is unchanged: new content starts at the top.
+	v.SetContent(lines(20))
+	if got, want := topLine(v), "line00"; got != want {
+		t.Errorf("top line after SetContent = %q, want %q", got, want)
 	}
 }
 
