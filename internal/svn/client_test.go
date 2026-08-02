@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunRecordsSuccessfulCommand(t *testing.T) {
@@ -60,5 +61,49 @@ func TestRunWithoutRecorderSucceeds(t *testing.T) {
 	c := &Client{Bin: "echo"} // no Recorder set
 	if _, err := c.run(context.Background(), "hello"); err != nil {
 		t.Fatalf("run without a recorder should still work: %v", err)
+	}
+}
+
+func TestRunReportsTimeoutRatherThanSignal(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found on PATH")
+	}
+	var got CommandRecord
+	// sh -c swallows the appended --non-interactive as $0, so the stub still sleeps.
+	c := &Client{Bin: "sh", Recorder: func(r CommandRecord) { got = r }}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := c.run(ctx, "-c", "sleep 10")
+	if err == nil {
+		t.Fatal("expected run to fail once the deadline expired")
+	}
+	if !strings.Contains(err.Error(), "timed out after") {
+		t.Errorf("error = %q, want the deadline reported as a timeout", err)
+	}
+	if strings.Contains(err.Error(), "signal: killed") {
+		t.Errorf("error = %q, should not leak the kill signal", err)
+	}
+	if !strings.Contains(got.Err, "timed out after") {
+		t.Errorf("record Err = %q, want the same timeout text", got.Err)
+	}
+}
+
+func TestRunDoesNotReportCancellationAsTimeout(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found on PATH")
+	}
+	c := &Client{Bin: "sh"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := c.run(ctx, "-c", "sleep 10")
+	if err == nil {
+		t.Fatal("expected run to fail once the context was cancelled")
+	}
+	if strings.Contains(err.Error(), "timed out after") {
+		t.Errorf("error = %q, a cancellation is not a timeout", err)
 	}
 }
