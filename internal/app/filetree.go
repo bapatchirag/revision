@@ -103,6 +103,12 @@ func buildFileTree(items []svn.StatusItem, collapsed map[string]bool) []fileNode
 			if slash := strings.LastIndex(name, "/"); slash >= 0 {
 				name = name[slash+1:]
 			}
+			// A status item can name a directory that also has child entries (for
+			// example, an added parent plus added files beneath it). The directory
+			// already renders as a directory row, so skip the duplicate file leaf.
+			if _, ok := d.dirs[name]; ok {
+				continue
+			}
 			rows = append(rows, fileNode{
 				Name:  name,
 				Path:  it.Path,

@@ -2904,6 +2904,9 @@ func (m *Model) filteredStatusItems(items []svn.StatusItem) []svn.StatusItem {
 func (m *Model) changelistItems(name string) []svn.StatusItem {
 	var items []svn.StatusItem
 	for _, it := range m.fileItems {
+		if isContainerDirEntry(it.Path, m.fileItems) {
+			continue
+		}
 		if it.Changelist == name {
 			items = append(items, it)
 		}
