@@ -1,6 +1,7 @@
 package component_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -100,6 +101,59 @@ func TestViewportGutterPinsLeadingColumn(t *testing.T) {
 	v.Update(keyEnd())
 	if got, want := v.View(), "-BCDEFGHIJ"; got != want {
 		t.Fatalf("after End = %q, want %q", got, want)
+	}
+}
+
+// TestViewportPreservesScrollOnRefresh asserts the scroll-preserving content
+// setter keeps the reader's place across a refresh — clamping it when the new
+// content is shorter — while the plain setter still starts at the top.
+func TestViewportPreservesScrollOnRefresh(t *testing.T) {
+	lines := func(n int) string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = fmt.Sprintf("line%02d", i)
+		}
+		return strings.Join(out, "\n")
+	}
+	topLine := func(v *component.Viewport) string {
+		// The first six cells of the top row, past which sit padding and the
+		// vertical scrollbar.
+		return ansi.Cut(strings.SplitN(v.View(), "\n", 2)[0], 0, 6)
+	}
+
+	v := component.NewViewport(testTheme(), testKeys())
+	v.SetContent(lines(20))
+	v.SetSize(12, 4)
+	v.Focus()
+	for range 6 {
+		v.Update(keyDown())
+	}
+	if got, want := topLine(v), "line06"; got != want {
+		t.Fatalf("top line after scrolling = %q, want %q", got, want)
+	}
+
+	// Same length: the offset survives untouched.
+	v.SetContentPreservingScroll(lines(20))
+	if got, want := topLine(v), "line06"; got != want {
+		t.Errorf("top line after an equal-length refresh = %q, want %q", got, want)
+	}
+
+	// Longer content: still untouched.
+	v.SetContentPreservingScroll(lines(40))
+	if got, want := topLine(v), "line06"; got != want {
+		t.Errorf("top line after a longer refresh = %q, want %q", got, want)
+	}
+
+	// Shorter content: the offset clamps to the last full window.
+	v.SetContentPreservingScroll(lines(8))
+	if got, want := topLine(v), "line04"; got != want {
+		t.Errorf("top line after a shorter refresh = %q, want %q", got, want)
+	}
+
+	// The plain setter is unchanged: new content starts at the top.
+	v.SetContent(lines(20))
+	if got, want := topLine(v), "line00"; got != want {
+		t.Errorf("top line after SetContent = %q, want %q", got, want)
 	}
 }
 
@@ -252,6 +306,32 @@ func TestTableIgnoresInputWhenBlurred(t *testing.T) {
 	}
 }
 
+func TestTableSetItemsKeepsCursorButGoTopResets(t *testing.T) {
+	tb := newStringTable()
+	tb.SetItems([][]string{{"r3", "a"}, {"r2", "b"}, {"r1", "c"}})
+	tb.SetSize(20, 6)
+	tb.Focus()
+
+	tb.Update(keyDown())
+	tb.Update(keyDown())
+	if tb.Index() != 2 {
+		t.Fatalf("cursor = %d, want 2", tb.Index())
+	}
+
+	// Refreshing the same page keeps the cursor; turning a page resets it.
+	tb.SetItems([][]string{{"r6", "d"}, {"r5", "e"}, {"r4", "f"}})
+	if tb.Index() != 2 {
+		t.Errorf("cursor = %d after SetItems, want 2 (kept)", tb.Index())
+	}
+	tb.GoTop()
+	if tb.Index() != 0 {
+		t.Errorf("cursor = %d after GoTop, want 0", tb.Index())
+	}
+	if row, ok := tb.Selected(); !ok || row[0] != "r6" {
+		t.Errorf("selected = %v, want the first row", row)
+	}
+}
+
 // TestTableHorizontalScroll scrolls a table whose message column overflows and
 // checks the horizontal scrollbar appears and the window shifts.
 func TestTableHorizontalScroll(t *testing.T) {
@@ -332,6 +412,54 @@ func TestModalSetPromptUpdatesView(t *testing.T) {
 	}
 	if strings.Contains(view, "gone forever") {
 		t.Errorf("view should drop the old message, got:\n%s", view)
+	}
+}
+
+// TestToastWrapsToItsWidth guards the notice box against a long svn error: once
+// sized, no row may be wider than the box, or the terminal wraps it and the
+// border breaks.
+func TestToastWrapsToItsWidth(t *testing.T) {
+	to := component.NewToast(testTheme())
+	to.Show("commit failed: svn: E155007: '/home/alice/work/wc/deeply/nested/file.go' is not a working copy", component.LevelError)
+	to.SetSize(40, 20)
+
+	lines := strings.Split(to.View(), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("expected the message to wrap over several rows, got:\n%s", to.View())
+	}
+	for i, ln := range lines {
+		if w := ansi.StringWidth(ln); w != 40 {
+			t.Errorf("row %d width = %d, want 40:\n%s", i, w, ln)
+		}
+	}
+}
+
+// TestToastClipsToItsHeight covers the other axis: a message too tall for the
+// box loses its tail to an ellipsis rather than pushing the border off-screen.
+func TestToastClipsToItsHeight(t *testing.T) {
+	to := component.NewToast(testTheme())
+	to.Show(strings.Repeat("a bcdefghij", 40), component.LevelError)
+	to.SetSize(20, 6)
+
+	view := to.View()
+	if h := strings.Count(view, "\n") + 1; h != 6 {
+		t.Errorf("height = %d, want 6:\n%s", h, view)
+	}
+	if !strings.Contains(view, "…") {
+		t.Errorf("clipped message should end in an ellipsis, got:\n%s", view)
+	}
+}
+
+// TestToastUnsizedHugsItsMessage keeps the pre-sizing behavior for the gallery
+// and any caller that never sets a size: the box grows to fit.
+func TestToastUnsizedHugsItsMessage(t *testing.T) {
+	to := component.NewToast(testTheme())
+	to.Show("committed r128", component.LevelSuccess)
+
+	for i, ln := range strings.Split(to.View(), "\n") {
+		if w := ansi.StringWidth(ln); w != 18 {
+			t.Errorf("row %d width = %d, want 18", i, w)
+		}
 	}
 }
 
@@ -679,6 +807,46 @@ func TestPromptSecretMasksValue(t *testing.T) {
 	// The real value is still readable for submission.
 	if p.Value() != "hunter2" {
 		t.Errorf("Value() = %q, want hunter2", p.Value())
+	}
+}
+
+func TestPromptLockedPrefixResistsEditing(t *testing.T) {
+	p := component.NewPrompt("path", "Change source path", "", testTheme(), testKeys())
+	p.Focus()
+	p.SetValue("/wc/internal/app")
+	p.SetLocked("/wc")
+
+	for range 30 {
+		p.Update(keyBackspace())
+	}
+	if p.Value() != "/wc" {
+		t.Fatalf("backspace ate the locked prefix: value = %q, want /wc", p.Value())
+	}
+
+	// The cursor cannot be walked into the prefix either, so typing lands after it.
+	for range 10 {
+		p.Update(keyLeft())
+	}
+	p.Update(runes("/sub"))
+	if p.Value() != "/wc/sub" {
+		t.Errorf("value = %q, want /wc/sub", p.Value())
+	}
+}
+
+func TestPromptLockReplacesValueOutsidePrefix(t *testing.T) {
+	p := component.NewPrompt("path", "Change source path", "", testTheme(), testKeys())
+	p.Focus()
+	p.SetValue("/elsewhere")
+	p.SetLocked("/wc")
+
+	if p.Value() != "/wc" {
+		t.Errorf("value = %q, want the lock to replace a value outside it", p.Value())
+	}
+	// Reset returns to the prefix rather than emptying the input.
+	p.Update(runes("/sub"))
+	p.Reset()
+	if p.Value() != "/wc" {
+		t.Errorf("reset value = %q, want /wc", p.Value())
 	}
 }
 

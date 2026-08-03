@@ -32,6 +32,11 @@ cannot use.
 This sets where `revision` *operates*; [`displayFrom`](/reference/configuration/#displayfrom)
 controls how much of the working copy it *shows*.
 
+Once the TUI is open, `P` re-scopes it to another directory inside that working copy for
+the rest of the session — see
+[changing the source path](/guides/panels/#changing-the-source-path). The new source is
+never saved; the next launch uses `--path` again.
+
 ### `--version`
 
 ```sh

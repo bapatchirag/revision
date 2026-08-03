@@ -39,9 +39,10 @@ type KeyMap struct {
 	PrevView key.Binding
 	NextView key.Binding
 
-	ToggleDirDiff   key.Binding
-	ToggleUntracked key.Binding
-	ToggleCmdLog    key.Binding
+	ToggleDirDiff     key.Binding
+	ToggleUntracked   key.Binding
+	ToggleCmdLog      key.Binding
+	ToggleLiveRefresh key.Binding
 
 	SaveDiff key.Binding
 
@@ -49,11 +50,12 @@ type KeyMap struct {
 
 	OpenEditor key.Binding
 
-	Filter   key.Binding
-	Refresh  key.Binding
-	Settings key.Binding
-	Help     key.Binding
-	Quit     key.Binding
+	Filter    key.Binding
+	Refresh   key.Binding
+	Settings  key.Binding
+	ChangeDir key.Binding
+	Help      key.Binding
+	Quit      key.Binding
 }
 
 // Default returns the standard, lazygit-flavored bindings.
@@ -73,30 +75,32 @@ func Default() KeyMap {
 		// common macOS or Linux terminal sends for it: the modifier form (alt+←),
 		// the meta-prefixed form macOS Terminal sends for option+← (alt+b), and the
 		// ctrl+arrow / ctrl+w forms used across Linux terminals and readline.
-		WordLeft:        key.NewBinding(key.WithKeys("alt+left", "ctrl+left", "alt+b"), key.WithHelp("alt+←", "word left")),
-		WordRight:       key.NewBinding(key.WithKeys("alt+right", "ctrl+right", "alt+f"), key.WithHelp("alt+→", "word right")),
-		DeleteWordLeft:  key.NewBinding(key.WithKeys("alt+backspace", "ctrl+w"), key.WithHelp("alt+⌫", "delete word left")),
-		DeleteWordRight: key.NewBinding(key.WithKeys("alt+delete", "alt+d"), key.WithHelp("alt+⌦", "delete word right")),
-		Enter:           key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
-		Confirm:         key.NewBinding(key.WithKeys("enter", "y"), key.WithHelp("enter", "confirm")),
-		Cancel:          key.NewBinding(key.WithKeys("esc", "n"), key.WithHelp("esc", "cancel")),
-		Back:            key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
-		Submit:          key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "submit")),
-		FocusNext:       key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next panel")),
-		FocusPrev:       key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev panel")),
-		PrevView:        key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev view")),
-		NextView:        key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next view")),
-		ToggleDirDiff:   key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "toggle dir diff")),
-		ToggleUntracked: key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "toggle untracked")),
-		ToggleCmdLog:    key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "toggle command log")),
-		SaveDiff:        key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "save diff")),
-		SplitDiff:       key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "side-by-side diff")),
-		OpenEditor:      key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "open in editor")),
-		Filter:          key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
-		Refresh:         key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh")),
-		Settings:        key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "settings")),
-		Help:            key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
-		Quit:            key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+		WordLeft:          key.NewBinding(key.WithKeys("alt+left", "ctrl+left", "alt+b"), key.WithHelp("alt+←", "word left")),
+		WordRight:         key.NewBinding(key.WithKeys("alt+right", "ctrl+right", "alt+f"), key.WithHelp("alt+→", "word right")),
+		DeleteWordLeft:    key.NewBinding(key.WithKeys("alt+backspace", "ctrl+w"), key.WithHelp("alt+⌫", "delete word left")),
+		DeleteWordRight:   key.NewBinding(key.WithKeys("alt+delete", "alt+d"), key.WithHelp("alt+⌦", "delete word right")),
+		Enter:             key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
+		Confirm:           key.NewBinding(key.WithKeys("enter", "y"), key.WithHelp("enter", "confirm")),
+		Cancel:            key.NewBinding(key.WithKeys("esc", "n"), key.WithHelp("esc", "cancel")),
+		Back:              key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
+		Submit:            key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "submit")),
+		FocusNext:         key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next panel")),
+		FocusPrev:         key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev panel")),
+		PrevView:          key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev view")),
+		NextView:          key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next view")),
+		ToggleDirDiff:     key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "toggle dir diff")),
+		ToggleUntracked:   key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "toggle untracked")),
+		ToggleCmdLog:      key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "toggle command log")),
+		ToggleLiveRefresh: key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "toggle live refresh")),
+		SaveDiff:          key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "save diff")),
+		SplitDiff:         key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "side-by-side diff")),
+		OpenEditor:        key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "open in editor")),
+		Filter:            key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+		Refresh:           key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh")),
+		Settings:          key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "settings")),
+		ChangeDir:         key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "change source path")),
+		Help:              key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+		Quit:              key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	}
 }
 
@@ -169,8 +173,16 @@ func HelpSections() []Section {
 				Description: "Open the highlighted file in the configured editor.",
 			},
 			{
+				Action: "Change source path", Keys: []string{"P"}, Context: "Global",
+				Description: "Re-scope revision to another directory inside the working copy, browsing to it from a prompt that opens on the directory it is reading now. The working copy's root is fixed, and the new source lasts for the session only — it is never saved.",
+			},
+			{
 				Action: "Refresh / settings", Keys: []string{"R", "S"}, Context: "Global",
 				Description: "Refresh status and history, or open the settings editor.",
+			},
+			{
+				Action: "Toggle live refresh", Keys: []string{"L"}, Context: "Global",
+				Description: "Turn background watching of the working copy on or off. While it is on, a change made outside revision reaches the Files and diff panels on its own. The toggle lasts for the session only; `liveRefresh` sets the default.",
 			},
 		}},
 		{Title: "Navigation", Bindings: []Binding{
@@ -189,6 +201,10 @@ func HelpSections() []Section {
 			{
 				Action: "Jump top / bottom", Keys: []string{"g", "G"}, Context: "Any panel",
 				Description: "Jump to the first or last row.",
+			},
+			{
+				Action: "Next / prev history page", Keys: []string{"n", "p"}, Context: "Log",
+				Description: "Load the next or previous page of revision history. A page holds `logLimit` revisions.",
 			},
 			{
 				Action: "Scroll main up / down", Keys: []string{"K", "J"}, Context: "Main",

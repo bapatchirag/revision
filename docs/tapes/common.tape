@@ -34,7 +34,12 @@ Wait+Screen /demo ready:/
 Type 'export PATH="/tmp/revision-demo-bin:$PATH"' Enter
 Type "export XDG_CONFIG_HOME=/tmp/revision-demo/config" Enter
 Type "mkdir -p $XDG_CONFIG_HOME/revision && cp docs/tapes/config.json $XDG_CONFIG_HOME/revision/config.json" Enter
-Type "cd /tmp/revision-demo/wc && clear" Enter
+
+# Enter the working copy by its physical path. svn reports the working copy root
+# with symlinks resolved, so on macOS — where /tmp is a link to /private/tmp —
+# landing here via /tmp would put a different string in the Status panel's Root
+# row than in its Source and CWD rows. A no-op on Linux.
+Type 'cd /tmp/revision-demo/wc && cd "$(pwd -P)" && clear' Enter
 
 Type "revision" Enter
 Wait+Screen /Command Log/

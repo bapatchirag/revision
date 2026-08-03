@@ -74,6 +74,15 @@
   },
   {
     "section": "Working copy",
+    "action": "Change source path",
+    "keys": [
+      "P"
+    ],
+    "context": "Global",
+    "description": "Re-scope revision to another directory inside the working copy, browsing to it from a prompt that opens on the directory it is reading now. The working copy's root is fixed, and the new source lasts for the session only — it is never saved."
+  },
+  {
+    "section": "Working copy",
     "action": "Refresh / settings",
     "keys": [
       "R",
@@ -81,6 +90,15 @@
     ],
     "context": "Global",
     "description": "Refresh status and history, or open the settings editor."
+  },
+  {
+    "section": "Working copy",
+    "action": "Toggle live refresh",
+    "keys": [
+      "L"
+    ],
+    "context": "Global",
+    "description": "Turn background watching of the working copy on or off. While it is on, a change made outside revision reaches the Files and diff panels on its own. The toggle lasts for the session only; `liveRefresh` sets the default."
   },
   {
     "section": "Navigation",
@@ -124,6 +142,16 @@
     ],
     "context": "Any panel",
     "description": "Jump to the first or last row."
+  },
+  {
+    "section": "Navigation",
+    "action": "Next / prev history page",
+    "keys": [
+      "n",
+      "p"
+    ],
+    "context": "Log",
+    "description": "Load the next or previous page of revision history. A page holds `logLimit` revisions."
   },
   {
     "section": "Navigation",

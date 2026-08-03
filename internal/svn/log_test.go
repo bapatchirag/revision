@@ -53,3 +53,174 @@ func TestParseLogInvalid(t *testing.T) {
 		t.Fatal("expected error for malformed xml")
 	}
 }
+
+func TestLogPageArgs(t *testing.T) {
+	cases := []struct {
+		name   string
+		anchor string
+		limit  int
+		want   []string
+	}{
+		{
+			name:  "first page over-fetches one row to detect a further page",
+			limit: 50,
+			want:  []string{"log", "--xml", "--limit", "51", ".@HEAD"},
+		},
+		{
+			name:   "anchored page also covers the repeated anchor revision",
+			anchor: "31",
+			limit:  50,
+			want:   []string{"log", "--xml", "-r", "31:1", "--limit", "52", ".@HEAD"},
+		},
+		{
+			name:  "no limit leaves it to svn",
+			limit: 0,
+			want:  []string{"log", "--xml", ".@HEAD"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := logPageArgs(tc.anchor, tc.limit)
+			if len(got) != len(tc.want) {
+				t.Fatalf("args = %q, want %q", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("args = %q, want %q", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// A page of history is the most-run log command, so it must stay cheap: the
+// changed paths --verbose adds are fetched one revision at a time instead.
+func TestLogPageArgsAreNotVerbose(t *testing.T) {
+	for _, arg := range logPageArgs("31", 50) {
+		if arg == "--verbose" {
+			t.Fatalf("a log page must not be verbose: %q", logPageArgs("31", 50))
+		}
+	}
+}
+
+func TestRevisionDetailArgs(t *testing.T) {
+	want := []string{"log", "--xml", "--verbose", "-r", "42", "--limit", "1", ".@HEAD"}
+	got := revisionDetailArgs("42")
+	if len(got) != len(want) {
+		t.Fatalf("args = %q, want %q", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("args = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestHeadRevisionArgs(t *testing.T) {
+	want := []string{"log", "--xml", "--limit", "1", ".@HEAD"}
+	got := headRevisionArgs()
+	if len(got) != len(want) {
+		t.Fatalf("args = %q, want %q", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("args = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestLogPageFrom(t *testing.T) {
+	entries := func(revs ...string) []LogEntry {
+		out := make([]LogEntry, 0, len(revs))
+		for _, r := range revs {
+			out = append(out, LogEntry{Revision: r})
+		}
+		return out
+	}
+	revisions := func(in []LogEntry) []string {
+		out := make([]string, 0, len(in))
+		for _, e := range in {
+			out = append(out, e.Revision)
+		}
+		return out
+	}
+	cases := []struct {
+		name     string
+		entries  []LogEntry
+		anchor   string
+		limit    int
+		want     []string
+		wantMore bool
+	}{
+		{
+			name:     "surplus row signals a further page and is dropped",
+			entries:  entries("9", "8", "7"),
+			limit:    2,
+			want:     []string{"9", "8"},
+			wantMore: true,
+		},
+		{
+			name:    "an exactly full page is the last page",
+			entries: entries("9", "8"),
+			limit:   2,
+			want:    []string{"9", "8"},
+		},
+		{
+			name:    "a short page is the last page",
+			entries: entries("9"),
+			limit:   2,
+			want:    []string{"9"},
+		},
+		{
+			name:     "the repeated anchor revision is dropped",
+			entries:  entries("7", "6", "5", "4"),
+			anchor:   "7",
+			limit:    2,
+			want:     []string{"6", "5"},
+			wantMore: true,
+		},
+		{
+			name:    "anchored last page",
+			entries: entries("7", "6"),
+			anchor:  "7",
+			limit:   2,
+			want:    []string{"6"},
+		},
+		{
+			name:    "nothing beyond the anchor",
+			entries: entries("7"),
+			anchor:  "7",
+			limit:   2,
+			want:    []string{},
+		},
+		{
+			name:    "no limit keeps everything",
+			entries: entries("9", "8", "7"),
+			limit:   0,
+			want:    []string{"9", "8", "7"},
+		},
+		{
+			name:    "empty result",
+			entries: entries(),
+			limit:   2,
+			want:    []string{},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, more := logPageFrom(tc.entries, tc.anchor, tc.limit)
+			gotRevs := revisions(got)
+			if len(gotRevs) != len(tc.want) {
+				t.Fatalf("revisions = %q, want %q", gotRevs, tc.want)
+			}
+			for i := range gotRevs {
+				if gotRevs[i] != tc.want[i] {
+					t.Fatalf("revisions = %q, want %q", gotRevs, tc.want)
+				}
+			}
+			if more != tc.wantMore {
+				t.Errorf("more = %v, want %v", more, tc.wantMore)
+			}
+		})
+	}
+}

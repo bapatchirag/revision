@@ -130,7 +130,7 @@ func (m *Model) savedDiffLoadForSelection() tea.Cmd {
 	if !ok || m.savedPath == d.Path {
 		return nil
 	}
-	return readSavedDiffCmd(d.Path)
+	return m.readSavedDiff(d.Path)
 }
 
 // savedDiffDetail renders the highlighted saved patch file in Main, with a
@@ -156,6 +156,6 @@ func (m *Model) savedDiffDetail() string {
 	case strings.TrimSpace(m.savedText) == "":
 		return "(" + d.Name + " is empty)"
 	default:
-		return colorizeDiff(m.theme, m.savedText)
+		return m.colorize(m.savedText)
 	}
 }

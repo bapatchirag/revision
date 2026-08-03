@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,9 +16,61 @@ import (
 	"github.com/bapatchirag/revision/internal/svn"
 )
 
+// loadTimeout caps how long a status, diff or history load may run before it is
+// abandoned.
+const loadTimeout = 30 * time.Second
+
+// loadGen stamps one class of async load so a reply overtaken by a later request
+// can be dropped instead of rendered. Each new request bumps the generation and
+// abandons the one still in flight; a reply is only applied when it carries the
+// current stamp.
+type loadGen struct {
+	gen    uint64
+	cancel context.CancelFunc
+}
+
+// next abandons the request in flight — whatever it returns is now superseded —
+// and returns the stamp the new request's reply must carry. It is for loads that
+// run no svn command and so have no context to cancel.
+func (g *loadGen) next() uint64 {
+	g.stop()
+	g.gen++
+	return g.gen
+}
+
+// stop abandons the request in flight without opening a new generation, for
+// shutdown, where nothing is waiting for a reply.
+func (g *loadGen) stop() {
+	if g.cancel != nil {
+		g.cancel()
+		g.cancel = nil
+	}
+}
+
+// begin starts a new generation, returning the context the request runs under
+// and the stamp its reply must carry. The cancel is retained so the request
+// after it can abandon this one.
+func (g *loadGen) begin(timeout time.Duration) (context.Context, uint64) {
+	gen := g.next()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	g.cancel = cancel
+	return ctx, gen
+}
+
+// stale reports whether a reply stamped gen has been superseded. The zero stamp
+// marks an unstamped reply — every load the model issues is stamped from 1 up —
+// and is always applied.
+func (g *loadGen) stale(gen uint64) bool { return gen != 0 && gen != g.gen }
+
+// superseded reports whether ctx was cancelled by a later request for the same
+// data, in which case its reply is dropped. A deadline that simply expired is a
+// real failure and still surfaces.
+func superseded(ctx context.Context) bool { return errors.Is(ctx.Err(), context.Canceled) }
+
 // statusLoadedMsg carries the result of a successful status refresh.
 type statusLoadedMsg struct {
 	items []svn.StatusItem
+	gen   uint64
 }
 
 // errMsg carries an error to surface in the UI.
@@ -25,11 +78,23 @@ type errMsg struct{ err error }
 
 func (e errMsg) Error() string { return e.err.Error() }
 
-// diffLoadedMsg carries the result of loading a single file's diff.
+// diffLoadedMsg carries the result of loading a single file's diff. dir marks a
+// diff produced for a directory row — spanning every change beneath it — rather
+// than for one file, so the two can be cached apart.
 type diffLoadedMsg struct {
 	path string
+	dir  bool
 	diff string
 	err  error
+	gen  uint64
+}
+
+// diffPendingMsg fires once the cursor has rested on a selection for
+// diffDebounce, at which point its diff is worth asking svn for. A stamp that
+// has been superseded means the cursor moved on, so the load never runs.
+type diffPendingMsg struct {
+	key diffKey
+	gen uint64
 }
 
 // diffSavedMsg carries the result of writing a diff to disk, along with the
@@ -44,6 +109,7 @@ type diffSavedMsg struct {
 type savedDiffsLoadedMsg struct {
 	files []savedDiff
 	err   error
+	gen   uint64
 }
 
 // savedDiffReadMsg carries the contents of a saved patch file, keyed by the path
@@ -52,6 +118,7 @@ type savedDiffReadMsg struct {
 	path string
 	text string
 	err  error
+	gen  uint64
 }
 
 // editedMsg carries the result of opening a file in the configured editor. name
@@ -64,42 +131,87 @@ type editedMsg struct {
 	err      error
 }
 
-// logLoadedMsg carries the result of a `svn log` load.
+// logLoadedMsg carries the result of a `svn log` load. page is the 1-based page
+// it was requested for, so a response overtaken by a later page turn can be
+// discarded; more reports whether a further page exists.
 type logLoadedMsg struct {
 	entries []svn.LogEntry
+	page    int
+	more    bool
 	err     error
+	gen     uint64
 }
 
-// stagedMsg carries the result of staging or unstaging a single path.
+// headLoadedMsg carries the repository's newest revision from the one-entry log
+// read at startup, which is all the HEAD indicator needs.
+type headLoadedMsg struct {
+	rev string
+	err error
+}
+
+// revisionDetailMsg carries the changed paths of one revision, loaded on demand
+// because `svn log --verbose` over a whole page is the most expensive call
+// revision makes.
+type revisionDetailMsg struct {
+	rev   string
+	paths []svn.ChangedPath
+	err   error
+	gen   uint64
+}
+
+// revisionPendingMsg fires once the cursor has rested on a revision for
+// diffDebounce, at which point its changed paths are worth asking svn for. A
+// stamp that has been superseded means the cursor moved on, so the load never
+// runs.
+type revisionPendingMsg struct {
+	rev string
+	gen uint64
+}
+
+// stagedMsg carries the result of staging or unstaging a single path. token
+// identifies the optimistic change the model applied ahead of this reply, so a
+// failure can be undone; it is zero when the change was not shown in advance.
 type stagedMsg struct {
 	path       string
 	staged     bool
 	changelist string // non-empty when a named changelist was assigned
+	token      uint64
 	err        error
 }
 
-// committedMsg carries the result of a commit.
+// committedMsg carries the result of a commit. token identifies the rows the
+// model marked as in flight when the commit was dispatched, so the reply clears
+// exactly those; it is zero when nothing was marked.
 type committedMsg struct {
 	revision string
+	token    uint64
 	err      error
 }
 
-// revertedMsg carries the result of reverting a single path.
+// revertedMsg carries the result of reverting a single path. token identifies
+// the rows marked as in flight for it, as on committedMsg.
 type revertedMsg struct {
-	path string
-	err  error
+	path  string
+	token uint64
+	err   error
 }
 
-// deletedMsg carries the result of deleting a single path.
+// deletedMsg carries the result of deleting a single path. token identifies the
+// rows marked as in flight for it, as on committedMsg.
 type deletedMsg struct {
-	path string
-	err  error
+	path  string
+	token uint64
+	err   error
 }
 
-// updatedMsg carries the result of an `svn update`.
+// updatedMsg carries the result of an `svn update`. toRevision distinguishes an
+// update to a revision picked in the Log — which was necessarily on the page on
+// screen, so the Log stays there — from a plain update to HEAD, which lands on
+// the first page.
 type updatedMsg struct {
-	revision string
-	err      error
+	revision   string
+	toRevision bool
+	err        error
 }
 
 // updateAvailableMsg is emitted when the startup check finds a newer release
@@ -122,6 +234,26 @@ type sshCheckedMsg struct {
 
 // sshAddedMsg carries the result of adding the SSH key to the agent.
 type sshAddedMsg struct{ err error }
+
+// sourceChangedMsg carries the result of probing a candidate source directory:
+// the client rooted at it and the working-copy info read from there, or the
+// error that rules the directory out.
+type sourceChangedMsg struct {
+	client *svn.Client
+	info   *svn.Info
+	err    error
+}
+
+// probeSourceCmd asks svn, off the UI goroutine, whether client's directory is a
+// working copy, so the session is only re-rooted on a directory known to be one.
+func probeSourceCmd(client *svn.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		info, err := client.Info(ctx)
+		return sourceChangedMsg{client: client, info: info, err: err}
+	}
+}
 
 // startupNoticeCmd emits a startupNoticeMsg so a launch-time notice is shown
 // through the normal toast path once the program is running.
@@ -167,15 +299,18 @@ func checkUpdateCmd(build selfupdate.Build) tea.Cmd {
 }
 
 // loadStatusCmd runs `svn status` off the UI goroutine and reports the result.
-func loadStatusCmd(client *svn.Client) tea.Cmd {
+// A run abandoned in favour of a later status load reports nothing, so a
+// cancellation the model asked for never surfaces as a failure.
+func loadStatusCmd(ctx context.Context, client *svn.Client, gen uint64) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
 		items, err := client.Status(ctx)
+		if superseded(ctx) {
+			return nil
+		}
 		if err != nil {
 			return errMsg{err}
 		}
-		return statusLoadedMsg{items: items}
+		return statusLoadedMsg{items: items, gen: gen}
 	}
 }
 
@@ -185,16 +320,14 @@ func loadStatusCmd(client *svn.Client) tea.Cmd {
 // the message stays keyed by the original path so the current selection can match
 // it. Diff failures are carried on the message rather than promoted to a fatal
 // error so a single undiffable path never tears down the UI.
-func loadDiffCmd(client *svn.Client, path string) tea.Cmd {
-	target := path
+func loadDiffCmd(ctx context.Context, client *svn.Client, k diffKey, gen uint64) tea.Cmd {
+	target := k.path
 	if target == fileTreeRoot {
 		target = ""
 	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
 		diff, err := client.Diff(ctx, target)
-		return diffLoadedMsg{path: path, diff: diff, err: err}
+		return diffLoadedMsg{path: k.path, dir: k.dir, diff: diff, err: err, gen: gen}
 	}
 }
 
@@ -206,42 +339,38 @@ const (
 	diffFilePerm = 0o644
 )
 
-// saveDiffCmd writes diff into dir as name off the UI goroutine.
-func saveDiffCmd(dir, name, diff string) tea.Cmd {
-	return func() tea.Msg { return writeDiff(dir, name, diff) }
-}
-
-// loadSavedDiffsCmd lists the patch files already saved in dir, off the UI
-// goroutine, for the Diffs view to browse.
-func loadSavedDiffsCmd(dir string) tea.Cmd {
+// saveDiffCmd generates the diff of the given paths and writes it into dir as
+// name, off the UI goroutine. An empty path set diffs the whole working copy.
+// The run is marked as a user action, so — unlike the diffs revision loads to
+// fill Main — it is reported in the command log.
+func saveDiffCmd(client *svn.Client, paths []string, dir, name string) tea.Cmd {
 	return func() tea.Msg {
-		files, err := scanSavedDiffs(dir)
-		return savedDiffsLoadedMsg{files: files, err: err}
-	}
-}
-
-// readSavedDiffCmd reads a saved patch file off the UI goroutine so it can be
-// shown in Main. A read failure is carried on the message rather than promoted
-// to a fatal error, so an unreadable file never tears down the UI.
-func readSavedDiffCmd(path string) tea.Cmd {
-	return func() tea.Msg {
-		b, err := os.ReadFile(path)
-		return savedDiffReadMsg{path: path, text: string(b), err: err}
-	}
-}
-
-// saveChangelistDiffCmd generates the combined diff of the given paths and
-// writes it, off the UI goroutine. It backs saving a changelist, whose diff is
-// not on screen and so has to be produced first.
-func saveChangelistDiffCmd(client *svn.Client, paths []string, dir, name string) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(svn.WithUserAction(context.Background()), 60*time.Second)
 		defer cancel()
 		diff, err := client.DiffPaths(ctx, paths)
 		if err != nil {
 			return diffSavedMsg{path: filepath.Join(dir, name), err: err}
 		}
 		return writeDiff(dir, name, diff)
+	}
+}
+
+// loadSavedDiffsCmd lists the patch files already saved in dir, off the UI
+// goroutine, for the Diffs view to browse.
+func loadSavedDiffsCmd(dir string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		files, err := scanSavedDiffs(dir)
+		return savedDiffsLoadedMsg{files: files, err: err, gen: gen}
+	}
+}
+
+// readSavedDiffCmd reads a saved patch file off the UI goroutine so it can be
+// shown in Main. A read failure is carried on the message rather than promoted
+// to a fatal error, so an unreadable file never tears down the UI.
+func readSavedDiffCmd(path string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		b, err := os.ReadFile(path)
+		return savedDiffReadMsg{path: path, text: string(b), err: err, gen: gen}
 	}
 }
 
@@ -263,27 +392,49 @@ func writeDiff(dir, name, diff string) diffSavedMsg {
 	return diffSavedMsg{path: path}
 }
 
-// loadLogCmd runs `svn log` off the UI goroutine. Errors are carried on the
-// message so history-load failures stay confined to the Log panel.
-func loadLogCmd(client *svn.Client) tea.Cmd {
+// loadLogCmd runs `svn log` off the UI goroutine for one page of history: anchor
+// is the revision the previous page ended on (empty for the first page) and page
+// is the 1-based number the result belongs to. Errors are carried on the message
+// so history-load failures stay confined to the Log panel.
+func loadLogCmd(ctx context.Context, client *svn.Client, anchor string, page, limit int, gen uint64) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		entries, more, err := client.LogPage(ctx, anchor, limit)
+		return logLoadedMsg{entries: entries, page: page, more: more, err: err, gen: gen}
+	}
+}
+
+// headRevisionCmd reads just the newest revision off the UI goroutine, so the
+// Status panel's HEAD indicator is correct from the first paint without a page
+// of history being fetched for it.
+func headRevisionCmd(client *svn.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 		defer cancel()
-		entries, err := client.Log(ctx, logLimit)
-		return logLoadedMsg{entries: entries, err: err}
+		rev, err := client.HeadRevision(ctx)
+		return headLoadedMsg{rev: rev, err: err}
+	}
+}
+
+// loadRevisionDetailCmd reads one revision's changed paths off the UI goroutine.
+// Errors are carried on the message so a revision that cannot be described
+// leaves the metadata already on screen intact.
+func loadRevisionDetailCmd(ctx context.Context, client *svn.Client, rev string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		entry, err := client.RevisionDetail(ctx, rev)
+		return revisionDetailMsg{rev: rev, paths: entry.Paths, err: err, gen: gen}
 	}
 }
 
 // stageCmd applies a stage action off the UI goroutine: it optionally runs
 // `svn add` first (for a previously unversioned file), then adds the path to, or
 // removes it from, the staged changelist.
-func stageCmd(client *svn.Client, changelist string, act stageAction) tea.Cmd {
+func stageCmd(client *svn.Client, changelist string, act stageAction, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if act.add {
 			if err := client.Add(ctx, act.path); err != nil {
-				return stagedMsg{path: act.path, staged: act.stage, err: err}
+				return stagedMsg{path: act.path, staged: act.stage, token: token, err: err}
 			}
 		}
 		var err error
@@ -292,7 +443,7 @@ func stageCmd(client *svn.Client, changelist string, act stageAction) tea.Cmd {
 		} else {
 			err = client.RemoveFromChangelist(ctx, act.path)
 		}
-		return stagedMsg{path: act.path, staged: act.stage, err: err}
+		return stagedMsg{path: act.path, staged: act.stage, token: token, err: err}
 	}
 }
 
@@ -302,14 +453,14 @@ func stageCmd(client *svn.Client, changelist string, act stageAction) tea.Cmd {
 // the staged changelist. It stops on the first error. Success rides on a single
 // stagedMsg with no changelist name, so — like acting on a single file — it shows
 // no toast; the follow-up status reload makes the change visible.
-func stageManyCmd(client *svn.Client, changelist string, acts []stageAction) tea.Cmd {
+func stageManyCmd(client *svn.Client, changelist string, acts []stageAction, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		for _, act := range acts {
 			if act.add {
 				if err := client.Add(ctx, act.path); err != nil {
-					return stagedMsg{path: act.path, staged: act.stage, err: err}
+					return stagedMsg{path: act.path, staged: act.stage, token: token, err: err}
 				}
 			}
 			var err error
@@ -319,20 +470,20 @@ func stageManyCmd(client *svn.Client, changelist string, acts []stageAction) tea
 				err = client.RemoveFromChangelist(ctx, act.path)
 			}
 			if err != nil {
-				return stagedMsg{path: act.path, staged: act.stage, err: err}
+				return stagedMsg{path: act.path, staged: act.stage, token: token, err: err}
 			}
 		}
-		return stagedMsg{staged: true}
+		return stagedMsg{staged: true, token: token}
 	}
 }
 
 // commitCmd commits the staged changelist off the UI goroutine.
-func commitCmd(client *svn.Client, message, changelist string) tea.Cmd {
+func commitCmd(client *svn.Client, message, changelist string, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		rev, err := client.Commit(ctx, message, changelist)
-		return committedMsg{revision: rev, err: err}
+		return committedMsg{revision: rev, token: token, err: err}
 	}
 }
 
@@ -341,21 +492,21 @@ func commitCmd(client *svn.Client, message, changelist string) tea.Cmd {
 // result rides on stagedMsg (carrying the changelist name so the app can confirm
 // the assignment); the reported path is the sole file when one was named, or an
 // "N files" count when several were named together.
-func assignChangelistCmd(client *svn.Client, name string, targets []changelistTarget) tea.Cmd {
+func assignChangelistCmd(client *svn.Client, name string, targets []changelistTarget, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		for _, t := range targets {
 			if t.add {
 				if err := client.Add(ctx, t.path); err != nil {
-					return stagedMsg{path: t.path, staged: true, changelist: name, err: err}
+					return stagedMsg{path: t.path, staged: true, changelist: name, token: token, err: err}
 				}
 			}
 			if err := client.AddToChangelist(ctx, name, t.path); err != nil {
-				return stagedMsg{path: t.path, staged: true, changelist: name, err: err}
+				return stagedMsg{path: t.path, staged: true, changelist: name, token: token, err: err}
 			}
 		}
-		return stagedMsg{path: assignedLabel(targets), staged: true, changelist: name}
+		return stagedMsg{path: assignedLabel(targets), staged: true, changelist: name, token: token}
 	}
 }
 
@@ -378,11 +529,11 @@ func batchLabel(n int, first string) string {
 }
 
 // revertCmd discards local modifications to path off the UI goroutine.
-func revertCmd(client *svn.Client, path string) tea.Cmd {
+func revertCmd(client *svn.Client, path string, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		return revertedMsg{path: path, err: client.Revert(ctx, path)}
+		return revertedMsg{path: path, token: token, err: client.Revert(ctx, path)}
 	}
 }
 
@@ -390,22 +541,22 @@ func revertCmd(client *svn.Client, path string) tea.Cmd {
 // UI goroutine, stopping on the first error. Success rides on a single
 // revertedMsg carrying an "N files" summary, mirroring how acting on one file
 // reports a single path.
-func revertManyCmd(client *svn.Client, paths []string) tea.Cmd {
+func revertManyCmd(client *svn.Client, paths []string, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		for _, p := range paths {
 			if err := client.Revert(ctx, p); err != nil {
-				return revertedMsg{path: p, err: err}
+				return revertedMsg{path: p, token: token, err: err}
 			}
 		}
-		return revertedMsg{path: batchLabel(len(paths), paths[0])}
+		return revertedMsg{path: batchLabel(len(paths), paths[0]), token: token}
 	}
 }
 
 // deleteCmd deletes a path off the UI goroutine: a versioned path is scheduled
 // for removal (svn delete), an unversioned one is removed from disk.
-func deleteCmd(client *svn.Client, act deleteAction) tea.Cmd {
+func deleteCmd(client *svn.Client, act deleteAction, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -415,7 +566,7 @@ func deleteCmd(client *svn.Client, act deleteAction) tea.Cmd {
 		} else {
 			err = client.Delete(ctx, act.path)
 		}
-		return deletedMsg{path: act.path, err: err}
+		return deletedMsg{path: act.path, token: token, err: err}
 	}
 }
 
@@ -423,7 +574,7 @@ func deleteCmd(client *svn.Client, act deleteAction) tea.Cmd {
 // versioned path is scheduled for removal (svn delete) and each unversioned one
 // is removed from disk. It stops on the first error; success rides on a single
 // deletedMsg carrying an "N files" summary.
-func deleteManyCmd(client *svn.Client, acts []deleteAction) tea.Cmd {
+func deleteManyCmd(client *svn.Client, acts []deleteAction, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -435,10 +586,10 @@ func deleteManyCmd(client *svn.Client, acts []deleteAction) tea.Cmd {
 				err = client.Delete(ctx, act.path)
 			}
 			if err != nil {
-				return deletedMsg{path: act.path, err: err}
+				return deletedMsg{path: act.path, token: token, err: err}
 			}
 		}
-		return deletedMsg{path: batchLabel(len(acts), acts[0].path)}
+		return deletedMsg{path: batchLabel(len(acts), acts[0].path), token: token}
 	}
 }
 
@@ -459,6 +610,6 @@ func updateToRevisionCmd(client *svn.Client, rev string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		r, err := client.UpdateToRevision(ctx, rev)
-		return updatedMsg{revision: r, err: err}
+		return updatedMsg{revision: r, toRevision: true, err: err}
 	}
 }

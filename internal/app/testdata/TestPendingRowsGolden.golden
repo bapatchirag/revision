@@ -1,0 +1,24 @@
+╭─ [1] Status ─────────────────╮╭─ [0] Diff ───────────────────────────────────╮
+│Root      /home/alice/work/wc ││Loading diff…                                 │
+│Source    /home/alice/work/wc ││                                              │
+│CWD       /home/alice/work/wc ││                                              │
+│Branch    trunk               ││                                              │
+│Revision  r42                 ││                                              │
+│                              ││                                              │
+╰──────────────────────────────╯│                                              │
+╭─ [2] ─ Changes ─── Changelist╮│                                              │
+│  ▾ / 2…                      ││                                              │
+│    ▾ src/ 2…                 ││                                              │
+│>       M a.go …              ││                                              │
+│        M b.go …              ││                                              │
+│    ● M readme.md             ││                                              │
+╰────────────────── 1 of 3 ────╯│                                              │
+╭─ [3] Log ────────────────────╮│                                              │
+│  Rev Author Message          │╰──────────────────────────────────────────────╯
+│                              │╭─ [4] Command Log ────────────────────────────╮
+│                              ││No svn commands run yet.                      │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+╰──────────────────────────────╯╰──────────────────────────────────────────────╯
+space stage · n changelist · c commit · r revert · d delete · [ ] view · ? help 

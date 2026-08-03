@@ -4,6 +4,7 @@ description: What each panel shows, how it behaves, and how to move between them
 ---
 
 import AppScreen from '../../../components/AppScreen.astro';
+import DemoVideo from '../../../components/DemoVideo.astro';
 import KeyCap from '../../../components/KeyCap.astro';
 
 The screen is a left column of Status, Files and Log, beside a Main detail view with a
@@ -48,7 +49,7 @@ Six rows, any of which is omitted when it has no value:
 | Row | Meaning |
 |---|---|
 | `Root` | The working copy's root directory. |
-| `Source` | The directory the views are scoped to — the same as `Root` when [`displayFrom`](/reference/configuration/#displayfrom) is `root`. |
+| `Source` | The directory the views are scoped to — the same as `Root` when [`displayFrom`](/reference/configuration/#displayfrom) is `root`. <KeyCap key="P" /> [moves it](#changing-the-source-path) for the session. |
 | `CWD` | The directory `revision` was started in. |
 | `Branch` | Derived from the repository URL: `trunk`, `branches/<name>` or `tags/<name>`. Blank when the repository does not follow that layout. |
 | `Revision` | The revision the working copy sits at. |
@@ -57,6 +58,27 @@ Six rows, any of which is omitted when it has no value:
 Focusing the Status panel puts project links and version information in Main:
 
 <AppScreen golden="TestStatusPanelAboutGolden" />
+
+### Changing the source path
+
+<KeyCap key="P" /> moves `Source` anywhere inside `Root` for the rest of the session. The
+prompt opens on the directory `revision` is reading now and lists what is under it: typing
+narrows the list, <KeyCap key="tab" /> steps into it and back, and the parent directory
+leads it so the list walks up as well as down. The working copy's root is fixed at the head
+of the input — it cannot be deleted, and a path above it is refused — so the source never
+leaves the checkout.
+
+<DemoVideo
+	name="source-path"
+	width={1200}
+	height={700}
+	label="Pressing P and picking internal/server from the prompt's suggestions, after which the Files tree, the Log and the diff cover only that subtree"
+/>
+
+Everything is re-read for the new source — the trees, the history and the cached diffs are
+dropped and fetched again — so the panels show that subtree and nothing else. The change is
+never written to the config file; the next launch uses [`--path`](/reference/cli/#--path)
+again.
 
 ## Files
 
@@ -75,6 +97,11 @@ The footer counts the position and the number of files in view. When a
 [filter](/workflows/filtering-and-searching/) or
 [`hideUntracked`](/reference/configuration/#hideuntracked) hides some, the full count
 follows in brackets — `1 of 16 (29)`.
+
+A row waiting on a revert, a delete or a commit is dimmed and tailed with `…`, and the
+directories above it carry the count of what is in flight beneath them. Those rows are
+inert until `svn` answers — see [rows in
+flight](/workflows/staging-and-commit/#rows-in-flight).
 
 ### Changelists
 
@@ -96,19 +123,28 @@ This view is read-only: stage, revert and delete do nothing here.
 
 ## Log
 
-Revision history, newest first, capped at the 50 most recent revisions. Each row carries
-the full revision number, the author, and the first line of the message. An asterisk marks
-where the working copy sits.
+Revision history, newest first, a page at a time. Each row carries the full revision
+number, the author, and the first line of the message. An asterisk marks where the working
+copy sits.
 
 Selecting a revision shows its date, full message and changed paths in Main.
 <KeyCap key="space" /> [updates the working copy](/workflows/updating/) to the selected
 revision.
 
+A page holds [`logLimit`](/reference/configuration/#loglimit) revisions — 100 by default.
+<KeyCap key="n" /> loads the next page and <KeyCap key="p" /> the previous one. The footer
+shows where the cursor sits within the page and which page you are on, so `12 of 100 · 3`
+is the twelfth revision of the third page.
+
+Filtering with <KeyCap key="/" /> searches the page on screen, not the whole history; the
+filter stays applied as you turn pages. Committing returns the panel to the first page, so
+the new revision is in view.
+
 ## Command Log
 
 Every `svn` command `revision` ran on your behalf, newest first, each marked ✓ or ✗.
-Read-only queries — the status and log refreshes that happen constantly — are left out, so
-the list stays a record of what actually changed.
+Read-only queries — the status and log refreshes that happen constantly, including the
+background ones — are left out, so the list stays a record of what actually changed.
 
 Toggle the panel with <KeyCap key="x" />.
 
@@ -126,3 +162,22 @@ Detail for the current selection, and the target of the
 | A saved patch | The patch file's contents. |
 | A revision | Date, author, full message, and changed paths. |
 | The Status panel | Project links and version information. |
+
+A diff is fetched once and reused for the rest of the session, so stepping back to a file
+you have already read costs no `svn` at all.
+
+## Keeping up with the working copy
+
+`revision` watches the working copy in the background, so a file saved in your editor, a
+build, or an `svn` command run in another terminal reaches the Files panel and the diff on
+screen within a couple of seconds. The cursor stays on the same file and Main keeps its
+scroll position — a refresh you did not ask for never moves the screen under you.
+
+Nothing is re-read while a prompt, the commit editor, the settings form, the help menu or
+the side-by-side overlay owns the screen. The refresh is held and taken once the screen is
+free, so closing a dialog costs exactly one reload.
+
+<KeyCap key="L" /> turns the watcher off and on for the session;
+[`liveRefresh`](/reference/configuration/#liverefresh) sets the default.
+<KeyCap key="R" /> still re-reads status and history on demand, whether the watcher is
+running or not.

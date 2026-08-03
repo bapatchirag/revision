@@ -37,6 +37,9 @@ type Prompt struct {
 	placeholder string
 	value       []rune
 	col         int
+	// locked is a leading run of value that editing cannot remove and the cursor
+	// cannot move before, e.g. the root directory a path must stay under.
+	locked      []rune
 	optionsHead string
 	options     []string
 	sel         int  // highlighted option, -1 before the list is entered
@@ -80,11 +83,38 @@ func (p *Prompt) SetValue(s string) {
 	p.col = len(p.value)
 }
 
-// Reset clears the input and any option selection, returning focus to the input
-// field.
+// SetLocked fixes a leading run of the value that editing cannot remove and the
+// cursor cannot move before, so the prompt can carry a mandatory prefix such as
+// the root directory a path must stay under. It is rendered muted to show where
+// editing begins, and replaces a value that does not start with it. Passing ""
+// unlocks the input.
+func (p *Prompt) SetLocked(prefix string) {
+	p.locked = []rune(prefix)
+	if !strings.HasPrefix(string(p.value), prefix) {
+		p.SetValue(prefix)
+	}
+	p.clampCursor()
+}
+
+// lockedLen is how many leading runes editing must leave alone, bounded by the
+// value in case a shorter one replaced it.
+func (p *Prompt) lockedLen() int { return min(len(p.locked), len(p.value)) }
+
+// clampCursor keeps the cursor inside the editable part of the value.
+func (p *Prompt) clampCursor() {
+	if lo := p.lockedLen(); p.col < lo {
+		p.col = lo
+	}
+	if p.col > len(p.value) {
+		p.col = len(p.value)
+	}
+}
+
+// Reset clears the input back to its locked prefix and drops any option
+// selection, returning focus to the input field.
 func (p *Prompt) Reset() {
-	p.value = nil
-	p.col = 0
+	p.value = append([]rune(nil), p.locked...)
+	p.col = len(p.value)
 	p.sel = -1
 	p.listFocused = false
 }
@@ -108,6 +138,12 @@ func (p *Prompt) Blur() { p.focused = false }
 
 // Focused implements tui.Focusable.
 func (p *Prompt) Focused() bool { return p.focused }
+
+// ListFocused reports whether the option list, rather than the input field,
+// currently holds focus. A caller that recomputes the options from the value as
+// it is typed uses it to leave them alone while the list is being scrolled,
+// since picking an option writes the value too.
+func (p *Prompt) ListFocused() bool { return p.listFocused }
 
 // SetTheme implements tui.Themeable.
 func (p *Prompt) SetTheme(th theme.Theme) { p.theme = th }
@@ -163,7 +199,7 @@ func (p *Prompt) Update(m tea.Msg) tea.Cmd {
 			p.move(1)
 		}
 	case tea.KeyLeft:
-		if !p.listFocused && p.col > 0 {
+		if !p.listFocused && p.col > p.lockedLen() {
 			p.col--
 		}
 	case tea.KeyRight:
@@ -226,9 +262,7 @@ func (p *Prompt) setValueFromOption() {
 
 // insert adds rs at the cursor (input field only).
 func (p *Prompt) insert(rs []rune) {
-	if p.col > len(p.value) {
-		p.col = len(p.value)
-	}
+	p.clampCursor()
 	next := make([]rune, 0, len(p.value)+len(rs))
 	next = append(next, p.value[:p.col]...)
 	next = append(next, rs...)
@@ -237,43 +271,49 @@ func (p *Prompt) insert(rs []rune) {
 	p.col += len(rs)
 }
 
-// backspace deletes the rune before the cursor (input field only).
+// backspace deletes the rune before the cursor (input field only), leaving the
+// locked prefix alone.
 func (p *Prompt) backspace() {
-	if p.col == 0 {
+	if p.col <= p.lockedLen() {
 		return
 	}
 	p.value = append(p.value[:p.col-1], p.value[p.col:]...)
 	p.col--
 }
 
-// wordMove moves the cursor one word left (delta < 0) or right (delta > 0). A
-// secret value is masked on screen, so stepping over its words would expose
-// where they start and end; the cursor jumps to the ends of the value instead.
+// wordMove moves the cursor one word left (delta < 0) or right (delta > 0),
+// stopping at the locked prefix. A secret value is masked on screen, so stepping
+// over its words would expose where they start and end; the cursor jumps to the
+// ends of the editable part instead.
 func (p *Prompt) wordMove(delta int) {
 	switch {
 	case p.secret && delta < 0:
-		p.col = 0
+		p.col = p.lockedLen()
 	case p.secret:
 		p.col = len(p.value)
 	case delta < 0:
-		p.col = wordStart(p.value, p.col)
+		p.col = max(wordStart(p.value, p.col), p.lockedLen())
 	default:
 		p.col = wordEnd(p.value, p.col)
 	}
 }
 
 // wordDelete removes the word before (delta < 0) or after (delta > 0) the
-// cursor, clearing to the corresponding end of a secret value instead.
+// cursor, clearing to the corresponding end of a secret value instead. Deleting
+// backwards stops at the locked prefix.
 func (p *Prompt) wordDelete(delta int) {
 	switch {
-	case p.secret && delta < 0:
-		p.value, p.col = append([]rune(nil), p.value[p.col:]...), 0
-	case p.secret:
+	case delta > 0 && p.secret:
 		p.value = p.value[:p.col]
-	case delta < 0:
-		p.value, p.col = cutWordLeft(p.value, p.col)
-	default:
+	case delta > 0:
 		p.value = cutWordRight(p.value, p.col)
+	default:
+		start := p.lockedLen()
+		if !p.secret {
+			start = max(wordStart(p.value, p.col), start)
+		}
+		p.value = append(p.value[:start:start], p.value[p.col:]...)
+		p.col = start
 	}
 }
 
@@ -337,13 +377,13 @@ func (p *Prompt) inputRow(innerW int) string {
 	}
 	disp := p.display()
 	if !inputActive {
-		return fitLine(string(disp), innerW)
+		return fitLine(p.paint(disp), innerW)
 	}
 	col := p.col
 	if col > len(disp) {
 		col = len(disp)
 	}
-	left := string(disp[:col])
+	left := p.paint(disp[:col])
 	cur, right := " ", ""
 	if col < len(disp) {
 		cur = string(disp[col])
@@ -351,6 +391,17 @@ func (p *Prompt) inputRow(innerW int) string {
 	}
 	cursor := lipgloss.NewStyle().Reverse(true).Render(cur)
 	return fitLine(left+cursor+right, innerW)
+}
+
+// paint renders a leading slice of the value with its locked prefix muted, so
+// the point where editing begins is visible. The cursor never sits inside the
+// prefix, so every slice it is called with covers all or none of it.
+func (p *Prompt) paint(disp []rune) string {
+	n := min(p.lockedLen(), len(disp))
+	if n == 0 {
+		return string(disp)
+	}
+	return lipgloss.NewStyle().Foreground(p.theme.Muted).Render(string(disp[:n])) + string(disp[n:])
 }
 
 // display returns the runes to render for the current value: the value itself,
