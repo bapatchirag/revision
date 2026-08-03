@@ -4,6 +4,7 @@ description: What each panel shows, how it behaves, and how to move between them
 ---
 
 import AppScreen from '../../../components/AppScreen.astro';
+import DemoVideo from '../../../components/DemoVideo.astro';
 import KeyCap from '../../../components/KeyCap.astro';
 
 The screen is a left column of Status, Files and Log, beside a Main detail view with a
@@ -48,7 +49,7 @@ Six rows, any of which is omitted when it has no value:
 | Row | Meaning |
 |---|---|
 | `Root` | The working copy's root directory. |
-| `Source` | The directory the views are scoped to — the same as `Root` when [`displayFrom`](/reference/configuration/#displayfrom) is `root`. Press <KeyCap key="P" /> to move it anywhere inside `Root` for this session. |
+| `Source` | The directory the views are scoped to — the same as `Root` when [`displayFrom`](/reference/configuration/#displayfrom) is `root`. <KeyCap key="P" /> [moves it](#changing-the-source-path) for the session. |
 | `CWD` | The directory `revision` was started in. |
 | `Branch` | Derived from the repository URL: `trunk`, `branches/<name>` or `tags/<name>`. Blank when the repository does not follow that layout. |
 | `Revision` | The revision the working copy sits at. |
@@ -57,6 +58,27 @@ Six rows, any of which is omitted when it has no value:
 Focusing the Status panel puts project links and version information in Main:
 
 <AppScreen golden="TestStatusPanelAboutGolden" />
+
+### Changing the source path
+
+<KeyCap key="P" /> moves `Source` anywhere inside `Root` for the rest of the session. The
+prompt opens on the directory `revision` is reading now and lists what is under it: typing
+narrows the list, <KeyCap key="tab" /> steps into it and back, and the parent directory
+leads it so the list walks up as well as down. The working copy's root is fixed at the head
+of the input — it cannot be deleted, and a path above it is refused — so the source never
+leaves the checkout.
+
+<DemoVideo
+	name="source-path"
+	width={1200}
+	height={700}
+	label="Pressing P and picking internal/server from the prompt's suggestions, after which the Files tree, the Log and the diff cover only that subtree"
+/>
+
+Everything is re-read for the new source — the trees, the history and the cached diffs are
+dropped and fetched again — so the panels show that subtree and nothing else. The change is
+never written to the config file; the next launch uses [`--path`](/reference/cli/#--path)
+again.
 
 ## Files
 

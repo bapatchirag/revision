@@ -211,6 +211,35 @@ The directory being watched became unreadable — it was deleted, renamed, or an
 network share went away. `revision` reports it once, then retries every fifteen seconds
 instead of every tick. It recovers on its own when the directory comes back.
 
+## An `svn` command timed out
+
+```text
+svn status --xml: timed out after 30s
+```
+
+Every `svn` call runs under a deadline, and `revision` kills the process once it expires.
+Reads — status, log and diff — get 30 seconds, the `svn info` at startup gets 15, and a
+commit, an update or an action over a whole directory gets 60. None of them is
+configurable.
+
+Hitting one means `svn` was slow, not that `revision` stalled. A very large working copy, a
+repository reached over a slow link, and a network filesystem are the usual causes. Nothing
+is left half-applied by `revision` itself: the reads change nothing, and a write that was
+killed leaves the working copy wherever `svn` had got to. Press <KeyCap key="R" /> to see
+where that is.
+
+Two things help:
+
+- **Scope the session smaller.** `svn` is always run from the source directory, so
+  <KeyCap key="P" /> — [change source path](/reference/cli/#--path) — narrows status and
+  diff to one subtree instead of the whole checkout.
+- **Act on fewer files at once.** A directory-wide stage, revert or delete is a single
+  `svn` invocation under a single deadline; the same files one at a time each get their
+  own.
+
+The [Command Log](/guides/panels/#command-log) records the timeout against the command that
+hit it, so you can re-run that command in a shell and time it yourself.
+
 ## Where is my config file?
 
 ```text
