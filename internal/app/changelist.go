@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -50,6 +51,9 @@ func displayCL(name string) string {
 func groupChangelists(items []svn.StatusItem) []changelistGroup {
 	byName := map[string][]svn.StatusItem{}
 	for _, it := range items {
+		if isContainerDirEntry(it.Path, items) {
+			continue
+		}
 		byName[it.Changelist] = append(byName[it.Changelist], it)
 	}
 
@@ -72,6 +76,20 @@ func groupChangelists(items []svn.StatusItem) []changelistGroup {
 		groups = append(groups, changelistGroup{Name: "", Items: loose})
 	}
 	return groups
+}
+
+// isContainerDirEntry reports whether path is a directory status entry that has
+// descendants in the same status set (path/...). Such entries are structural:
+// they duplicate a directory row already present in the tree and cannot be
+// changelisted reliably, so changelist views ignore them.
+func isContainerDirEntry(path string, items []svn.StatusItem) bool {
+	prefix := path + "/"
+	for _, it := range items {
+		if it.Path != path && strings.HasPrefix(it.Path, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // renderChangelistGroup is the domain adapter that turns a changelistGroup into

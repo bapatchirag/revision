@@ -3393,6 +3393,35 @@ func TestChangelistGrouping(t *testing.T) {
 	}
 }
 
+func TestChangelistGroupingSkipsContainerDirectoryEntries(t *testing.T) {
+	groups := groupChangelists([]svn.StatusItem{
+		{Path: "usp/lib/libwmiclient/h", State: svn.StateUnversioned},
+		{Path: "usp/lib/libwmiclient/h/file.c", State: svn.StateAdded, Changelist: stagedChangelist},
+	})
+	if len(groups) != 1 {
+		t.Fatalf("expected only one group after skipping container dir entry, got %d: %+v", len(groups), groups)
+	}
+	if groups[0].Name != stagedChangelist || len(groups[0].Items) != 1 || groups[0].Items[0].Path != "usp/lib/libwmiclient/h/file.c" {
+		t.Fatalf("unexpected groups after container-dir filtering: %+v", groups)
+	}
+}
+
+func TestChangelistItemsSkipsContainerDirectoryEntries(t *testing.T) {
+	m := sizedModel(t)
+	m.fileItems = []svn.StatusItem{
+		{Path: "src", State: svn.StateUnversioned},
+		{Path: "src/a.go", State: svn.StateAdded, Changelist: stagedChangelist},
+		{Path: "src/b.go", State: svn.StateModified, Changelist: "feature"},
+	}
+	if unstaged := m.changelistItems(""); len(unstaged) != 0 {
+		t.Fatalf("container directory entry should not appear in unstaged drill, got: %+v", unstaged)
+	}
+	staged := m.changelistItems(stagedChangelist)
+	if len(staged) != 1 || staged[0].Path != "src/a.go" {
+		t.Fatalf("staged drill should include only src/a.go, got: %+v", staged)
+	}
+}
+
 func TestFilesViewSwitchesToChangelists(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "a.go", State: svn.StateModified, Changelist: "feature"},

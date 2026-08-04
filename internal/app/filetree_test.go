@@ -60,6 +60,34 @@ func TestBuildFileTreeCarriesFilePointer(t *testing.T) {
 	}
 }
 
+func TestBuildFileTreeSkipsDuplicateDirectoryLeaf(t *testing.T) {
+	rows := buildFileTree([]svn.StatusItem{
+		{Path: "src", State: svn.StateAdded},
+		{Path: "src/a.go", State: svn.StateAdded},
+	}, nil)
+
+	var srcDir, srcLeaf, child bool
+	for _, n := range rows {
+		switch {
+		case n.Item == nil && n.Path == "src":
+			srcDir = true
+		case n.Item != nil && n.Path == "src":
+			srcLeaf = true
+		case n.Item != nil && n.Path == "src/a.go":
+			child = true
+		}
+	}
+	if !srcDir {
+		t.Fatal("expected src/ directory row to be present")
+	}
+	if srcLeaf {
+		t.Fatal("did not expect a duplicate file leaf for src")
+	}
+	if !child {
+		t.Fatal("expected child file leaf src/a.go to be present")
+	}
+}
+
 func TestBuildFileTreeCollapseHidesDescendants(t *testing.T) {
 	items := []svn.StatusItem{
 		{Path: "internal/app/app.go", State: svn.StateModified},
