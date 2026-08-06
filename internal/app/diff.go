@@ -28,11 +28,15 @@ type diffSource struct {
 // overview, where Main shows a summary rather than a diff, it saves the
 // highlighted changelist's diff instead. A selection with nothing to diff — a
 // clean file, a directory while directory diffs are off, one whose diff is still
-// loading or failed to — warns instead, as does the Diffs view, whose entries are
-// saved patch files already.
+// loading or failed to — warns instead, as do the Diffs and Rejects views, whose
+// entries are patch files on disk already.
 func (m *Model) saveDiff() tea.Cmd {
 	if m.filesViewIsDiffs() {
 		m.showToast("this diff is already saved", component.LevelWarning)
+		return nil
+	}
+	if m.filesViewIsRejects() {
+		m.showToast("a reject is already a file on disk", component.LevelWarning)
 		return nil
 	}
 	if m.filesViewIsChangelists() && !m.inChangelistDrill() {

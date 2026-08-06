@@ -123,6 +123,15 @@ copy, and <KeyCap key="d" /> deletes it from the store.
 
 The rows are files, not working-copy changes: stage and revert do nothing here.
 
+### Rejects
+
+The `.rej` files left behind by a patch, found by walking the [source
+path](/workflows/source-path/) recursively and laid out as the same tree as
+Changes — <KeyCap key="enter" /> expands and collapses a directory. svn ignores rejects,
+so this is the only view that shows them. Selecting one shows its contents in Main;
+<KeyCap key="e" /> opens it in your [editor](/workflows/editor/) and <KeyCap key="d" />
+deletes it from disk. See [Finding rejects](/workflows/diffs/#finding-rejects).
+
 ## Log
 
 Revision history, newest first, a page at a time. Each row carries the full revision

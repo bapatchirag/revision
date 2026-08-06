@@ -54,8 +54,9 @@ func (m *Model) openInEditor() tea.Cmd {
 
 // editTarget returns the absolute path of the file the Files panel highlights,
 // along with the shorter name it is known by on screen: a file leaf in the
-// Changes tree or in a drilled-in changelist, or a patch file in the Diffs view.
-// ok is false wherever the highlight is not a single file.
+// Changes tree or in a drilled-in changelist, a patch file in the Diffs view, or
+// a reject in the Rejects view. ok is false wherever the highlight is not a
+// single file.
 func (m *Model) editTarget() (path, name string, ok bool) {
 	if m.filesViewIsDiffs() {
 		d, ok := m.savedDiffs.Selected()
@@ -63,6 +64,13 @@ func (m *Model) editTarget() (path, name string, ok bool) {
 			return "", "", false
 		}
 		return d.Path, d.Name, true
+	}
+	if m.filesViewIsRejects() {
+		r, ok := m.selectedReject()
+		if !ok {
+			return "", "", false
+		}
+		return r.Path, r.Rel, true
 	}
 	it, ok := m.selectedFile()
 	if !ok {

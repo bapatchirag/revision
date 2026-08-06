@@ -91,6 +91,13 @@ func (m *Model) mainDiff() (diff, target string, ok bool) {
 		}
 		return m.savedText, d.Name, true
 	}
+	if m.filesViewIsRejects() {
+		r, sel := m.selectedReject()
+		if !sel {
+			return "", "", false
+		}
+		return m.rejectText, r.Rel, true
+	}
 	if m.diffErr {
 		return "", "", false
 	}

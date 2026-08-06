@@ -121,6 +121,7 @@ type Model struct {
 	changelists *component.List[changelistGroup]
 	clFiles     *component.List[fileNode]
 	savedDiffs  *component.List[savedDiff]
+	rejects     *component.List[rejectNode]
 	filesViews  *component.Views
 	log         *component.Table[svn.LogEntry]
 	main        *component.Viewport
@@ -188,6 +189,17 @@ type Model struct {
 	savedText      string
 	savedErr       bool
 
+	// rejectItems is every reject file found beneath the source path, before the
+	// Files-panel filter narrows the Rejects view; rejectPath and rejectText are
+	// the file whose contents Main is showing for that view, and rejectCollapsed
+	// the directories folded shut in its tree.
+	rejectItems     []rejectFile
+	rejectsErr      error
+	rejectPath      string
+	rejectText      string
+	rejectErr       bool
+	rejectCollapsed map[string]bool
+
 	source   mainSource
 	diffPath string
 	diffText string
@@ -204,13 +216,15 @@ type Model struct {
 	optimisticTok uint64
 	// diffGen, statusGen, logGen and savedGen stamp the loads whose replies can
 	// be overtaken by a later request, so a superseded reply is dropped instead
-	// of rendered. diffGen covers both diff sources feeding Main — the working
-	// copy and the saved-patch reader — since only one of them is on screen.
+	// of rendered. diffGen covers every source feeding Main — the working copy,
+	// the saved-patch reader and the reject reader — since only one of them is on
+	// screen. savedGen and rejectGen stamp the two directory scans.
 	diffGen   loadGen
 	statusGen loadGen
 	logGen    loadGen
 	revGen    loadGen
 	savedGen  loadGen
+	rejectGen loadGen
 	// mainKey identifies the selection mainText was rendered for, so a refresh of
 	// what is already on screen can keep the reader's scroll position.
 	mainKey  string
@@ -320,10 +334,12 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	changelists := component.NewList[changelistGroup](changelistsListID, renderChangelistGroup(th), th, keys)
 	clFiles := component.NewList[fileNode](changelistFilesID, renderFileNode(th, pending), th, keys)
 	savedDiffs := component.NewList[savedDiff](savedDiffsListID, renderSavedDiff(th), th, keys)
+	rejects := component.NewList[rejectNode](rejectsListID, renderRejectNode(th), th, keys)
 	filesViews := component.NewViews(filesViewsID, []component.View{
 		{Name: "Changes", Content: files},
 		{Name: "Changelists", Content: changelists},
 		{Name: savedDiffsViewName, Content: savedDiffs},
+		{Name: rejectsViewName, Content: rejects},
 	}, th, keys)
 	logTable := component.NewTable[svn.LogEntry]("log", logColumns(), func(it svn.LogEntry) []string {
 		return renderLogRow(it, m.wcRevision, m.logLoading, m.theme)
@@ -351,6 +367,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		changelists:     changelists,
 		clFiles:         clFiles,
 		savedDiffs:      savedDiffs,
+		rejects:         rejects,
 		filesViews:      filesViews,
 		log:             logTable,
 		main:            main,
@@ -373,6 +390,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		splitDiff:       component.NewSplitView(splitDiffID, "Side-by-side diff", th, keys),
 		collapsedDirs:   map[string]bool{},
 		clCollapsedDirs: map[string]bool{},
+		rejectCollapsed: map[string]bool{},
 		filters:         map[int]string{},
 		pendingOps:      map[string]pendingOp{},
 		session:         newSessionStore(),
@@ -475,13 +493,16 @@ func (m *Model) Close() {
 	m.logGen.stop()
 	m.revGen.stop()
 	m.savedGen.stop()
+	m.rejectGen.stop()
 	m.stopWatch()
 	m.session.Close()
 	m.clearDiff()
 	m.mainKey, m.mainText = "", ""
 	m.savedPath, m.savedText, m.savedErr = "", "", false
+	m.rejectPath, m.rejectText, m.rejectErr = "", "", false
 	m.diffSrc = diffSource{}
 	m.fileItems, m.clItems, m.logEntries, m.savedDiffItems = nil, nil, nil, nil
+	m.rejectItems = nil
 	m.dropOptimistic()
 	m.pendingOps, m.pendingHold = nil, nil
 	m.cmdLog.clear()
@@ -685,6 +706,48 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.reloadSavedDiffs()
 
+	case rejectsLoadedMsg:
+		if m.rejectGen.stale(msg.gen) {
+			return m, nil
+		}
+		m.rejectsErr = msg.err
+		m.rejectItems = msg.files
+		m.rebuildRejects()
+		if m.source == sourceFiles && m.filesViewIsRejects() {
+			m.updateMain()
+			return m, m.rejectLoadForSelection()
+		}
+		return m, nil
+
+	case rejectReadMsg:
+		if m.diffGen.stale(msg.gen) {
+			return m, nil
+		}
+		m.rejectPath = msg.path
+		m.rejectErr = msg.err != nil
+		if msg.err != nil {
+			m.rejectText = "Unable to read reject: " + msg.err.Error()
+		} else {
+			m.rejectText = msg.text
+		}
+		if m.source == sourceFiles {
+			m.updateMain()
+		}
+		return m, nil
+
+	case rejectDeletedMsg:
+		if msg.err != nil {
+			m.showToast(failureText("delete "+msg.name, msg.err), component.LevelError)
+			return m, nil
+		}
+		m.showToast("deleted "+msg.name, component.LevelSuccess)
+		if m.rejectPath == msg.path {
+			// Main is showing the file that just went away; drop it so the re-scan
+			// reads whatever the list settles on.
+			m.rejectPath, m.rejectText, m.rejectErr = "", "", false
+		}
+		return m, m.reloadRejects()
+
 	case patchAppliedMsg:
 		if msg.err != nil {
 			m.showToast(failureText("apply "+msg.name, msg.err), component.LevelError)
@@ -692,9 +755,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.showToast(patchToast(msg.name, msg.res))
 		// The working copy now holds changes it did not a moment ago, so the diff on
-		// screen and the status behind it are both out of date.
+		// screen and the status behind it are both out of date — and any hunk that
+		// did not fit has just been written out as a reject.
 		m.clearDiff()
-		return m, m.reloadStatus()
+		return m, tea.Batch(m.reloadStatus(), m.reloadRejectsIfShown())
 
 	case editedMsg:
 		if msg.err != nil {
@@ -705,8 +769,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// A terminal editor has exited, so the file may have changed: re-read the
-		// working copy (which reloads the diff on screen) and the saved-diff store.
-		return m, tea.Batch(m.reloadStatus(), m.reloadSavedDiffsIfShown())
+		// working copy (which reloads the diff on screen) and the local file stores.
+		return m, tea.Batch(m.reloadStatus(), m.reloadSavedDiffsIfShown(), m.reloadRejectsIfShown())
 
 	case errMsg:
 		m.loading = false
@@ -867,6 +931,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.toggleCollapse()
 		case changelistFilesID:
 			return m, m.toggleClCollapse()
+		case rejectsListID:
+			return m, m.toggleRejectCollapse()
 		case updateMenuID:
 			return m, m.chooseUpdate(msg.Index)
 		}
@@ -882,6 +948,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case savedDiffsViewName:
 				// Re-scan on entry so diffs saved (or removed) elsewhere show up.
 				return m, tea.Batch(m.reloadSavedDiffs(), m.savedDiffLoadForSelection())
+			case rejectsViewName:
+				// Re-scan on entry: a reject can appear or be cleaned up at any time.
+				return m, tea.Batch(m.reloadRejects(), m.rejectLoadForSelection())
 			}
 		}
 		return m, nil
@@ -1167,7 +1236,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		m.session.Purge()
 		m.clearDiff()
 		m.refreshChrome()
-		return tea.Batch(m.reloadStatus(), m.reloadLogPage(), m.reloadSavedDiffsIfShown()), true
+		return tea.Batch(m.reloadStatus(), m.reloadLogPage(), m.reloadSavedDiffsIfShown(), m.reloadRejectsIfShown()), true
 	case key.Matches(k, m.keys.FocusNext):
 		m.focusNextPanel()
 		return m.afterFocusChange(), true
@@ -1446,10 +1515,10 @@ func (m *Model) submitChangelist(name string) tea.Cmd {
 // Changes tree selection (only when the cursor is on a file leaf, not a
 // directory row), or the selection within a drilled-in changelist. At the
 // Changelists overview (a group is selected), on a directory row, or in the
-// Diffs view (which lists saved patch files, not working-copy files) there is no
-// single file, so ok is false.
+// Diffs and Rejects views (which list local files, not working-copy ones) there
+// is no single file, so ok is false.
 func (m *Model) selectedFile() (svn.StatusItem, bool) {
-	if m.filesViewIsDiffs() {
+	if m.filesViewIsStore() {
 		return svn.StatusItem{}, false
 	}
 	if m.filesViewIsChangelists() {
@@ -1476,9 +1545,9 @@ func (m *Model) rebuildFileTree() {
 	selectNodePath(m.files, path)
 }
 
-// selectedNodePath returns the path of the row a file tree's cursor rests on,
-// for restoring the selection across a rebuild.
-func selectedNodePath(l *component.List[fileNode]) string {
+// selectedNodePath returns the path of the row a tree's cursor rests on, for
+// restoring the selection across a rebuild.
+func selectedNodePath[T any](l *component.List[pathRow[T]]) string {
 	n, ok := l.Selected()
 	if !ok {
 		return ""
@@ -1486,10 +1555,10 @@ func selectedNodePath(l *component.List[fileNode]) string {
 	return n.Path
 }
 
-// selectNodePath moves a file tree's cursor back onto path. A path the rebuild
+// selectNodePath moves a tree's cursor back onto path. A path the rebuild
 // dropped leaves the cursor where the List clamped it — on the row that took its
 // place — which is the nearest thing that survived.
-func selectNodePath(l *component.List[fileNode], path string) {
+func selectNodePath[T any](l *component.List[pathRow[T]], path string) {
 	if path == "" {
 		return
 	}
@@ -1574,6 +1643,21 @@ func (m *Model) filesViewIsDiffs() bool {
 	return m.filesViews.ActiveName() == savedDiffsViewName
 }
 
+// filesViewIsRejects reports whether the Files panel's active view is the
+// Rejects browser, which lists the .rej files a patch left behind rather than
+// working-copy changes.
+func (m *Model) filesViewIsRejects() bool {
+	return m.filesViews.ActiveName() == rejectsViewName
+}
+
+// filesViewIsStore reports whether the active Files-panel view browses files on
+// local disk — saved patches or rejects — rather than working-copy status. Those
+// two views share their shape: a flat list, a file's contents in Main, and no
+// selection svn knows anything about.
+func (m *Model) filesViewIsStore() bool {
+	return m.filesViewIsDiffs() || m.filesViewIsRejects()
+}
+
 // inChangelistDrill reports whether the Changelists view is drilled into a
 // changelist's file list.
 func (m *Model) inChangelistDrill() bool {
@@ -1585,14 +1669,21 @@ func (m *Model) inChangelistDrill() bool {
 // entries shown, and — when a filter or the hide-untracked toggle hides some —
 // the full unfiltered count in brackets. It counts file leaves in the Changes
 // tree and a drilled-in changelist (ignoring the synthetic root and directory
-// rows), changelists in the Changelists overview, and saved patch files in the
-// Diffs view, following whichever view is active.
+// rows), changelists in the Changelists overview, saved patch files in the Diffs
+// view and rejects in the Rejects view, following whichever view is active.
 func (m *Model) filesFooter() string {
 	hiding := m.hideUntracked || m.filters[panelFiles] != ""
 	switch {
 	case m.filesViewIsDiffs():
 		shown := len(m.savedDiffs.Items())
 		return countLabel(m.savedDiffs.Index()+1, shown, len(m.savedDiffItems))
+	case m.filesViewIsRejects():
+		index, shown := fileLeafStats(m.rejects.Items(), m.rejects.Index())
+		full := shown
+		if m.filters[panelFiles] != "" {
+			full = len(m.rejectItems)
+		}
+		return countLabel(index, shown, full)
 	case m.inChangelistDrill():
 		index, shown := fileLeafStats(m.clFiles.Items(), m.clFiles.Index())
 		full := shown
@@ -1817,14 +1908,17 @@ func directoryRevertPaths(n fileNode, items []svn.StatusItem) []string {
 }
 
 // requestDelete asks to remove the current selection, opening a confirmation
-// modal. In the Diffs view it removes the highlighted patch file from disk; on a
-// directory row it removes every deletable file beneath it; on a file leaf a
-// versioned file is scheduled for deletion, an unversioned one is removed from
-// disk, and ignored files are left alone. A row already waiting on svn is left
-// alone too.
+// modal. In the Diffs view it removes the highlighted patch file from disk and
+// in the Rejects view the highlighted reject; on a directory row it removes
+// every deletable file beneath it; on a file leaf a versioned file is scheduled
+// for deletion, an unversioned one is removed from disk, and ignored files are
+// left alone. A row already waiting on svn is left alone too.
 func (m *Model) requestDelete() tea.Cmd {
 	if m.filesViewIsDiffs() {
 		return m.requestDeleteSavedDiff()
+	}
+	if m.filesViewIsRejects() {
+		return m.requestDeleteReject()
 	}
 	if n, items, ok := m.selectedDirectory(); ok {
 		return m.requestDeleteDirectory(n, m.withoutPending(items))
@@ -2077,6 +2171,7 @@ func (m *Model) previewTheme(name string) {
 	m.clFiles.SetRender(renderFileNode(th, m.pendingCount))
 	m.changelists.SetRender(renderChangelistGroup(th))
 	m.savedDiffs.SetRender(renderSavedDiff(th))
+	m.rejects.SetRender(renderRejectNode(th))
 	m.refreshChrome()
 }
 
@@ -2177,6 +2272,12 @@ func (m *Model) submitSettings() tea.Cmd {
 		m.savedPath, m.savedText, m.savedErr = "", "", false
 		m.rebuildSavedDiffs()
 		reload = tea.Batch(reload, m.reloadSavedDiffsIfShown())
+	}
+	// Rejects are found by walking the source path, so a new display scope is a
+	// different tree to search.
+	if displayChanged {
+		m.clearRejects()
+		reload = tea.Batch(reload, m.reloadRejectsIfShown())
 	}
 	// A new page size puts different revisions on every page, so the anchors
 	// reached with the old one no longer address anything.
@@ -2491,6 +2592,11 @@ func (m *Model) handleSelection(sel uimsg.SelectedMsg) tea.Cmd {
 			m.updateMain()
 			return m.savedDiffLoadForSelection()
 		}
+	case rejectsListID:
+		if m.source == sourceFiles {
+			m.updateMain()
+			return m.rejectLoadForSelection()
+		}
 	case "log":
 		if m.source == sourceLog {
 			m.updateMain()
@@ -2647,14 +2753,40 @@ func (m *Model) readSavedDiff(path string) tea.Cmd {
 	return readSavedDiffCmd(path, m.diffGen.next())
 }
 
+// reloadRejects re-walks the source path for the .rej files a patch left behind.
+// They are ignored by svn and so are invisible to the Changes view; the disk is
+// the only place they can be found.
+func (m *Model) reloadRejects() tea.Cmd {
+	return loadRejectsCmd(m.patchRoot(), m.rejectGen.next())
+}
+
+// reloadRejectsIfShown re-walks for rejects only while the Rejects view is the
+// one on screen. Anywhere else the walk is deferred: that view re-scans whenever
+// it is opened, so a whole working copy is never read for a list nobody is
+// looking at.
+func (m *Model) reloadRejectsIfShown() tea.Cmd {
+	if !m.filesViewIsRejects() {
+		return nil
+	}
+	return m.reloadRejects()
+}
+
+func (m *Model) readReject(path string) tea.Cmd {
+	return readRejectCmd(path, m.diffGen.next())
+}
+
 // diffLoadForSelection returns a command to load the diff that Main should show
 // for the current Files selection when it is not already loaded. In the Diffs
-// view that is the highlighted saved patch file; otherwise a directory row loads
-// the combined diff of every change beneath it (the "/" root covers the whole
-// working copy) and a file leaf loads its own diff when it is dirty.
+// view that is the highlighted saved patch file and in the Rejects view the
+// highlighted reject; otherwise a directory row loads the combined diff of every
+// change beneath it (the "/" root covers the whole working copy) and a file leaf
+// loads its own diff when it is dirty.
 func (m *Model) diffLoadForSelection() tea.Cmd {
 	if m.filesViewIsDiffs() {
 		return m.savedDiffLoadForSelection()
+	}
+	if m.filesViewIsRejects() {
+		return m.rejectLoadForSelection()
 	}
 	k, ok := m.diffSelection()
 	if !ok || m.diffPath == k.path {
@@ -2743,14 +2875,15 @@ func (m *Model) toggleCmdLog() tea.Cmd {
 }
 
 // rebuildFilesViews re-flattens every Files-panel view — the Changes tree, the
-// Changelists overview, a drilled-in changelist and the saved-diffs browser —
-// from the current status items. It is the shared refresh used whenever what
-// those views should show changes without a status reload (a filter edit or the
-// untracked toggle).
+// Changelists overview, a drilled-in changelist, the saved-diffs browser and the
+// rejects browser — from the current status items. It is the shared refresh used
+// whenever what those views should show changes without a status reload (a
+// filter edit or the untracked toggle).
 func (m *Model) rebuildFilesViews() {
 	m.rebuildFileTree()
 	m.rebuildChangelists()
 	m.rebuildSavedDiffs()
+	m.rebuildRejects()
 	if m.inChangelistDrill() {
 		m.rebuildClTree()
 	}
@@ -3239,6 +3372,9 @@ func (m *Model) mainSelectionKey() string {
 	case m.filesViewIsDiffs():
 		d, _ := m.savedDiffs.Selected()
 		return "saved:" + d.Path
+	case m.filesViewIsRejects():
+		n, _ := m.rejects.Selected()
+		return "reject:" + n.Path
 	case m.filesViewIsChangelists() && !m.inChangelistDrill():
 		g, _ := m.changelists.Selected()
 		return "changelist:" + g.Name
@@ -3253,9 +3389,9 @@ func (m *Model) mainContent() string {
 	if m.source == sourceStatus {
 		return m.statusDetail()
 	}
-	// The Diffs view browses patch files on local disk, so it stays readable
-	// while the working copy is still loading or has failed to load.
-	if m.source != sourceFiles || !m.filesViewIsDiffs() {
+	// The Diffs and Rejects views browse files on local disk, so they stay
+	// readable while the working copy is still loading or has failed to load.
+	if m.source != sourceFiles || !m.filesViewIsStore() {
 		switch {
 		case m.err != nil:
 			return "Error: " + m.err.Error() + "\n\nPress R to retry."
@@ -3274,12 +3410,16 @@ func (m *Model) mainContent() string {
 
 // filesMain renders the Main content for the Files panel, which depends on its
 // active view: the Diffs browser shows the highlighted saved patch file, the
-// Changelists overview shows a changelist summary, a directory row in the
-// Changes tree shows the combined diff beneath it, and everything else (a file
-// in the Changes tree or a drilled-in changelist) shows the selected file.
+// Rejects browser the highlighted reject, the Changelists overview a changelist
+// summary, a directory row in the Changes tree the combined diff beneath it, and
+// everything else (a file in the Changes tree or a drilled-in changelist) the
+// selected file.
 func (m *Model) filesMain() string {
 	if m.filesViewIsDiffs() {
 		return m.savedDiffDetail()
+	}
+	if m.filesViewIsRejects() {
+		return m.rejectDetail()
 	}
 	if m.filesViewIsChangelists() && !m.inChangelistDrill() {
 		return m.changelistDetail()
@@ -3294,10 +3434,10 @@ func (m *Model) filesMain() string {
 // from the Changes tree, or a drilled-in changelist tree — together with the
 // item set that tree was built from (used to stage a directory's files). It
 // reports ok=false at the Changelists overview, where the selection is a
-// changelist group rather than a tree row, and in the Diffs view, where it is a
-// saved patch file.
+// changelist group rather than a tree row, and in the Diffs and Rejects views,
+// where it is a file on local disk.
 func (m *Model) selectedTreeNode() (fileNode, []svn.StatusItem, bool) {
-	if m.filesViewIsDiffs() {
+	if m.filesViewIsStore() {
 		return fileNode{}, nil, false
 	}
 	if m.filesViewIsChangelists() {
@@ -3324,14 +3464,18 @@ func (m *Model) selectedDirectory() (fileNode, []svn.StatusItem, bool) {
 
 // filesShowDiff reports whether filesMain currently renders a unified diff — the
 // only Main view with a +/-/space gutter to pin. It mirrors the diff branches of
-// savedDiffDetail, directoryDetail and fileDetail: the Files panel is showing a
-// saved patch file that has been read, or working-copy files (not the
-// Changelists overview) whose selected directory row, or dirty file leaf, has a
-// non-empty, freshly-loaded diff.
+// savedDiffDetail, rejectDetail, directoryDetail and fileDetail: the Files panel
+// is showing a saved patch file or a reject that has been read, or working-copy
+// files (not the Changelists overview) whose selected directory row, or dirty
+// file leaf, has a non-empty, freshly-loaded diff.
 func (m *Model) filesShowDiff() bool {
 	if m.filesViewIsDiffs() {
 		d, ok := m.savedDiffs.Selected()
 		return ok && !m.savedErr && m.savedPath == d.Path && strings.TrimSpace(m.savedText) != ""
+	}
+	if m.filesViewIsRejects() {
+		r, ok := m.selectedReject()
+		return ok && !m.rejectErr && m.rejectPath == r.Path && strings.TrimSpace(m.rejectText) != ""
 	}
 	if m.filesViewIsChangelists() && !m.inChangelistDrill() {
 		return false
@@ -3522,12 +3666,14 @@ func (m *Model) panelHints(p int) []string {
 }
 
 // filesHints are the Files panel's keys for its active view: the saved-diff
-// browser, a drilled-in changelist, the Changelists overview, or the Changes
-// tree.
+// browser, the reject browser, a drilled-in changelist, the Changelists
+// overview, or the Changes tree.
 func (m *Model) filesHints() []string {
 	switch {
 	case m.filesViewIsDiffs():
 		return []string{"e open", "p apply", "d delete", "/ filter", "[ ] view"}
+	case m.filesViewIsRejects():
+		return []string{"enter expand", "e open", "d delete", "/ filter", "[ ] view"}
 	case m.inChangelistDrill():
 		return []string{"space unstage", "c commit", "esc back", "[ ] view"}
 	case m.filesViewIsChangelists():

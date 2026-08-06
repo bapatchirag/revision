@@ -15,44 +15,54 @@ import (
 // collides with a directory or file.
 const fileTreeRoot = "/"
 
-// fileNode is one visible row in the Changes view's file tree. A node is either
-// a directory (Item == nil) or a file leaf (Item != nil). Depth is the row's
-// indentation level and Path is the full working-copy-relative path of the
-// directory or file, which doubles as the stable key for collapse state.
-type fileNode struct {
+// pathRow is one visible row of a tree built from slash-separated paths: either
+// a directory (Item == nil) or a leaf carrying the item it was built from. Depth
+// is the row's indentation level and Path is the full relative path of the
+// directory or leaf, which doubles as the stable key for collapse state.
+type pathRow[T any] struct {
 	Name      string
 	Path      string
 	Depth     int
 	Collapsed bool
-	Item      *svn.StatusItem
+	Item      *T
 }
+
+// fileNode is one visible row in the Changes view's file tree, over working-copy
+// status items.
+type fileNode = pathRow[svn.StatusItem]
 
 // treeDir is the mutable directory node used while assembling the tree, before
 // it is flattened into display rows.
-type treeDir struct {
+type treeDir[T any] struct {
 	name  string
 	path  string
-	dirs  map[string]*treeDir
+	dirs  map[string]*treeDir[T]
 	names []string
-	files []svn.StatusItem
+	files []T
 }
 
 // buildFileTree turns the flat, path-sorted status items into the flattened list
-// of visible tree rows. Everything hangs off a single synthetic root row shown
-// as "/" (the working-copy root): every path segment becomes a directory row and
-// each file a leaf, indented by its depth beneath the root. Directories sort
-// before files within a parent, both alphabetically. A directory whose path is
-// present in collapsed hides its descendants (its own row still shows, marked
-// collapsed); collapsing the root hides the whole tree. An empty working copy
-// yields no rows at all.
+// of visible tree rows.
 func buildFileTree(items []svn.StatusItem, collapsed map[string]bool) []fileNode {
+	return buildPathTree(items, func(it svn.StatusItem) string { return it.Path }, collapsed)
+}
+
+// buildPathTree turns a flat list of items, each named by pathOf, into the
+// flattened list of visible tree rows. Everything hangs off a single synthetic
+// root row shown as "/": every path segment becomes a directory row and each
+// item a leaf, indented by its depth beneath the root. Directories sort before
+// files within a parent, directories alphabetically and leaves in the order they
+// were given. A directory whose path is present in collapsed hides its
+// descendants (its own row still shows, marked collapsed); collapsing the root
+// hides the whole tree. No items yields no rows at all.
+func buildPathTree[T any](items []T, pathOf func(T) string, collapsed map[string]bool) []pathRow[T] {
 	if len(items) == 0 {
 		return nil
 	}
 
-	root := &treeDir{dirs: map[string]*treeDir{}}
+	root := &treeDir[T]{dirs: map[string]*treeDir[T]{}}
 	for _, it := range items {
-		parts := strings.Split(it.Path, "/")
+		parts := strings.Split(pathOf(it), "/")
 		dir := root
 		for _, seg := range parts[:len(parts)-1] {
 			child, ok := dir.dirs[seg]
@@ -61,7 +71,7 @@ func buildFileTree(items []svn.StatusItem, collapsed map[string]bool) []fileNode
 				if dir.path != "" {
 					path = dir.path + "/" + seg
 				}
-				child = &treeDir{name: seg, path: path, dirs: map[string]*treeDir{}}
+				child = &treeDir[T]{name: seg, path: path, dirs: map[string]*treeDir[T]{}}
 				dir.dirs[seg] = child
 				dir.names = append(dir.names, seg)
 			}
@@ -71,7 +81,7 @@ func buildFileTree(items []svn.StatusItem, collapsed map[string]bool) []fileNode
 	}
 
 	rootCollapsed := collapsed[fileTreeRoot]
-	rows := []fileNode{{
+	rows := []pathRow[T]{{
 		Name:      "/",
 		Path:      fileTreeRoot,
 		Depth:     0,
@@ -81,13 +91,13 @@ func buildFileTree(items []svn.StatusItem, collapsed map[string]bool) []fileNode
 		return rows
 	}
 
-	var walk func(d *treeDir, depth int)
-	walk = func(d *treeDir, depth int) {
+	var walk func(d *treeDir[T], depth int)
+	walk = func(d *treeDir[T], depth int) {
 		sort.Strings(d.names)
 		for _, name := range d.names {
 			child := d.dirs[name]
 			isCollapsed := collapsed[child.path]
-			rows = append(rows, fileNode{
+			rows = append(rows, pathRow[T]{
 				Name:      name,
 				Path:      child.path,
 				Depth:     depth,
@@ -98,20 +108,20 @@ func buildFileTree(items []svn.StatusItem, collapsed map[string]bool) []fileNode
 			}
 		}
 		for i := range d.files {
-			it := d.files[i]
-			name := it.Path
+			path := pathOf(d.files[i])
+			name := path
 			if slash := strings.LastIndex(name, "/"); slash >= 0 {
 				name = name[slash+1:]
 			}
-			// A status item can name a directory that also has child entries (for
-			// example, an added parent plus added files beneath it). The directory
-			// already renders as a directory row, so skip the duplicate file leaf.
+			// An item can name a directory that also has child entries (for example,
+			// an added parent plus added files beneath it). The directory already
+			// renders as a directory row, so skip the duplicate leaf.
 			if _, ok := d.dirs[name]; ok {
 				continue
 			}
-			rows = append(rows, fileNode{
+			rows = append(rows, pathRow[T]{
 				Name:  name,
-				Path:  it.Path,
+				Path:  path,
 				Depth: depth,
 				Item:  &d.files[i],
 			})
@@ -139,9 +149,9 @@ func (m *Model) fileTree(items []svn.StatusItem, collapsed map[string]bool) []fi
 	return rows
 }
 
-// firstFileIndex returns the index of the first file leaf in rows, or -1 when
-// the tree holds no files (empty, or only directory rows).
-func firstFileIndex(rows []fileNode) int {
+// firstFileIndex returns the index of the first leaf in rows, or -1 when the
+// tree holds no leaves (empty, or only directory rows).
+func firstFileIndex[T any](rows []pathRow[T]) int {
 	for i := range rows {
 		if rows[i].Item != nil {
 			return i
@@ -150,9 +160,9 @@ func firstFileIndex(rows []fileNode) int {
 	return -1
 }
 
-// leafCount returns the number of file leaves (rows carrying a status item)
-// among rows, ignoring the synthetic root and directory rows.
-func leafCount(rows []fileNode) int {
+// leafCount returns the number of leaves (rows carrying an item) among rows,
+// ignoring the synthetic root and directory rows.
+func leafCount[T any](rows []pathRow[T]) int {
 	n := 0
 	for i := range rows {
 		if rows[i].Item != nil {
@@ -162,11 +172,11 @@ func leafCount(rows []fileNode) int {
 	return n
 }
 
-// fileLeafStats returns a file-tree position indicator: the number of file
-// leaves at or before cursor — a 1-based position when the cursor rests on a
-// file, or the count of leaves already passed when it rests on a directory (0 on
-// the root) — together with the total leaf count.
-func fileLeafStats(rows []fileNode, cursor int) (index, count int) {
+// fileLeafStats returns a tree position indicator: the number of leaves at or
+// before cursor — a 1-based position when the cursor rests on a leaf, or the
+// count of leaves already passed when it rests on a directory (0 on the root) —
+// together with the total leaf count.
+func fileLeafStats[T any](rows []pathRow[T], cursor int) (index, count int) {
 	for i := range rows {
 		if rows[i].Item == nil {
 			continue
@@ -181,7 +191,7 @@ func fileLeafStats(rows []fileNode, cursor int) (index, count int) {
 
 // dirLabel is a directory row's display label: its segment name with a single
 // trailing slash (the "/" root already carries one).
-func dirLabel(n fileNode) string {
+func dirLabel[T any](n pathRow[T]) string {
 	if strings.HasSuffix(n.Name, "/") {
 		return n.Name
 	}

@@ -158,13 +158,13 @@ func (m *Model) applySourceChange(msg sourceChangedMsg) tea.Cmd {
 	m.retargetDisplay(m.cfg.DisplayFrom)
 	m.resetForSource()
 	m.showToast("source path: "+m.client.Dir, component.LevelSuccess)
-	return tea.Batch(m.beginInitialLoad(), m.reloadSavedDiffsIfShown())
+	return tea.Batch(m.beginInitialLoad(), m.reloadSavedDiffsIfShown(), m.reloadRejectsIfShown())
 }
 
 // resetForSource clears everything the previous source directory produced — the
 // file trees and their collapse state, any changelist drill, history, the diff
-// on screen, the saved-diff browser and every panel filter — so nothing from the
-// old working copy survives into the new one's views.
+// on screen, the saved-diff and reject browsers and every panel filter — so
+// nothing from the old working copy survives into the new one's views.
 func (m *Model) resetForSource() {
 	m.fileItems = nil
 	m.clItems = nil
@@ -192,6 +192,7 @@ func (m *Model) resetForSource() {
 	m.clearDiff()
 	m.savedDiffItems, m.savedDiffsErr = nil, nil
 	m.savedPath, m.savedText, m.savedErr = "", "", false
+	m.clearRejects()
 	for p := range m.filters {
 		m.setFilter(p, "")
 	}

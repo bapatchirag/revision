@@ -130,6 +130,32 @@ type savedDiffReadMsg struct {
 	gen  uint64
 }
 
+// rejectsLoadedMsg carries the reject files found beneath the source path, for
+// the Files panel's Rejects view.
+type rejectsLoadedMsg struct {
+	files []rejectFile
+	err   error
+	gen   uint64
+}
+
+// rejectDeletedMsg carries the result of removing a reject file, along with the
+// file it was asked to remove: path to match against the contents on screen,
+// name to report.
+type rejectDeletedMsg struct {
+	path string
+	name string
+	err  error
+}
+
+// rejectReadMsg carries the contents of a reject file, keyed by the path it was
+// read from so the current selection can match it.
+type rejectReadMsg struct {
+	path string
+	text string
+	err  error
+	gen  uint64
+}
+
 // patchAppliedMsg carries the result of applying a saved patch file to the
 // working copy, named as the Diffs view shows it. res describes what svn did
 // with the patch's targets; it is empty when the patch was refused before it
@@ -399,6 +425,34 @@ func readSavedDiffCmd(path string, gen uint64) tea.Cmd {
 func deleteSavedDiffCmd(path, name string) tea.Cmd {
 	return func() tea.Msg {
 		return savedDiffDeletedMsg{path: path, name: name, err: os.Remove(path)}
+	}
+}
+
+// loadRejectsCmd walks dir for the rejects a patch left behind, off the UI
+// goroutine, for the Rejects view to browse.
+func loadRejectsCmd(dir string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		files, err := scanRejects(dir)
+		return rejectsLoadedMsg{files: files, err: err, gen: gen}
+	}
+}
+
+// readRejectCmd reads a reject file off the UI goroutine so it can be shown in
+// Main. A read failure is carried on the message rather than promoted to a fatal
+// error, so an unreadable file never tears down the UI.
+func readRejectCmd(path string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		b, err := os.ReadFile(path)
+		return rejectReadMsg{path: path, text: string(b), err: err, gen: gen}
+	}
+}
+
+// deleteRejectCmd removes a reject file off the UI goroutine. svn ignores
+// rejects, so like the saved-diff store this is an os.Remove rather than
+// anything svn knows about.
+func deleteRejectCmd(path, name string) tea.Cmd {
+	return func() tea.Msg {
+		return rejectDeletedMsg{path: path, name: name, err: os.Remove(path)}
 	}
 }
 

@@ -148,9 +148,26 @@ applied feature-x.diff to 3 files, 1 with rejects (.rej), 1 not found
 ```
 
 Rejects are per file, not per hunk: a file with any rejected hunk is counted there even
-though its other hunks did go in. **`.rej` files are svn-ignored**, so they do not appear
-in the Files panel — the toast and the [Command Log](/guides/panels/#command-log), which
-holds svn's full output, are where you find them.
+though its other hunks did go in. **`.rej` files are svn-ignored**, so they never appear
+in the Changes view — the [Rejects view](#finding-rejects) is where you read them.
+
+## Finding rejects
+
+<KeyCap key="]" /> once more from the Diffs view opens **Rejects**: every `.rej` file
+beneath the [source path](/workflows/source-path/), as a tree. The search is recursive,
+because a reject lands beside the file it failed to patch rather than in one directory;
+`.svn` is skipped. Directories nest exactly as they do in the Changes view, and
+<KeyCap key="enter" /> folds one shut.
+
+Selecting a reject shows its hunks in Main, where <KeyCap key="/" />
+[search](/workflows/filtering-and-searching/) and <KeyCap key="s" /> side-by-side both
+work as usual. <KeyCap key="e" /> opens it in [your editor](/workflows/editor/) so you can
+apply the hunks by hand, and <KeyCap key="d" /> deletes it once you are done, after
+asking. A directory row has no file of its own, so it summarizes what sits beneath it.
+
+The walk is deferred until you look: the view rescans on <KeyCap key="R" />, on entering
+it, after applying a patch, and after the source path changes — never while another view
+is on screen.
 
 :::note
 A patch is applied in the [source path](/workflows/source-path/), which is not necessarily
