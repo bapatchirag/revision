@@ -41,6 +41,19 @@ func keyFile(t *testing.T) string {
 	return path
 }
 
+// sleepBin is the absolute path to sleep. A stub that has to block cannot just
+// say "sleep": stubTools makes its directory the whole of PATH, and sleep is an
+// external binary, so the stub's shell would not find it. Resolve it here, while
+// the real PATH is still in place.
+func sleepBin(t *testing.T) string {
+	t.Helper()
+	path, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skip("sleep not found on PATH")
+	}
+	return path
+}
+
 const stubFingerprint = "SHA256:abc123"
 
 // listsFingerprint is an ssh-keygen stub reporting stubFingerprint.
@@ -245,11 +258,13 @@ func TestAddKey(t *testing.T) {
 }
 
 func TestAddKeyReportsATimeout(t *testing.T) {
-	stubTools(t, map[string]string{"ssh-add": "sleep 10\n"})
+	sleep := sleepBin(t)
+	key := keyFile(t)
+	stubTools(t, map[string]string{"ssh-add": sleep + " 10\n"})
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := AddKey(ctx, keyFile(t), "hunter2")
+	err := AddKey(ctx, key, "hunter2")
 	if err == nil || !strings.Contains(err.Error(), "timed out adding") {
 		t.Errorf("err = %v, want the deadline reported as a timeout", err)
 	}
