@@ -158,6 +158,10 @@ func HelpSections() []Section {
 				Action: "Revert / delete file", Keys: []string{"r", "d"}, Context: "Files",
 				Description: "Revert or delete the selected file, or everything under the selected directory. In the Diffs view `d` deletes the highlighted patch file from `diffOutputDir` instead. All ask for confirmation.",
 			},
+			{
+				Action: "Apply saved patch", Keys: []string{"p"}, Context: "Diffs",
+				Description: "Apply the patch file highlighted in the Diffs view to the source path, after asking for confirmation. A patch taken from another directory — one whose files are not the ones here — is refused, as is one svn says would land nothing at all. A patch that only partly fits is applied for what it is worth, with the hunks svn could not place written out beside their targets as `.rej` files.",
+			},
 		}},
 		{Title: "Working copy", Bindings: []Binding{
 			{

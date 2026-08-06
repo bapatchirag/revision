@@ -7,14 +7,14 @@
 │       │  Commit staged / list       c    Move up / down         k / j│       │
 ╰───────│  Expand changelist      enter    Jump top / bottom      g / G│       │
 ╭─ [2] ─│  Revert / delete file   r / d    Next / prev history pa n / p│       │
-│  ▾ /  │Working copy                      Scroll main up / down  K / J│       │
-│>     M│  Update working copy        u    Scroll main l / r      h / l│       │
-│       │  Update to rev (Log)    space    Line start / end  home / end│       │
-│       │  Open file in editor        e    Filter panel               /│       │
-│       │  Change source path         P  View                          │       │
-╰───────│  Refresh / settings     R / S    Switch file view       [ / ]│       │
-╭─ [3] L│  Toggle live refresh        L    Side-by-side / save    s / w│       │
-│  Rev A│                                  Dir diff / untracked   D / U│───────╯
+│  ▾ /  │  Apply saved patch          p    Scroll main up / down  K / J│       │
+│>     M│Working copy                      Scroll main l / r      h / l│       │
+│       │  Update working copy        u    Line start / end  home / end│       │
+│       │  Update to rev (Log)    space    Filter panel               /│       │
+│       │  Open file in editor        e  View                          │       │
+╰───────│  Change source path         P    Switch file view       [ / ]│       │
+╭─ [3] L│  Refresh / settings     R / S    Side-by-side / save    s / w│       │
+│  Rev A│  Toggle live refresh        L    Dir diff / untracked   D / U│───────╯
 │       │                                  Toggle command log         x│───────╮
 │       │                                General                       │       │
 │       │                                  Toggle help                ?│       │

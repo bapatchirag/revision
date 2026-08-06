@@ -117,9 +117,11 @@ it and <KeyCap key="esc" /> goes back.
 
 Patches you have [saved with `w`](/workflows/diffs/#saving-a-diff), newest first, read
 from [`diffOutputDir`](/reference/configuration/#diffoutputdir). Selecting one shows it in
-Main; <KeyCap key="e" /> opens it in your [editor](/workflows/editor/).
+Main; <KeyCap key="e" /> opens it in your [editor](/workflows/editor/),
+<KeyCap key="p" /> [applies it](/workflows/diffs/#applying-a-saved-patch) to the working
+copy, and <KeyCap key="d" /> deletes it from the store.
 
-This view is read-only: stage, revert and delete do nothing here.
+The rows are files, not working-copy changes: stage and revert do nothing here.
 
 ## Log
 

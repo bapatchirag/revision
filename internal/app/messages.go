@@ -130,6 +130,16 @@ type savedDiffReadMsg struct {
 	gen  uint64
 }
 
+// patchAppliedMsg carries the result of applying a saved patch file to the
+// working copy, named as the Diffs view shows it. res describes what svn did
+// with the patch's targets; it is empty when the patch was refused before it
+// could be applied.
+type patchAppliedMsg struct {
+	name string
+	res  svn.PatchResult
+	err  error
+}
+
 // editedMsg carries the result of opening a file in the configured editor. name
 // is the file as it is shown on screen. detached is true when the editor was
 // handed the file and left running outside the terminal, so nothing can have
@@ -390,6 +400,54 @@ func deleteSavedDiffCmd(path, name string) tea.Cmd {
 	return func() tea.Msg {
 		return savedDiffDeletedMsg{path: path, name: name, err: os.Remove(path)}
 	}
+}
+
+// applyPatchCmd applies a saved patch file to the working copy rooted at dir,
+// off the UI goroutine. Nothing is changed until two questions are answered:
+// whether the patch was taken from dir at all, and whether svn says any of it
+// would land there. A patch that passes both is applied for whatever it is
+// worth — svn takes the hunks that fit and writes the rest out beside their
+// targets as .rej files. Both runs are marked as user actions, so the command
+// log shows the trial as well as the patch itself.
+func applyPatchCmd(client *svn.Client, path, name, dir string) tea.Cmd {
+	return func() tea.Msg {
+		text, err := os.ReadFile(path)
+		if err != nil {
+			return patchAppliedMsg{name: name, err: err}
+		}
+		if !svn.PatchBelongsTo(string(text), dir) {
+			return patchAppliedMsg{name: name, err: fmt.Errorf(
+				"none of the files it changes are in %s — it was taken from another directory", dir)}
+		}
+		ctx, cancel := context.WithTimeout(svn.WithUserAction(context.Background()), 60*time.Second)
+		defer cancel()
+		dry, err := client.Patch(ctx, path, true)
+		if err != nil {
+			return patchAppliedMsg{name: name, err: err}
+		}
+		if err := patchTrialErr(dry); err != nil {
+			return patchAppliedMsg{name: name, err: err}
+		}
+		res, err := client.Patch(ctx, path, false)
+		return patchAppliedMsg{name: name, res: res, err: err}
+	}
+}
+
+// patchTrialErr reads a dry run's result and returns why the patch is not worth
+// applying, or nil when any of it would land. A patch that only partly fits is
+// still worth having: svn applies the hunks it can and leaves the rest in .rej
+// files to be worked through by hand. One where nothing lands at all leaves
+// nothing but those rejects, so it is refused instead.
+func patchTrialErr(res svn.PatchResult) error {
+	switch {
+	case res.Targets() == 0:
+		return errors.New("svn found nothing in it to apply")
+	case len(res.Applied) > 0:
+		return nil
+	case len(res.Skipped) == res.Targets():
+		return fmt.Errorf("svn cannot find %s", batchLabel(len(res.Skipped), res.Skipped[0]))
+	}
+	return errors.New("not one of its changes applies here")
 }
 
 // writeDiff writes diff into dir as name, creating dir (and any missing parent)

@@ -685,6 +685,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.reloadSavedDiffs()
 
+	case patchAppliedMsg:
+		if msg.err != nil {
+			m.showToast(failureText("apply "+msg.name, msg.err), component.LevelError)
+			return m, nil
+		}
+		m.showToast(patchToast(msg.name, msg.res))
+		// The working copy now holds changes it did not a moment ago, so the diff on
+		// screen and the status behind it are both out of date.
+		m.clearDiff()
+		return m, m.reloadStatus()
+
 	case editedMsg:
 		if msg.err != nil {
 			m.showToast(failureText("open "+msg.name, msg.err), component.LevelError)
@@ -1236,6 +1247,11 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		}
 		return nil, false
 	case "p":
+		// In the Diffs view p applies the highlighted patch; everywhere else in the
+		// Files panel it means nothing, so it stays the Log panel's page-back key.
+		if m.focus.Index() == panelFiles && m.filesViewIsDiffs() {
+			return m.requestApplyPatch(), true
+		}
 		if m.focus.Index() == panelLog {
 			return m.prevLogPage(), true
 		}
@@ -3511,7 +3527,7 @@ func (m *Model) panelHints(p int) []string {
 func (m *Model) filesHints() []string {
 	switch {
 	case m.filesViewIsDiffs():
-		return []string{"e open", "d delete", "/ filter", "[ ] view"}
+		return []string{"e open", "p apply", "d delete", "/ filter", "[ ] view"}
 	case m.inChangelistDrill():
 		return []string{"space unstage", "c commit", "esc back", "[ ] view"}
 	case m.filesViewIsChangelists():
