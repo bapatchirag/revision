@@ -1,6 +1,6 @@
 ---
 title: Opening files in an editor
-description: What e does, how the editor setting resolves, and how it behaves over Remote-SSH.
+description: What e does, where in the file it lands, how the editor setting resolves, and how it behaves over Remote-SSH.
 ---
 
 import KeyCap from '../../../components/KeyCap.astro';
@@ -10,8 +10,36 @@ tree, a file inside an expanded [changelist](/workflows/changelists/), a saved p
 the [Diffs view](/workflows/diffs/#the-diffs-view), or a `.rej` in the
 [Rejects view](/workflows/diffs/#finding-rejects).
 
-Directory rows and the Changelists overview have no single file to open, so
-<KeyCap key="e" /> says so instead.
+The Changelists overview has no single file to open, so <KeyCap key="e" /> says so
+instead.
+
+## Where in the file it opens
+
+A file opens on its change rather than on line one.
+
+| Pressed from | Opens at |
+|---|---|
+| The **Files** panel | The first hunk of that file's diff. |
+| The **Diff** panel | The line under its cursor — move it with the arrow keys. |
+| The [side-by-side overlay](/workflows/diffs/#reading-a-diff-side-by-side) | The file whose page is open, at the row on screen. The overlay closes, since it holds a snapshot. |
+
+When the Diff panel has focus it marks its current line with a highlight bar: that is the
+line <KeyCap key="e" /> will land on. Jumping to a
+[search](/workflows/filtering-and-searching/) match moves the cursor onto it, so
+<KeyCap key="n" /> then <KeyCap key="e" /> opens the file at the hit.
+
+**Directory rows** work the same way through their combined diff: which file a hunk
+belongs to is written in the diff itself, so reading down a directory's changes and
+pressing <KeyCap key="e" /> opens whichever file you have reached. From the Files panel a
+directory opens the first file changed under it. A directory with
+[no diff on display](/workflows/diffs/) has nothing to place, so <KeyCap key="e" /> says
+so.
+
+The position is passed the way each editor expects it — `+42` for the vi family, `nano`
+and `emacs`, `--goto file:42` for VS Code, `file:42` for Sublime Text and Helix. The
+desktop openers (`open`, `xdg-open`) take no position, so those open the file at the top.
+
+Saved patches and `.rej` files are diffs already, so they open at the top too.
 
 ## The editor setting
 

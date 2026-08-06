@@ -16,11 +16,14 @@ import (
 // Viewport is a scrollable, read-only text area. It renders a vertical window
 // over its content and scrolls with the arrow and page keys while focused. It can
 // also highlight the lines matching a search query and jump between them without
-// removing any content.
+// removing any content, and — where the caller has something to do with a single
+// line — carry a cursor over one of them.
 type Viewport struct {
 	lines        []string
 	offset       int
 	xOffset      int
+	cursor       int
+	hasCursor    bool
 	gutter       int
 	contentWidth int
 	search       string
@@ -56,6 +59,7 @@ func (v *Viewport) SetContent(content string) {
 	v.setLines(content)
 	v.offset = 0
 	v.xOffset = 0
+	v.cursor = 0
 	v.recomputeMatches()
 	v.clampOffset()
 	v.clampXOffset()
@@ -70,7 +74,31 @@ func (v *Viewport) SetContentPreservingScroll(content string) {
 	v.recomputeMatches()
 	v.clampOffset()
 	v.clampXOffset()
+	v.clampCursor()
 }
+
+// SetCursorLine turns the line cursor on or off. With it on the viewport marks
+// one line as the current one, moves it with the scroll keys and keeps it inside
+// the window, giving the caller a line to act on; with it off the keys only
+// scroll. The cursor keeps its place across a toggle, so a redraw that re-arms it
+// does not send the reader back to the top.
+func (v *Viewport) SetCursorLine(on bool) {
+	v.hasCursor = on
+	v.clampCursor()
+}
+
+// Cursor is the index of the current line, or -1 when the viewport has no
+// cursor.
+func (v *Viewport) Cursor() int {
+	if !v.hasCursor {
+		return -1
+	}
+	return v.cursor
+}
+
+// Offset is the index of the content line drawn at the top of the visible
+// window.
+func (v *Viewport) Offset() int { return v.offset }
 
 // setLines splits content into the rendered lines and re-measures the horizontal
 // extent, leaving the scroll offsets to the caller.
@@ -184,7 +212,8 @@ func (v *Viewport) recomputeMatches() {
 	v.matchSet = set
 }
 
-// scrollToCurrent centers the current match line in the visible window.
+// scrollToCurrent centers the current match line in the visible window, taking
+// the cursor onto it so the match is also the line to act on.
 func (v *Viewport) scrollToCurrent() {
 	if v.current < 0 || v.current >= len(v.matches) {
 		return
@@ -194,7 +223,9 @@ func (v *Viewport) scrollToCurrent() {
 		innerH = 1
 	}
 	v.offset = v.matches[v.current] - innerH/2
+	v.cursor = v.matches[v.current]
 	v.clampOffset()
+	v.clampCursor()
 }
 
 // Focus implements tui.Focusable.
@@ -220,17 +251,17 @@ func (v *Viewport) Update(m tea.Msg) tea.Cmd {
 	}
 	switch {
 	case key.Matches(km, v.keys.Up):
-		v.offset--
+		v.move(-1)
 	case key.Matches(km, v.keys.Down):
-		v.offset++
+		v.move(1)
 	case key.Matches(km, v.keys.PageUp):
-		v.offset -= v.pageStep()
+		v.page(-v.pageStep())
 	case key.Matches(km, v.keys.PageDown):
-		v.offset += v.pageStep()
+		v.page(v.pageStep())
 	case key.Matches(km, v.keys.Top):
-		v.offset = 0
+		v.offset, v.cursor = 0, 0
 	case key.Matches(km, v.keys.Bottom):
-		v.offset = len(v.lines)
+		v.offset, v.cursor = len(v.lines), len(v.lines)-1
 	case key.Matches(km, v.keys.Left):
 		v.xOffset -= hScrollStep
 	case key.Matches(km, v.keys.Right):
@@ -243,8 +274,37 @@ func (v *Viewport) Update(m tea.Msg) tea.Cmd {
 		return nil
 	}
 	v.clampOffset()
+	v.clampCursor()
 	v.clampXOffset()
 	return nil
+}
+
+// move steps delta lines down the content: the cursor when there is one, which
+// the window then follows only as far as it must to keep it in sight, and the
+// window itself when there is not.
+func (v *Viewport) move(delta int) {
+	if !v.hasCursor {
+		v.offset += delta
+		return
+	}
+	v.cursor += delta
+	v.clampCursor()
+	_, innerH, _, _ := v.layout()
+	v.offset = min(v.offset, v.cursor)
+	v.offset = max(v.offset, v.cursor-max(innerH, 1)+1)
+}
+
+// page turns the window delta lines, taking the cursor along at the row it was
+// on so the reader keeps their place on screen. Clamping either end brings the
+// other back into the window, so the cursor never lands off it.
+func (v *Viewport) page(delta int) {
+	v.offset += delta
+	v.cursor += delta
+}
+
+// clampCursor keeps the cursor on a line that exists.
+func (v *Viewport) clampCursor() {
+	v.cursor = min(max(v.cursor, 0), max(len(v.lines)-1, 0))
 }
 
 // View renders the visible window padded to width×height, drawing vertical and
@@ -281,6 +341,7 @@ func (v *Viewport) View() string {
 		row := v.window(line, innerW)
 		if idx < len(v.lines) {
 			row = v.highlightMatch(idx, row, innerW)
+			row = v.highlightCursor(idx, row, innerW)
 		}
 		if vBar {
 			if i >= vStart && i < vStart+vSize {
@@ -307,6 +368,20 @@ func (v *Viewport) highlightMatch(idx int, row string, width int) string {
 	}
 	if v.current >= 0 && v.current < len(v.matches) && v.matches[v.current] == idx {
 		return lipgloss.NewStyle().Reverse(true).Render(fitLine(ansi.Strip(row), width))
+	}
+	return highlightLine(row, width, lipgloss.NewStyle().Background(v.theme.SelectionBg))
+}
+
+// highlightCursor paints the current line's bar, marking the line the caller
+// would act on. It is drawn only while focused, since the cursor moves with this
+// viewport's own keys, and it gives way to the current search match, which is
+// already unmistakable.
+func (v *Viewport) highlightCursor(idx int, row string, width int) string {
+	if !v.hasCursor || !v.focused || idx != v.cursor {
+		return row
+	}
+	if v.current >= 0 && v.current < len(v.matches) && v.matches[v.current] == idx {
+		return row
 	}
 	return highlightLine(row, width, lipgloss.NewStyle().Background(v.theme.SelectionBg))
 }
