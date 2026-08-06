@@ -1,0 +1,24 @@
+╭─ [1] Status ─────────────────╮╭─ [0] Diff ───────────────────────────────────╮
+│Root      /home/alice/work/wc ││conflict — press m to resolve it side by side │
+│S╭─ Resolve conflict — src/a.go · 1 of 1 undecided ─────────────────────────╮ │
+│C│1   mine                            │2   r42                              │ │
+│B│────────────────────────────────────┼─────────────────────────────────────│ │
+│R│  1  package main                   │  1  package main                    │ │
+│ │  2                                 │  2                                  │ │
+╰─│  3  func main() {                  │  3  func main() {                   │ │
+╭─│  5      greet("world")             │  5      hello("world")              │ │
+│ │ 11  }                              │ 11  }                               │ │
+│ │                                    │                                     │ │
+│>│                                    │                                     │ │
+│ │                                    │                                     │ │
+│ │                                    │                                     │ │
+╰─│                                    │                                     │ │
+╭─│                                    │                                     │ │
+│ │                                    │                                     │─╯
+│ │                                    │                                     │─╮
+│ │                                    │                                     │ │
+│ │                                    │                                     │ │
+│ │                                    │                                     │ │
+│ ╰───── line 5 · 1-5 of 5 · 1/2/3 pick · 0 clear · [ ] next · esc close ────╯ │
+╰──────────────────────────────╯╰──────────────────────────────────────────────╯
+space stage · n changelist · c commit · r revert · d delete · [ ] view · ? help 

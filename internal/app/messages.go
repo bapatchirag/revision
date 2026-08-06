@@ -166,6 +166,26 @@ type patchAppliedMsg struct {
 	err  error
 }
 
+// mergeLoadedMsg carries a file read for resolution — a conflicted file, or a
+// reject paired with the file it was written for — as the decisions it needs.
+// rel names the file on screen, so a read that failed can still be reported.
+type mergeLoadedMsg struct {
+	doc *mergeDoc
+	rel string
+	err error
+}
+
+// mergeWrittenMsg carries the result of writing a resolved file back out and
+// clearing what marked it as needing resolution: `svn resolve` for a conflict,
+// removing the reject for a reject. aux is the reject that was cleared.
+type mergeWrittenMsg struct {
+	kind  mergeKind
+	rel   string
+	aux   string
+	count int
+	err   error
+}
+
 // editedMsg carries the result of opening a file in the configured editor. name
 // is the file as it is shown on screen. detached is true when the editor was
 // handed the file and left running outside the terminal, so nothing can have
@@ -502,6 +522,65 @@ func patchTrialErr(res svn.PatchResult) error {
 		return fmt.Errorf("svn cannot find %s", batchLabel(len(res.Skipped), res.Skipped[0]))
 	}
 	return errors.New("not one of its changes applies here")
+}
+
+// loadConflictCmd reads a conflicted file off the UI goroutine and breaks it
+// into the decisions its markers describe. The file is read rather than taken
+// from anything already on screen, so what is resolved is the file as it stands.
+func loadConflictCmd(path, rel string) tea.Cmd {
+	return func() tea.Msg {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return mergeLoadedMsg{rel: rel, err: err}
+		}
+		return mergeLoadedMsg{doc: conflictDoc(path, rel, string(b)), rel: rel}
+	}
+}
+
+// loadRejectMergeCmd reads a reject and the file it was written for off the UI
+// goroutine, and works out which of its hunks still have somewhere to go. A
+// reject whose target has since been deleted has nothing to resolve against.
+func loadRejectMergeCmd(rejPath, rejRel string) tea.Cmd {
+	targetPath, targetRel := rejectTarget(rejPath), rejectTarget(rejRel)
+	return func() tea.Msg {
+		rej, err := os.ReadFile(rejPath)
+		if err != nil {
+			return mergeLoadedMsg{rel: rejRel, err: err}
+		}
+		target, err := os.ReadFile(targetPath)
+		if err != nil {
+			return mergeLoadedMsg{rel: targetRel, err: err}
+		}
+		return mergeLoadedMsg{
+			doc: rejectDoc(rejPath, targetRel, string(rej), targetPath, string(target)),
+			rel: targetRel,
+		}
+	}
+}
+
+// writeMergeCmd writes a resolved file back out off the UI goroutine and then
+// clears what marked it as needing resolution: `svn resolve --accept working`
+// for a conflict, which takes the file as it now stands and drops the artifacts
+// beside it, or removing the reject whose hunks have just been dealt with. The
+// resolve is marked as a user action, so it shows up in the command log.
+func writeMergeCmd(client *svn.Client, d *mergeDoc) tea.Cmd {
+	kind, path, rel, aux := d.kind, d.path, d.rel, d.aux
+	text, count := d.merged(), len(d.regions)
+	return func() tea.Msg {
+		done := mergeWrittenMsg{kind: kind, rel: rel, aux: aux, count: count}
+		if err := os.WriteFile(path, []byte(text), diffFilePerm); err != nil {
+			done.err = err
+			return done
+		}
+		if kind == mergeReject {
+			done.err = os.Remove(aux)
+			return done
+		}
+		ctx, cancel := context.WithTimeout(svn.WithUserAction(context.Background()), 30*time.Second)
+		defer cancel()
+		done.err = client.Resolve(ctx, path)
+		return done
+	}
 }
 
 // writeDiff writes diff into dir as name, creating dir (and any missing parent)

@@ -41,6 +41,7 @@ SVN's command line is powerful but verbose for day-to-day work. `revision` wraps
 - **Staging** built on a native SVN changelist — `space` stages a file or a whole subtree, `c` commits the set through an inline message editor
 - **Named changelists** — group the staged set into real SVN changelists, drill into one in a tabbed view, and commit it on its own
 - **Update** to HEAD with `u`, or to any revision picked in the Log panel — conflicts are spelled out before you confirm
+- **Resolve conflicts side by side** with `m` — each conflict, or each hunk a patch could not place, laid out two panes wide with a key to take either side, both, or your editor
 - **Add, revert and delete** a single file or every change beneath a directory, with confirmation prompts
 - **Instant staging** — the row restyles on the keypress while `svn` confirms behind it, and a failure puts the previous state back; revert, delete and commit mark their rows as in flight rather than claiming a success they do not have yet
 - **Live refresh** — an edit made outside `revision` reaches the Files and diff panels on its own, with the cursor and scroll where you left them; `L` turns the watcher off
