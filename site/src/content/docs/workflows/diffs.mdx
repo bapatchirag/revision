@@ -154,9 +154,9 @@ in the Changes view — the [Rejects view](#finding-rejects) is where you read t
 ## Finding rejects
 
 <KeyCap key="]" /> once more from the Diffs view opens **Rejects**: every `.rej` file
-beneath the [source path](/workflows/source-path/), as a tree. The search is recursive,
-because a reject lands beside the file it failed to patch rather than in one directory;
-`.svn` is skipped. Directories nest exactly as they do in the Changes view, and
+beneath the [source path](/guides/panels/#changing-the-source-path), as a tree. The search
+is recursive, because a reject lands beside the file it failed to patch rather than in one
+directory; `.svn` is skipped. Directories nest exactly as they do in the Changes view, and
 <KeyCap key="enter" /> folds one shut.
 
 Selecting a reject shows its hunks in Main, where <KeyCap key="/" />
@@ -170,9 +170,9 @@ it, after applying a patch, and after the source path changes — never while an
 is on screen.
 
 :::note
-A patch is applied in the [source path](/workflows/source-path/), which is not necessarily
-where saved diffs are written. Save a diff from the working copy's root and it applies
-there, not inside a subdirectory you have since scoped to.
+A patch is applied in the [source path](/guides/panels/#changing-the-source-path), which is
+not necessarily where saved diffs are written. Save a diff from the working copy's root and
+it applies there, not inside a subdirectory you have since scoped to.
 :::
 
 ## Searching inside a diff
