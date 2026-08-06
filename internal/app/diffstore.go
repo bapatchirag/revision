@@ -11,6 +11,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/bapatchirag/revision/internal/svn"
+	"github.com/bapatchirag/revision/internal/tui/component"
 	"github.com/bapatchirag/revision/internal/tui/theme"
 )
 
@@ -131,6 +133,78 @@ func (m *Model) savedDiffLoadForSelection() tea.Cmd {
 		return nil
 	}
 	return m.readSavedDiff(d.Path)
+}
+
+// requestDeleteSavedDiff asks to remove the highlighted patch file from the diff
+// output directory, opening a confirmation modal. This is the Diffs view's
+// answer to the Changes tree's delete: the store is files on disk, so nothing is
+// scheduled and nothing can put the file back.
+func (m *Model) requestDeleteSavedDiff() tea.Cmd {
+	d, ok := m.savedDiffs.Selected()
+	if !ok {
+		m.showToast("no saved diff to delete", component.LevelWarning)
+		return nil
+	}
+	m.confirmAction(deleteSavedDiffCmd(d.Path, d.Name), nil)
+	m.openConfirm("Delete saved diff?",
+		"Permanently delete "+d.Name+" from "+m.diffDir()+"? This cannot be undone.")
+	return nil
+}
+
+// requestApplyPatch asks to apply the highlighted patch file to the working
+// copy, opening a confirmation modal. Nothing is held pending: a patch lands on
+// files spread across the tree, most of which the Changes view is not even
+// showing, so the status reload that follows is what says where it went.
+func (m *Model) requestApplyPatch() tea.Cmd {
+	d, ok := m.savedDiffs.Selected()
+	if !ok {
+		m.showToast("no saved diff to apply", component.LevelWarning)
+		return nil
+	}
+	root := m.patchRoot()
+	m.confirmAction(applyPatchCmd(m.client, d.Path, d.Name, root), nil)
+	m.openConfirm("Apply patch?",
+		"Apply "+d.Name+" to "+root+"? Its changes are merged into the working copy as local "+
+			"modifications, and any hunk that does not fit is left beside its file in a .rej.")
+	return nil
+}
+
+// patchRoot is the directory a patch is applied in: the one the svn client is
+// rooted at, which is the source path revision is showing. Note that this need
+// not be the directory saved diffs are written to (diffDir), which is the
+// working copy's root.
+func (m *Model) patchRoot() string {
+	if m.client != nil && m.client.Dir != "" {
+		return m.client.Dir
+	}
+	return m.workDir
+}
+
+// patchToast describes a finished patch run: the files svn changed, and the ones
+// it could not place. A target left in conflict took the hunks that fit and has
+// the rest written out beside it in a .svnpatch.rej file, which svn ignores and
+// so never shows in the Files panel — leaving this the only announcement of it.
+func patchToast(name string, res svn.PatchResult) (string, component.Level) {
+	text := "applied " + name + " to " + fileCount(len(res.Applied))
+	var left []string
+	if n := len(res.Conflicted); n > 0 {
+		left = append(left, fmt.Sprintf("%d with rejects (.rej)", n))
+	}
+	if n := len(res.Skipped); n > 0 {
+		left = append(left, fmt.Sprintf("%d not found", n))
+	}
+	if len(left) == 0 {
+		return text, component.LevelSuccess
+	}
+	return text + ", " + strings.Join(left, ", "), component.LevelWarning
+}
+
+// fileCount renders a file count for a toast, with the right plural.
+func fileCount(n int) string {
+	if n == 1 {
+		return "1 file"
+	}
+	return fmt.Sprintf("%d files", n)
 }
 
 // savedDiffDetail renders the highlighted saved patch file in Main, with a

@@ -112,6 +112,15 @@ type savedDiffsLoadedMsg struct {
 	gen   uint64
 }
 
+// savedDiffDeletedMsg carries the result of removing a saved patch file from the
+// diff output directory, along with the file it was asked to remove: path to
+// match against the contents on screen, name to report.
+type savedDiffDeletedMsg struct {
+	path string
+	name string
+	err  error
+}
+
 // savedDiffReadMsg carries the contents of a saved patch file, keyed by the path
 // it was read from so the current selection can match it.
 type savedDiffReadMsg struct {
@@ -119,6 +128,42 @@ type savedDiffReadMsg struct {
 	text string
 	err  error
 	gen  uint64
+}
+
+// rejectsLoadedMsg carries the reject files found beneath the source path, for
+// the Files panel's Rejects view.
+type rejectsLoadedMsg struct {
+	files []rejectFile
+	err   error
+	gen   uint64
+}
+
+// rejectDeletedMsg carries the result of removing a reject file, along with the
+// file it was asked to remove: path to match against the contents on screen,
+// name to report.
+type rejectDeletedMsg struct {
+	path string
+	name string
+	err  error
+}
+
+// rejectReadMsg carries the contents of a reject file, keyed by the path it was
+// read from so the current selection can match it.
+type rejectReadMsg struct {
+	path string
+	text string
+	err  error
+	gen  uint64
+}
+
+// patchAppliedMsg carries the result of applying a saved patch file to the
+// working copy, named as the Diffs view shows it. res describes what svn did
+// with the patch's targets; it is empty when the patch was refused before it
+// could be applied.
+type patchAppliedMsg struct {
+	name string
+	res  svn.PatchResult
+	err  error
 }
 
 // editedMsg carries the result of opening a file in the configured editor. name
@@ -372,6 +417,91 @@ func readSavedDiffCmd(path string, gen uint64) tea.Cmd {
 		b, err := os.ReadFile(path)
 		return savedDiffReadMsg{path: path, text: string(b), err: err, gen: gen}
 	}
+}
+
+// deleteSavedDiffCmd removes a saved patch file from the diff output directory
+// off the UI goroutine. The store is plain files on disk, not working-copy
+// state, so this is an os.Remove rather than anything svn knows about.
+func deleteSavedDiffCmd(path, name string) tea.Cmd {
+	return func() tea.Msg {
+		return savedDiffDeletedMsg{path: path, name: name, err: os.Remove(path)}
+	}
+}
+
+// loadRejectsCmd walks dir for the rejects a patch left behind, off the UI
+// goroutine, for the Rejects view to browse.
+func loadRejectsCmd(dir string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		files, err := scanRejects(dir)
+		return rejectsLoadedMsg{files: files, err: err, gen: gen}
+	}
+}
+
+// readRejectCmd reads a reject file off the UI goroutine so it can be shown in
+// Main. A read failure is carried on the message rather than promoted to a fatal
+// error, so an unreadable file never tears down the UI.
+func readRejectCmd(path string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		b, err := os.ReadFile(path)
+		return rejectReadMsg{path: path, text: string(b), err: err, gen: gen}
+	}
+}
+
+// deleteRejectCmd removes a reject file off the UI goroutine. svn ignores
+// rejects, so like the saved-diff store this is an os.Remove rather than
+// anything svn knows about.
+func deleteRejectCmd(path, name string) tea.Cmd {
+	return func() tea.Msg {
+		return rejectDeletedMsg{path: path, name: name, err: os.Remove(path)}
+	}
+}
+
+// applyPatchCmd applies a saved patch file to the working copy rooted at dir,
+// off the UI goroutine. Nothing is changed until two questions are answered:
+// whether the patch was taken from dir at all, and whether svn says any of it
+// would land there. A patch that passes both is applied for whatever it is
+// worth — svn takes the hunks that fit and writes the rest out beside their
+// targets as .rej files. Both runs are marked as user actions, so the command
+// log shows the trial as well as the patch itself.
+func applyPatchCmd(client *svn.Client, path, name, dir string) tea.Cmd {
+	return func() tea.Msg {
+		text, err := os.ReadFile(path)
+		if err != nil {
+			return patchAppliedMsg{name: name, err: err}
+		}
+		if !svn.PatchBelongsTo(string(text), dir) {
+			return patchAppliedMsg{name: name, err: fmt.Errorf(
+				"none of the files it changes are in %s — it was taken from another directory", dir)}
+		}
+		ctx, cancel := context.WithTimeout(svn.WithUserAction(context.Background()), 60*time.Second)
+		defer cancel()
+		dry, err := client.Patch(ctx, path, true)
+		if err != nil {
+			return patchAppliedMsg{name: name, err: err}
+		}
+		if err := patchTrialErr(dry); err != nil {
+			return patchAppliedMsg{name: name, err: err}
+		}
+		res, err := client.Patch(ctx, path, false)
+		return patchAppliedMsg{name: name, res: res, err: err}
+	}
+}
+
+// patchTrialErr reads a dry run's result and returns why the patch is not worth
+// applying, or nil when any of it would land. A patch that only partly fits is
+// still worth having: svn applies the hunks it can and leaves the rest in .rej
+// files to be worked through by hand. One where nothing lands at all leaves
+// nothing but those rejects, so it is refused instead.
+func patchTrialErr(res svn.PatchResult) error {
+	switch {
+	case res.Targets() == 0:
+		return errors.New("svn found nothing in it to apply")
+	case len(res.Applied) > 0:
+		return nil
+	case len(res.Skipped) == res.Targets():
+		return fmt.Errorf("svn cannot find %s", batchLabel(len(res.Skipped), res.Skipped[0]))
+	}
+	return errors.New("not one of its changes applies here")
 }
 
 // writeDiff writes diff into dir as name, creating dir (and any missing parent)
