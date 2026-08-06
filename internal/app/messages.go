@@ -112,6 +112,15 @@ type savedDiffsLoadedMsg struct {
 	gen   uint64
 }
 
+// savedDiffDeletedMsg carries the result of removing a saved patch file from the
+// diff output directory, along with the file it was asked to remove: path to
+// match against the contents on screen, name to report.
+type savedDiffDeletedMsg struct {
+	path string
+	name string
+	err  error
+}
+
 // savedDiffReadMsg carries the contents of a saved patch file, keyed by the path
 // it was read from so the current selection can match it.
 type savedDiffReadMsg struct {
@@ -371,6 +380,15 @@ func readSavedDiffCmd(path string, gen uint64) tea.Cmd {
 	return func() tea.Msg {
 		b, err := os.ReadFile(path)
 		return savedDiffReadMsg{path: path, text: string(b), err: err, gen: gen}
+	}
+}
+
+// deleteSavedDiffCmd removes a saved patch file from the diff output directory
+// off the UI goroutine. The store is plain files on disk, not working-copy
+// state, so this is an os.Remove rather than anything svn knows about.
+func deleteSavedDiffCmd(path, name string) tea.Cmd {
+	return func() tea.Msg {
+		return savedDiffDeletedMsg{path: path, name: name, err: os.Remove(path)}
 	}
 }
 

@@ -672,6 +672,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case savedDiffDeletedMsg:
+		if msg.err != nil {
+			m.showToast(failureText("delete "+msg.name, msg.err), component.LevelError)
+			return m, nil
+		}
+		m.showToast("deleted "+msg.name, component.LevelSuccess)
+		if m.savedPath == msg.path {
+			// Main is showing the file that just went away; drop it so the re-scan
+			// reads whatever the list settles on.
+			m.savedPath, m.savedText, m.savedErr = "", "", false
+		}
+		return m, m.reloadSavedDiffs()
+
 	case editedMsg:
 		if msg.err != nil {
 			m.showToast(failureText("open "+msg.name, msg.err), component.LevelError)
@@ -1788,11 +1801,15 @@ func directoryRevertPaths(n fileNode, items []svn.StatusItem) []string {
 }
 
 // requestDelete asks to remove the current selection, opening a confirmation
-// modal. On a directory row it removes every deletable file beneath it; on a file
-// leaf a versioned file is scheduled for deletion, an unversioned one is removed
-// from disk, and ignored files are left alone. A row already waiting on svn is
-// left alone too.
+// modal. In the Diffs view it removes the highlighted patch file from disk; on a
+// directory row it removes every deletable file beneath it; on a file leaf a
+// versioned file is scheduled for deletion, an unversioned one is removed from
+// disk, and ignored files are left alone. A row already waiting on svn is left
+// alone too.
 func (m *Model) requestDelete() tea.Cmd {
+	if m.filesViewIsDiffs() {
+		return m.requestDeleteSavedDiff()
+	}
 	if n, items, ok := m.selectedDirectory(); ok {
 		return m.requestDeleteDirectory(n, m.withoutPending(items))
 	}
@@ -3494,7 +3511,7 @@ func (m *Model) panelHints(p int) []string {
 func (m *Model) filesHints() []string {
 	switch {
 	case m.filesViewIsDiffs():
-		return []string{"e open", "/ filter", "[ ] view"}
+		return []string{"e open", "d delete", "/ filter", "[ ] view"}
 	case m.inChangelistDrill():
 		return []string{"space unstage", "c commit", "esc back", "[ ] view"}
 	case m.filesViewIsChangelists():

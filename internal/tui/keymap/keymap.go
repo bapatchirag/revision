@@ -156,7 +156,7 @@ func HelpSections() []Section {
 			},
 			{
 				Action: "Revert / delete file", Keys: []string{"r", "d"}, Context: "Files",
-				Description: "Revert or delete the selected file, or everything under the selected directory. Both ask for confirmation.",
+				Description: "Revert or delete the selected file, or everything under the selected directory. In the Diffs view `d` deletes the highlighted patch file from `diffOutputDir` instead. All ask for confirmation.",
 			},
 		}},
 		{Title: "Working copy", Bindings: []Binding{

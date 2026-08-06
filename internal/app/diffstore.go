@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/bapatchirag/revision/internal/tui/component"
 	"github.com/bapatchirag/revision/internal/tui/theme"
 )
 
@@ -131,6 +132,22 @@ func (m *Model) savedDiffLoadForSelection() tea.Cmd {
 		return nil
 	}
 	return m.readSavedDiff(d.Path)
+}
+
+// requestDeleteSavedDiff asks to remove the highlighted patch file from the diff
+// output directory, opening a confirmation modal. This is the Diffs view's
+// answer to the Changes tree's delete: the store is files on disk, so nothing is
+// scheduled and nothing can put the file back.
+func (m *Model) requestDeleteSavedDiff() tea.Cmd {
+	d, ok := m.savedDiffs.Selected()
+	if !ok {
+		m.showToast("no saved diff to delete", component.LevelWarning)
+		return nil
+	}
+	m.confirmAction(deleteSavedDiffCmd(d.Path, d.Name), nil)
+	m.openConfirm("Delete saved diff?",
+		"Permanently delete "+d.Name+" from "+m.diffDir()+"? This cannot be undone.")
+	return nil
 }
 
 // savedDiffDetail renders the highlighted saved patch file in Main, with a

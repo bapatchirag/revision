@@ -43,7 +43,7 @@
       "d"
     ],
     "context": "Files",
-    "description": "Revert or delete the selected file, or everything under the selected directory. Both ask for confirmation."
+    "description": "Revert or delete the selected file, or everything under the selected directory. In the Diffs view `d` deletes the highlighted patch file from `diffOutputDir` instead. All ask for confirmation."
   },
   {
     "section": "Working copy",

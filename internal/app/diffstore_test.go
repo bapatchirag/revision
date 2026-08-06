@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/bapatchirag/revision/internal/config"
+	"github.com/bapatchirag/revision/internal/svn"
 )
 
 // writeDiffStore fills dir with the named files, stamping each one a minute
@@ -170,5 +171,60 @@ func TestSaveDiffRefusedInDiffsView(t *testing.T) {
 	m = next.(*Model)
 	if m.savingDiff {
 		t.Error("the save-diff prompt should not open over a file that is already saved")
+	}
+}
+
+func TestDeleteSavedDiffRemovesFileFromStore(t *testing.T) {
+	m, dir := diffStoreModel(t, "alpha.diff", "beta.diff")
+	m = showDiffsView(t, m)
+
+	// beta.diff is newest, so it opens highlighted.
+	m, cmd := requestAndConfirm(t, m, 'd')
+	if cmd == nil {
+		t.Fatal("confirming the prompt should emit the delete command")
+	}
+	next, cmd := m.Update(cmd())
+	m = next.(*Model)
+	if _, err := os.Stat(filepath.Join(dir, "beta.diff")); !os.IsNotExist(err) {
+		t.Errorf("beta.diff should be gone from the store, stat err = %v", err)
+	}
+	if cmd == nil {
+		t.Fatal("a successful delete should re-scan the store")
+	}
+	next, _ = m.Update(cmd())
+	m = next.(*Model)
+
+	if got := len(m.savedDiffs.Items()); got != 1 {
+		t.Fatalf("the Diffs view lists %d patches, want 1", got)
+	}
+	if d, _ := m.savedDiffs.Selected(); d.Name != "alpha.diff" {
+		t.Errorf("selected diff = %q, want alpha.diff", d.Name)
+	}
+}
+
+func TestDeleteSavedDiffLeavesWorkingCopyAlone(t *testing.T) {
+	m, _ := diffStoreModel(t, "alpha.diff")
+	m = loadItems(t, m, []svn.StatusItem{{Path: "src/a.go", State: svn.StateModified}})
+	m = showDiffsView(t, m)
+
+	m, _ = pressRune(t, m, 'd')
+	if !m.confirming {
+		t.Fatal("d in the Diffs view should ask before deleting")
+	}
+	if !strings.Contains(stripANSI(m.View()), "alpha.diff") {
+		t.Errorf("the prompt should name the patch file, got:\n%s", stripANSI(m.View()))
+	}
+}
+
+func TestDeleteSavedDiffOnEmptyStoreWarns(t *testing.T) {
+	m, _ := diffStoreModel(t)
+	m = showDiffsView(t, m)
+
+	m, _ = pressRune(t, m, 'd')
+	if m.confirming {
+		t.Fatal("an empty store has nothing to confirm deleting")
+	}
+	if !strings.Contains(stripANSI(m.View()), "no saved diff to delete") {
+		t.Errorf("an empty store should warn, got:\n%s", stripANSI(m.View()))
 	}
 }
