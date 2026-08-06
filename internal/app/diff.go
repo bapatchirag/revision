@@ -171,6 +171,55 @@ func diffSaveName(entered, fallback string) string {
 	return name
 }
 
+// diffTargetAt maps row idx of a unified diff onto the file and line it points
+// at: the path of the "Index:" block the row falls in, and the line it stands
+// for in that file's modified version. A context or added row stands for a line
+// of its own; a hunk header, a removal or a "\ No newline" note has none, so it
+// resolves to where its hunk sits. Rows outside any hunk — the "Index:" block
+// and the file markers — are skipped over, so an idx landing on one resolves to
+// the start of the hunk that follows, and an idx past the last hunk falls back to
+// the furthest the diff reached. It is the counterpart of colorizeDiff and
+// splitDiffPages: the same unified-diff structure, read for a position instead of
+// colors or columns. A combined diff is what makes the path worth reporting —
+// which file a row belongs to is only in the diff itself. A diff with no hunk at
+// all yields line 0, meaning "open at the top".
+func diffTargetAt(diff string, idx int) (path string, line int) {
+	if idx < 0 {
+		idx = 0
+	}
+	var file, lastFile string
+	var cur, last int
+	for i, ln := range strings.Split(diff, "\n") {
+		switch {
+		case strings.HasPrefix(ln, "Index:"):
+			file, cur = strings.TrimSpace(ln[len("Index:"):]), 0
+			continue
+		case strings.HasPrefix(ln, "@@"):
+			_, after, ok := parseHunkHeader(ln)
+			if !ok {
+				cur = 0
+				continue
+			}
+			cur = after.start
+		case cur == 0:
+			// Before the first hunk of a file: nothing to point at. Inside one the
+			// marker prefixes are ambiguous — a removed line beginning "--" reads as
+			// a "---" header — so only "Index:" ends a hunk.
+			continue
+		}
+		if i >= idx {
+			return file, cur
+		}
+		lastFile, last = file, cur
+		// A hunk header and a removed line take up no room in the modified file,
+		// and "\ No newline at end of file" annotates the row above it.
+		if !strings.HasPrefix(ln, "@@") && !strings.HasPrefix(ln, "-") && !strings.HasPrefix(ln, `\`) {
+			cur++
+		}
+	}
+	return lastFile, last
+}
+
 // colorize is colorizeDiff memoized over the session. Main is rebuilt on every
 // filter keystroke, focus change and reload, and re-styling a large patch line
 // by line dominates that work; the theme is part of the key, so a switch of

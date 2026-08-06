@@ -21,11 +21,14 @@ const splitChromeRows = 2
 
 // SplitRow is one row of a SplitView: the text of its left and right panes,
 // which the caller has already paired. A row with Span set draws Left across the
-// full width instead, for a heading that belongs to neither pane.
+// full width instead, for a heading that belongs to neither pane. Line is where
+// the row sits in the source the page was built from, for a caller that acts on
+// a position rather than the text; 0 means it has none.
 type SplitRow struct {
 	Left  string
 	Right string
 	Span  bool
+	Line  int
 }
 
 // SplitPage is one page of a SplitView: a titled body of paired rows. Pages are
@@ -94,6 +97,16 @@ func (s *SplitView) SetPages(pages []SplitPage) {
 
 // Pages is how many pages the content is divided into.
 func (s *SplitView) Pages() int { return len(s.pages) }
+
+// Current is what the reader is looking at: the open page's title and the row at
+// the top of its visible window. ok is false while there is nothing on screen.
+func (s *SplitView) Current() (title string, row SplitRow, ok bool) {
+	rows := s.rows()
+	if len(rows) == 0 {
+		return "", SplitRow{}, false
+	}
+	return s.pages[s.page].Title, rows[min(s.offset, len(rows)-1)], true
+}
 
 // rows are the current page's rows.
 func (s *SplitView) rows() []SplitRow {

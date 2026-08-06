@@ -174,7 +174,7 @@ func HelpSections() []Section {
 			},
 			{
 				Action: "Open file in editor", Keys: []string{"e"}, Context: "Files",
-				Description: "Open the highlighted file in the configured editor.",
+				Description: "Open the highlighted file in the configured editor, positioned on its first changed hunk. Pressed with the Diff panel focused it opens on the line under the cursor instead, so the editor picks up where the eye left off — which is also how a file is picked out of a directory's combined diff. It works from the side-by-side view too, on the file whose page is open.",
 			},
 			{
 				Action: "Change source path", Keys: []string{"P"}, Context: "Global",

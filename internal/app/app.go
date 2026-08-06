@@ -1086,6 +1086,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.closeSplitDiff()
 				return m, nil
 			}
+			// Editing is the one action reaching through: the overlay holds a
+			// snapshot, so it steps aside rather than sit over a file being changed.
+			if key.Matches(msg, m.keys.OpenEditor) {
+				if cmd := m.openInEditor(); cmd != nil {
+					m.closeSplitDiff()
+					return m, cmd
+				}
+				return m, nil
+			}
 			return m, m.splitDiff.Update(msg)
 		}
 		if m.filtering {
@@ -3341,9 +3350,11 @@ func (m *Model) headRevision() string { return m.headRev }
 // selection starts back at the top.
 func (m *Model) updateMain() {
 	// Only a unified diff carries the one-column +/-/space marker that must stay
-	// pinned while the body scrolls horizontally; mainContent sets the gutter for
-	// that case, and this baseline clears it for every other view.
+	// pinned while the body scrolls horizontally, and only a diff has lines worth
+	// pointing at; mainContent turns both on for that case, and this baseline
+	// clears them for every other view.
 	m.main.SetGutter(0)
+	m.main.SetCursorLine(false)
 	content := m.mainContent()
 	key := m.mainSelectionKey()
 	switch {
@@ -3384,7 +3395,7 @@ func (m *Model) mainSelectionKey() string {
 }
 
 // mainContent computes the raw Main text for the current state, setting the diff
-// gutter as a side effect when it renders a unified diff.
+// gutter and line cursor as a side effect when it renders a unified diff.
 func (m *Model) mainContent() string {
 	if m.source == sourceStatus {
 		return m.statusDetail()
@@ -3404,6 +3415,7 @@ func (m *Model) mainContent() string {
 	}
 	if m.filesShowDiff() {
 		m.main.SetGutter(1)
+		m.main.SetCursorLine(true)
 	}
 	return m.filesMain()
 }
