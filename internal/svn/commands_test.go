@@ -1,0 +1,233 @@
+package svn
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// stubClient returns a Client whose svn binary is a shell script that records
+// every argument list it was invoked with, prints out on stdout, and exits with
+// code. It lets the thin command wrappers be checked for the argv they build
+// without Subversion being installed.
+func stubClient(t *testing.T, out string, code int) (*Client, func() []string) {
+	t.Helper()
+	dir := t.TempDir()
+	body := filepath.Join(dir, "stdout.txt")
+	if err := os.WriteFile(body, []byte(out), 0o644); err != nil {
+		t.Fatalf("write stub output: %v", err)
+	}
+	argv := filepath.Join(dir, "argv.txt")
+	bin := filepath.Join(dir, "svn-stub")
+	script := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %s\ncat %s\nexit %d\n", argv, body, code)
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub binary: %v", err)
+	}
+	calls := func() []string {
+		b, err := os.ReadFile(argv)
+		if err != nil {
+			return nil
+		}
+		return strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
+	}
+	return &Client{Dir: dir, Bin: bin}, calls
+}
+
+func TestBinaryFallsBackToTheDefault(t *testing.T) {
+	if got := (&Client{}).binary(); got != DefaultBinary {
+		t.Errorf("binary() = %q, want %q when Bin is unset", got, DefaultBinary)
+	}
+	if got := (&Client{Bin: "/opt/svn"}).binary(); got != "/opt/svn" {
+		t.Errorf("binary() = %q, want the configured path", got)
+	}
+}
+
+func TestWithUserActionRidesOnTheRecord(t *testing.T) {
+	c, _ := stubClient(t, "", 0)
+	var got []CommandRecord
+	c.Recorder = func(r CommandRecord) { got = append(got, r) }
+
+	if err := c.Revert(context.Background(), "a.txt"); err != nil {
+		t.Fatalf("Revert: %v", err)
+	}
+	if err := c.Revert(WithUserAction(context.Background()), "a.txt"); err != nil {
+		t.Fatalf("Revert (user action): %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("recorded %d commands, want 2", len(got))
+	}
+	if got[0].UserAction {
+		t.Error("a plain context must not mark the record as a user action")
+	}
+	if !got[1].UserAction {
+		t.Error("WithUserAction must mark the record as a user action")
+	}
+	if got[0].Subcommand != "revert" {
+		t.Errorf("Subcommand = %q, want the svn subcommand", got[0].Subcommand)
+	}
+}
+
+// TestCommandWrappersBuildTheirArgv pins the argv each thin wrapper produces,
+// which is the whole of what these one-line commands do.
+func TestCommandWrappersBuildTheirArgv(t *testing.T) {
+	cases := map[string]struct {
+		call func(*Client) error
+		want string
+	}{
+		"add": {
+			func(c *Client) error { return c.Add(context.Background(), "a.txt") },
+			"add a.txt --non-interactive",
+		},
+		"add to changelist": {
+			func(c *Client) error { return c.AddToChangelist(context.Background(), "feature", "a.txt") },
+			"changelist feature a.txt --non-interactive",
+		},
+		"remove from changelist": {
+			func(c *Client) error { return c.RemoveFromChangelist(context.Background(), "a.txt") },
+			"changelist --remove a.txt --non-interactive",
+		},
+		"delete": {
+			func(c *Client) error { return c.Delete(context.Background(), "a.txt") },
+			"delete --force a.txt --non-interactive",
+		},
+		"revert": {
+			func(c *Client) error { return c.Revert(context.Background(), "a.txt") },
+			"revert a.txt --non-interactive",
+		},
+		"resolve": {
+			func(c *Client) error { return c.Resolve(context.Background(), "a.txt") },
+			"resolve --accept working a.txt --non-interactive",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			c, calls := stubClient(t, "", 0)
+			if err := tc.call(c); err != nil {
+				t.Fatalf("call: %v", err)
+			}
+			if got := calls(); len(got) != 1 || got[0] != tc.want {
+				t.Errorf("argv = %q, want %q", got, tc.want)
+			}
+
+			bad, _ := stubClient(t, "", 1)
+			if err := tc.call(bad); err == nil {
+				t.Error("a command svn refused must return an error")
+			}
+		})
+	}
+}
+
+func TestRemoveUnversionedResolvesAgainstTheWorkingCopy(t *testing.T) {
+	c, _ := stubClient(t, "", 0)
+	path := filepath.Join(c.Dir, "junk", "a.txt")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.RemoveUnversioned("junk"); err != nil {
+		t.Fatalf("RemoveUnversioned: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Dir, "junk")); !os.IsNotExist(err) {
+		t.Error("the unversioned tree should be gone from disk")
+	}
+}
+
+func TestDiffOmitsAnEmptyPath(t *testing.T) {
+	const patch = "Index: a.txt\n@@ -1 +1 @@\n-old\n+new\n"
+
+	c, calls := stubClient(t, patch, 0)
+	got, err := c.Diff(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if got != patch {
+		t.Errorf("Diff = %q, want svn's output verbatim", got)
+	}
+	if argv := calls(); len(argv) != 1 || argv[0] != "diff --non-interactive" {
+		t.Errorf("argv = %q, want the whole working copy diffed", argv)
+	}
+
+	c, calls = stubClient(t, patch, 0)
+	if _, err := c.Diff(context.Background(), "a.txt"); err != nil {
+		t.Fatalf("Diff(path): %v", err)
+	}
+	if argv := calls(); len(argv) != 1 || argv[0] != "diff a.txt --non-interactive" {
+		t.Errorf("argv = %q, want the named path diffed", argv)
+	}
+
+	bad, _ := stubClient(t, "", 1)
+	if _, err := bad.Diff(context.Background(), "a.txt"); err == nil {
+		t.Error("a diff svn refused must return an error")
+	}
+}
+
+func TestDiffPaths(t *testing.T) {
+	const patch = "Index: a.txt\n@@ -1 +1 @@\n-old\n+new\n"
+
+	cases := map[string]struct {
+		paths []string
+		want  string
+	}{
+		"none":   {nil, "diff --non-interactive"},
+		"single": {[]string{"a.txt"}, "diff a.txt --non-interactive"},
+		"many":   {[]string{"a.txt", "sub/b.txt"}, "diff a.txt sub/b.txt --non-interactive"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			c, calls := stubClient(t, patch, 0)
+			got, err := c.DiffPaths(context.Background(), tc.paths)
+			if err != nil {
+				t.Fatalf("DiffPaths: %v", err)
+			}
+			if got != patch {
+				t.Errorf("DiffPaths = %q, want svn's output verbatim", got)
+			}
+			if argv := calls(); len(argv) != 1 || argv[0] != tc.want {
+				t.Errorf("argv = %q, want %q", argv, tc.want)
+			}
+		})
+	}
+
+	bad, _ := stubClient(t, "", 1)
+	if _, err := bad.DiffPaths(context.Background(), []string{"a.txt"}); err == nil {
+		t.Error("a diff svn refused must return an error")
+	}
+}
+
+func TestRevisionDetailAndHeadRevisionErrors(t *testing.T) {
+	const empty = `<?xml version="1.0"?><log></log>`
+
+	c, _ := stubClient(t, empty, 0)
+	if _, err := c.RevisionDetail(context.Background(), "42"); err == nil {
+		t.Error("a revision svn has no entry for must be an error")
+	}
+	rev, err := c.HeadRevision(context.Background())
+	if err != nil {
+		t.Fatalf("HeadRevision on an empty log: %v", err)
+	}
+	if rev != "" {
+		t.Errorf("HeadRevision = %q, want empty when there is no history", rev)
+	}
+
+	malformed, _ := stubClient(t, "<log", 0)
+	if _, err := malformed.RevisionDetail(context.Background(), "42"); err == nil {
+		t.Error("malformed log XML must be an error")
+	}
+	if _, err := malformed.HeadRevision(context.Background()); err == nil {
+		t.Error("malformed log XML must be an error")
+	}
+
+	failing, _ := stubClient(t, "", 1)
+	if _, err := failing.RevisionDetail(context.Background(), "42"); err == nil {
+		t.Error("a failing svn log must be an error")
+	}
+	if _, err := failing.HeadRevision(context.Background()); err == nil {
+		t.Error("a failing svn log must be an error")
+	}
+}
