@@ -142,7 +142,9 @@ Before running an update, `revision` warns you when a file in the working copy i
 conflicted. `svn` leaves those files untouched and updates everything else, so the update
 still succeeds — but the conflicted files stay conflicted.
 
-`revision` has no conflict resolver yet. Resolve them with `svn`:
+Press <KeyCap key="m" /> on a conflicted file in the Files panel to decide it side by side;
+see [Resolving conflicts and rejects](/workflows/conflicts/). For a tree or property
+conflict, which is not markers in a file, use `svn` directly:
 
 ```sh
 svn status | grep '^C'      # what is conflicted

@@ -95,8 +95,21 @@ func (s *SplitView) SetPages(pages []SplitPage) {
 	s.rewind()
 }
 
+// RefreshPages replaces the content without moving the reader: the same page
+// stays open, scrolled where it was. It is for content that is re-rendered in
+// place — rows restyled as the caller's state changes — rather than replaced.
+func (s *SplitView) RefreshPages(pages []SplitPage) {
+	s.pages = pages
+	s.page = min(max(s.page, 0), max(len(pages)-1, 0))
+	s.contentWidth = s.measureWidth()
+	s.clamp()
+}
+
 // Pages is how many pages the content is divided into.
 func (s *SplitView) Pages() int { return len(s.pages) }
+
+// Page is which page is open, counted from 0.
+func (s *SplitView) Page() int { return s.page }
 
 // Current is what the reader is looking at: the open page's title and the row at
 // the top of its visible window. ok is false while there is nothing on screen.

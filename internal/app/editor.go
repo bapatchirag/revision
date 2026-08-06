@@ -56,11 +56,14 @@ func (m *Model) openInEditor() tea.Cmd {
 
 // editTarget returns the absolute path of the file to open, the shorter name it
 // is known by on screen, and the line to open it at (0 for the top of the file):
-// the page the side-by-side overlay is reading, a patch file in the Diffs or
-// Rejects view, the file a displayed diff places the reader in, or failing all
-// of those the highlighted file leaf. ok is false wherever none of those names a
-// single file.
+// the file the resolution overlay is deciding, the page the side-by-side overlay
+// is reading, a patch file in the Diffs or Rejects view, the file a displayed
+// diff places the reader in, or failing all of those the highlighted file leaf.
+// ok is false wherever none of those names a single file.
 func (m *Model) editTarget() (path, name string, line int, ok bool) {
+	if m.merging && m.mergeDoc != nil {
+		return m.mergeDoc.path, m.mergeDoc.rel, m.mergeLine(), true
+	}
 	if m.splitting {
 		rel, line, ok := m.splitTarget()
 		if !ok {

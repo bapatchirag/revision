@@ -1,0 +1,106 @@
+---
+title: Resolving conflicts and rejects
+description: Decide a conflicted file, or a patch's rejected hunks, side by side inside revision.
+---
+
+import KeyCap from '../../../components/KeyCap.astro';
+
+Two things leave a file half-merged: an `svn update` that could not reconcile two versions
+of a line, and an [applied patch](/workflows/diffs/#partly-applied-patches) whose hunks
+would not go in. `revision` resolves both through the same overlay — the
+[side-by-side diff](/workflows/diffs/#reading-a-diff-side-by-side) with a decision attached
+to each block.
+
+## Opening it
+
+<KeyCap key="m" /> in the Files panel opens the resolution overlay. **Which view you are in
+decides what it resolves**, and the two are never mixed:
+
+| View | <KeyCap key="m" /> resolves |
+| --- | --- |
+| **Changes** (or an expanded changelist) | The conflict markers SVN left in the selected file. Only a file with status `C` has any; Main names the key for you when one is selected. |
+| **Rejects** | The hunks in the selected `.rej`, against the file it was written for. |
+| **Diffs**, or the Changelists overview | Nothing — a saved patch is [applied with <KeyCap key="p" />](/workflows/diffs/#applying-a-saved-patch), and a changelist is not a file. |
+
+Keeping them apart matters, because they are different decisions about different text. A
+patch can leave a file **both** conflicted and with a `.rej` beside it; that is two pieces
+of work, and you do one in each view. A single overlay only ever holds one kind of block.
+
+Whichever it is, the file is read off disk when you press the key, so what you decide is
+the file as it actually stands — not anything the panels had cached.
+
+## Deciding
+
+Each conflict, or each rejected hunk, is one page of the overlay. The two candidates sit
+side by side; a few unchanged lines above and below give you the context to judge them.
+
+| Key | What it does |
+| --- | --- |
+| <KeyCap key="1" /> | Take the left side |
+| <KeyCap key="2" /> | Take the right side |
+| <KeyCap key="3" /> | Take both, left first |
+| <KeyCap key="0" /> | Clear the decision |
+| <KeyCap key="[" /> <KeyCap key="]" /> | Previous / next block |
+| <KeyCap key="w" /> | Write the result out |
+| <KeyCap key="e" /> | Merge it by hand instead |
+| <KeyCap key="esc" /> | Close without writing |
+
+The panes are headed by the key that takes each and by the name of what it holds — for a
+conflict, the labels SVN wrote into the markers (`mine` and `r42`); for a reject, `working
+copy` and `rejected hunk`. A tick marks the side you have taken, and the side you passed
+over recedes into grey. The title bar counts what is still undecided.
+
+Arrow keys, <KeyCap key="PgUp" /> / <KeyCap key="PgDn" />, <KeyCap key="g" /> /
+<KeyCap key="G" /> and <KeyCap key="home" /> / <KeyCap key="end" /> scroll both panes
+together, exactly as they do in the read-only side-by-side view.
+
+## Writing it out
+
+<KeyCap key="w" /> writes the file back with every block replaced by the side you chose.
+It is refused while any block is still undecided — a file written half-decided would still
+hold the markers, or the hunks, you opened it for.
+
+What happens next depends on what you were resolving:
+
+- **A conflict** is cleared with `svn resolve --accept working`, which takes the file as it
+  now stands and removes the `.mine` / `.rNN` artifacts beside it. The invocation shows up
+  in the [Command Log](/guides/panels/#command-log).
+- **A reject** is deleted once its hunks have been dealt with. The target file is left as a
+  normal local modification, to review and commit as usual.
+
+Either way status is re-read, so the Files panel reflects the result immediately.
+
+## Merging by hand
+
+<KeyCap key="e" /> steps out of the overlay and opens the file in
+[your editor](/workflows/editor/), positioned on the block you were looking at. Use it when
+neither side is right on its own and the merge needs writing rather than picking.
+
+For a conflict the markers are still in the file, so you edit them out as you would from
+the command line, then clear the conflict with `svn resolve`. For a reject the editor opens
+the *target* file; delete the `.rej` with <KeyCap key="d" /> in the Rejects view once you
+are done with it.
+
+## Hunks that no longer fit
+
+A reject's hunks name the lines they came from, but the file has moved on since — that is
+why they were rejected. `revision` therefore places each hunk by matching the text it
+expects to find, taking the match nearest the line it names.
+
+A hunk whose text is nowhere in the file has no place to go, and neither does one that
+would land on top of a hunk already placed. Those are counted, reported in a notice, and
+left in the `.rej` for you to apply by hand. A reject where *none* of the hunks fit does
+not open at all.
+
+## Conflicts you would rather not resolve here
+
+The overlay is for **text conflicts** — the markers SVN writes into a file. Tree conflicts,
+property conflicts and binary files are not markers in a file and are not offered; resolve
+those with `svn` directly:
+
+```sh
+svn status                              # what is conflicted
+svn resolve --accept theirs-full path   # or mine-full, base, working
+```
+
+Then press <KeyCap key="R" /> in `revision` to re-read status.

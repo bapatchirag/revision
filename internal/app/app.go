@@ -55,6 +55,10 @@ const diffNameEditorID = "diff-name"
 // splitDiffID identifies the side-by-side diff overlay on emitted messages.
 const splitDiffID = "split-diff"
 
+// mergeViewID identifies the conflict/reject resolution overlay on emitted
+// messages.
+const mergeViewID = "merge"
+
 // passphraseEditorID identifies the SSH passphrase prompt on emitted messages.
 const passphraseEditorID = "ssh-passphrase"
 
@@ -147,6 +151,7 @@ type Model struct {
 	toast      *component.Toast
 	searchBar  *component.SearchBar
 	splitDiff  *component.SplitView
+	mergeView  *component.SplitView
 	focus      *focus.Manager
 
 	fileItems        []svn.StatusItem
@@ -269,7 +274,11 @@ type Model struct {
 	retargeting bool
 	// splitting is true while the side-by-side view of the on-screen diff is
 	// floated over the layout.
-	splitting    bool
+	splitting bool
+	// merging is true while the resolution overlay is up, with mergeDoc the file
+	// it is deciding: a conflicted file, or a reject against its target.
+	merging      bool
+	mergeDoc     *mergeDoc
 	filtering    bool
 	filterPanel  int
 	filters      map[int]string
@@ -388,6 +397,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		toast:           component.NewToast(th),
 		searchBar:       component.NewSearchBar(searchBarID, th, keys),
 		splitDiff:       component.NewSplitView(splitDiffID, "Side-by-side diff", th, keys),
+		mergeView:       component.NewSplitView(mergeViewID, "Resolve", th, keys),
 		collapsedDirs:   map[string]bool{},
 		clCollapsedDirs: map[string]bool{},
 		rejectCollapsed: map[string]bool{},
@@ -532,6 +542,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.splitting {
 			m.sizeSplitDiff()
+		}
+		if m.merging {
+			m.sizeMerge()
 		}
 		if m.confirming {
 			m.sizeModal()
@@ -758,6 +771,43 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// screen and the status behind it are both out of date — and any hunk that
 		// did not fit has just been written out as a reject.
 		m.clearDiff()
+		return m, tea.Batch(m.reloadStatus(), m.reloadRejectsIfShown())
+
+	case mergeLoadedMsg:
+		if msg.err != nil {
+			m.showToast(failureText("read "+msg.rel, msg.err), component.LevelError)
+			return m, nil
+		}
+		if len(msg.doc.regions) == 0 {
+			m.showToast(mergeNothingToDo(msg.doc), component.LevelWarning)
+			return m, nil
+		}
+		if msg.doc.unplaced > 0 {
+			// The rest are still worth working through, so this is said in passing
+			// rather than in place of the overlay.
+			m.showToast(fmt.Sprintf("%d hunks no longer fit %s and are left in the reject",
+				msg.doc.unplaced, msg.doc.rel), component.LevelWarning)
+		}
+		m.showMerge(msg.doc)
+		return m, nil
+
+	case mergeWrittenMsg:
+		if msg.err != nil {
+			m.showToast(failureText("resolve "+msg.rel, msg.err), component.LevelError)
+			return m, nil
+		}
+		m.showToast(mergeDoneText(msg), component.LevelSuccess)
+		// The file on disk is not the one the diff on screen was taken from, and
+		// its status has just changed out from under the Files panel.
+		m.clearDiff()
+		if msg.kind != mergeReject {
+			return m, m.reloadStatus()
+		}
+		if m.rejectPath == msg.aux {
+			// Main is showing the reject that has just been cleared; drop it so the
+			// re-scan reads whatever the list settles on.
+			m.rejectPath, m.rejectText, m.rejectErr = "", "", false
+		}
 		return m, tea.Batch(m.reloadStatus(), m.reloadRejectsIfShown())
 
 	case editedMsg:
@@ -1021,6 +1071,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.closeSourcePath()
 		case splitDiffID:
 			m.closeSplitDiff()
+		case mergeViewID:
+			m.closeMerge()
 		case passphraseEditorID:
 			// The key is required and the user declined to unlock it, so exiting is
 			// the only sensible outcome; proceeding would leave a UI that cannot
@@ -1096,6 +1148,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, m.splitDiff.Update(msg)
+		}
+		if m.merging {
+			// The resolution overlay owns the keyboard while open: it decides a
+			// region, scrolls, and closes on esc (as a DismissMsg) or on the key that
+			// opened it.
+			return m, m.mergeKey(msg)
 		}
 		if m.filtering {
 			// The filter input owns the keyboard while open. Every edit re-runs the
@@ -1176,6 +1234,9 @@ func (m *Model) View() string {
 		// The side-by-side view all but fills the screen and is read rather than
 		// acted on, so the layout behind it recedes to a single dim color.
 		view = m.overlayCenter(layout.Dim(view, m.theme.Muted), m.splitDiff.View())
+	case m.merging:
+		// Resolving is the same two-pane read, with a decision attached to it.
+		view = m.overlayCenter(layout.Dim(view, m.theme.Muted), m.mergeView.View())
 	case m.confirming:
 		view = m.overlayCenter(view, m.modal.View())
 	case m.updating:
@@ -1342,6 +1403,13 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, false
 	case "c":
 		return m.openCommit(), true
+	case "m":
+		// Resolving acts on a conflicted file in the Changes tree, or on a reject in
+		// the Rejects view; nowhere else has anything to resolve.
+		if m.focus.Index() == panelFiles {
+			return m.openMerge(), true
+		}
+		return nil, false
 	case "r":
 		if m.focus.Index() == panelFiles {
 			return m.requestRevert(), true
@@ -2110,7 +2178,7 @@ func (m *Model) closeHelp() {
 // screen, so a background event (like the update check completing) knows not to
 // steal focus.
 func (m *Model) overlayActive() bool {
-	return m.aborting || m.unlocking || m.editing || m.naming || m.savingDiff || m.retargeting || m.splitting || m.confirming || m.helping || m.updating || m.configuring
+	return m.aborting || m.unlocking || m.editing || m.naming || m.savingDiff || m.retargeting || m.splitting || m.merging || m.confirming || m.helping || m.updating || m.configuring
 }
 
 // openUpdate shows the startup update prompt for the given release as a centered
@@ -2176,6 +2244,7 @@ func (m *Model) previewTheme(name string) {
 	m.form.SetTheme(th)
 	m.toast.SetTheme(th)
 	m.splitDiff.SetTheme(th)
+	m.mergeView.SetTheme(th)
 	m.files.SetRender(renderFileNode(th, m.pendingCount))
 	m.clFiles.SetRender(renderFileNode(th, m.pendingCount))
 	m.changelists.SetRender(renderChangelistGroup(th))
@@ -3556,6 +3625,12 @@ func (m *Model) fileDetail() string {
 	if it.Changelist != "" {
 		head = append(head, "changelist: "+displayCL(it.Changelist), "")
 	}
+	if it.State == svn.StateConflicted {
+		// The Changes hints fill the status bar at 80 columns, so the key that
+		// resolves a conflict is offered here, where it is only in the way of the
+		// files it applies to.
+		head = append(head, "conflict — press m to resolve it side by side", "")
+	}
 	switch {
 	case !it.State.IsDirty():
 		return strings.Join(append(head, "(no textual diff for this state)"), "\n")
@@ -3685,7 +3760,7 @@ func (m *Model) filesHints() []string {
 	case m.filesViewIsDiffs():
 		return []string{"e open", "p apply", "d delete", "/ filter", "[ ] view"}
 	case m.filesViewIsRejects():
-		return []string{"enter expand", "e open", "d delete", "/ filter", "[ ] view"}
+		return []string{"enter expand", "m resolve", "e open", "d delete", "/ filter", "[ ] view"}
 	case m.inChangelistDrill():
 		return []string{"space unstage", "c commit", "esc back", "[ ] view"}
 	case m.filesViewIsChangelists():
