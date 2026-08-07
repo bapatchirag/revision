@@ -13,8 +13,13 @@ func TestFileStateCode(t *testing.T) {
 		StateMissing:     "!",
 		StateIgnored:     "I",
 		StateExternal:    "X",
+		StateObstructed:  "~",
+		StateIncomplete:  "!",
+		StateMerged:      "G",
 		StateNormal:      " ",
 		StateNone:        " ",
+		FileState(""):    " ",
+		StateUnknown:     "?",
 	}
 	for st, want := range cases {
 		if got := st.Code(); got != want {
@@ -31,8 +36,15 @@ func TestMapState(t *testing.T) {
 		"modified":    StateModified,
 		"added":       StateAdded,
 		"deleted":     StateDeleted,
+		"replaced":    StateReplaced,
 		"unversioned": StateUnversioned,
+		"missing":     StateMissing,
 		"conflicted":  StateConflicted,
+		"ignored":     StateIgnored,
+		"external":    StateExternal,
+		"obstructed":  StateObstructed,
+		"incomplete":  StateIncomplete,
+		"merged":      StateMerged,
 		"weird-value": FileState("weird-value"),
 	}
 	for in, want := range cases {
@@ -43,13 +55,13 @@ func TestMapState(t *testing.T) {
 }
 
 func TestIsDirty(t *testing.T) {
-	dirty := []FileState{StateModified, StateAdded, StateDeleted, StateReplaced, StateConflicted}
+	dirty := []FileState{StateModified, StateAdded, StateDeleted, StateReplaced, StateConflicted, StateMissing, StateMerged}
 	for _, s := range dirty {
 		if !s.IsDirty() {
 			t.Errorf("IsDirty(%s) = false, want true", s)
 		}
 	}
-	clean := []FileState{StateNormal, StateNone, StateUnversioned, StateIgnored}
+	clean := []FileState{StateNormal, StateNone, StateUnversioned, StateIgnored, StateExternal, StateObstructed, StateIncomplete}
 	for _, s := range clean {
 		if s.IsDirty() {
 			t.Errorf("IsDirty(%s) = true, want false", s)
