@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -27,13 +29,17 @@ const (
 	// repo is the GitHub "owner/name" this binary updates from.
 	repo = "bapatchirag/revision"
 
+	// module is this project's Go module path, as recorded in the build info of
+	// any binary produced from it.
+	module = "github.com/" + repo
+
 	// installURL is the raw install script used by the curl update path. It is
 	// the same one-liner documented in the README and installs the latest
 	// release for the host OS/arch.
 	installURL = "https://raw.githubusercontent.com/bapatchirag/revision/main/install.sh"
 
 	// goModule is the module path used by the `go install` update path.
-	goModule = "github.com/bapatchirag/revision/cmd/revision"
+	goModule = module + "/cmd/revision"
 
 	// releaseChannel is the channel value that marks an official release build.
 	// Any other value (e.g. "dev") is treated as a development build and never
@@ -75,6 +81,44 @@ func (b Build) IsRelease() bool {
 	}
 	_, ok := parseSemver(b.Version)
 	return ok
+}
+
+// Resolve reports the running binary's provenance from the values the release
+// pipeline stamps into it, falling back to the module version the Go toolchain
+// records when there are none. Without that fallback a binary produced by
+// `go install <module>@<tag>` — a documented install path — would carry the
+// development defaults and be permanently barred from updating itself.
+func Resolve(version, channel string) Build {
+	b := Build{Version: version, Channel: channel}
+	if b.IsRelease() {
+		return b
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return b
+	}
+	return resolveFromModule(b, info)
+}
+
+// resolveFromModule promotes a build to the release channel when the toolchain
+// recorded this module at a published tag. A fork, the "(devel)" sentinel, and
+// the pseudo-version of an untagged commit all leave the build exactly as the
+// linker left it. So does anything built from a working tree: since Go 1.24 the
+// toolchain derives Main.Version from the checkout's own tags, so only the vcs
+// settings — which a module-cache build never carries — tell the two apart.
+func resolveFromModule(b Build, info *debug.BuildInfo) Build {
+	if info.Main.Path != module || isPseudoVersion(info.Main.Version) {
+		return b
+	}
+	if _, ok := parseSemver(info.Main.Version); !ok {
+		return b
+	}
+	for _, s := range info.Settings {
+		if strings.HasPrefix(s.Key, "vcs") {
+			return b
+		}
+	}
+	return Build{Version: strings.TrimPrefix(info.Main.Version, "v"), Channel: releaseChannel}
 }
 
 // Release is the metadata for the latest published GitHub release.
@@ -206,6 +250,18 @@ func parseSemver(s string) (semver, bool) {
 		nums[i] = n
 	}
 	return semver{major: nums[0], minor: nums[1], patch: nums[2], pre: pre}, true
+}
+
+// pseudoVersionRE matches the timestamp and commit the Go toolchain appends
+// when it synthesises a version for an untagged commit, in all three of the
+// forms it produces.
+var pseudoVersionRE = regexp.MustCompile(`(^|\.)[0-9]{14}-[0-9a-f]{12}$`)
+
+// isPseudoVersion reports whether v is a Go module pseudo-version, which stands
+// for a commit that carries no release tag.
+func isPseudoVersion(v string) bool {
+	sv, ok := parseSemver(v)
+	return ok && pseudoVersionRE.MatchString(sv.pre)
 }
 
 // atoiStrict parses a run of ASCII digits, rejecting signs, spaces and empties

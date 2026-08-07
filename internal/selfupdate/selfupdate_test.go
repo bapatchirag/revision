@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"runtime/debug"
 	"testing"
 )
 
@@ -29,6 +30,81 @@ func TestIsRelease(t *testing.T) {
 				t.Errorf("IsRelease(%+v) = %v, want %v", tc.build, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestIsPseudoVersion(t *testing.T) {
+	cases := []struct {
+		name    string
+		version string
+		want    bool
+	}{
+		{"no base version", "v0.0.0-20260101120000-abcdef123456", true},
+		{"release base", "v1.4.1-0.20260101120000-abcdef123456", true},
+		{"prerelease base", "v1.4.0-rc.1.0.20260101120000-abcdef123456", true},
+		{"release tag", "v1.4.0", false},
+		{"prerelease tag", "1.4.0-rc.1", false},
+		{"devel sentinel", "(devel)", false},
+		{"short revision", "v0.0.0-20260101120000-abcdef", false},
+		{"short timestamp", "v0.0.0-2026010112-abcdef123456", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isPseudoVersion(tc.version); got != tc.want {
+				t.Errorf("isPseudoVersion(%q) = %v, want %v", tc.version, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveFromModule(t *testing.T) {
+	dev := Build{Version: "dev", Channel: "dev"}
+	fromVCS := []debug.BuildSetting{{Key: "vcs", Value: "git"}, {Key: "vcs.modified", Value: "false"}}
+	cases := []struct {
+		name     string
+		path     string
+		version  string
+		settings []debug.BuildSetting
+		want     Build
+	}{
+		{"published tag", module, "v1.4.0", nil, Build{Version: "1.4.0", Channel: "release"}},
+		{"published prerelease", module, "v1.4.0-rc.1", nil, Build{Version: "1.4.0-rc.1", Channel: "release"}},
+		{"devel sentinel", module, "(devel)", nil, dev},
+		{"untagged commit", module, "v0.0.0-20260101120000-abcdef123456", nil, dev},
+		// Since Go 1.24 a working-tree build reports the checkout's nearest tag,
+		// so only the vcs settings keep `make build` out of the release channel.
+		{"local build at a tag", module, "v1.4.0", fromVCS, dev},
+		{"local build, dirty", module, "v1.4.0+dirty", fromVCS, dev},
+		// A fork publishes its own tags; they say nothing about this project's
+		// releases, so its binaries must stay inert.
+		{"fork at a tag", "github.com/someone/revision", "v9.9.9", nil, dev},
+		{"no module recorded", "", "", nil, dev},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			info := &debug.BuildInfo{
+				Main:     debug.Module{Path: tc.path, Version: tc.version},
+				Settings: tc.settings,
+			}
+			if got := resolveFromModule(dev, info); got != tc.want {
+				t.Errorf("resolveFromModule(%q, %q) = %+v, want %+v", tc.path, tc.version, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveKeepsAStampedBuild(t *testing.T) {
+	// The release pipeline is authoritative: its values are never second-guessed
+	// against the build info.
+	stamped := Build{Version: "1.4.0", Channel: "release"}
+	if got := Resolve(stamped.Version, stamped.Channel); got != stamped {
+		t.Errorf("Resolve(%+v) = %+v, want it unchanged", stamped, got)
+	}
+	// The test binary is built from this working tree, so an unstamped build
+	// stays unstamped.
+	dev := Build{Version: "dev", Channel: "dev"}
+	if got := Resolve(dev.Version, dev.Channel); got != dev {
+		t.Errorf("Resolve(%+v) = %+v, want it unchanged", dev, got)
 	}
 }
 

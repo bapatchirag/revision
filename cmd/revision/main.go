@@ -24,6 +24,8 @@ import (
 // version and channel are overridden via -ldflags at build time. channel is
 // "release" only for official release builds; every development or locally
 // cross-compiled build keeps the default, which disables the self-update paths.
+// A `go install` build gets neither, so selfupdate.Resolve recovers both from
+// the module version the toolchain records.
 var (
 	version = "dev"
 	channel = "dev"
@@ -38,6 +40,11 @@ func main() {
 		return
 	}
 
+	// Resolved before the flags are declared so usage and --version report the
+	// recovered identity too.
+	build := selfupdate.Resolve(version, channel)
+	version = build.Version
+
 	var (
 		path        string
 		showVersion bool
@@ -50,8 +57,6 @@ func main() {
 	flag.StringVar(&updateWith, "update-with", "", "update method for --update: 'curl' or 'go' (default: prompt)")
 	flag.Usage = usage
 	flag.Parse()
-
-	build := selfupdate.Build{Version: version, Channel: channel}
 
 	if showVersion {
 		_, _ = fmt.Printf("revision %s\n", version)
