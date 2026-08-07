@@ -3,10 +3,13 @@ package app
 import (
 	"fmt"
 	"sort"
+	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/bapatchirag/revision/internal/svn"
+	"github.com/bapatchirag/revision/internal/tui/component"
 	"github.com/bapatchirag/revision/internal/tui/theme"
 )
 
@@ -50,6 +53,9 @@ func displayCL(name string) string {
 func groupChangelists(items []svn.StatusItem) []changelistGroup {
 	byName := map[string][]svn.StatusItem{}
 	for _, it := range items {
+		if isContainerDirEntry(it.Path, items) {
+			continue
+		}
 		byName[it.Changelist] = append(byName[it.Changelist], it)
 	}
 
@@ -74,6 +80,20 @@ func groupChangelists(items []svn.StatusItem) []changelistGroup {
 	return groups
 }
 
+// isContainerDirEntry reports whether path is a directory status entry that has
+// descendants in the same status set (path/...). Such entries are structural:
+// they duplicate a directory row already present in the tree and cannot be
+// changelisted reliably, so changelist views ignore them.
+func isContainerDirEntry(path string, items []svn.StatusItem) bool {
+	prefix := path + "/"
+	for _, it := range items {
+		if it.Path != path && strings.HasPrefix(it.Path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // renderChangelistGroup is the domain adapter that turns a changelistGroup into
 // the row the reusable List renders: a colored marker (green staged, muted
 // default, accent for a named list), the label, and the file count.
@@ -93,4 +113,154 @@ func renderChangelistGroup(th theme.Theme) func(changelistGroup) string {
 		count := lipgloss.NewStyle().Foreground(th.Muted).Render(fmt.Sprintf(" (%d)", len(g.Items)))
 		return marker + " " + label + count
 	}
+}
+
+// changelistTarget is one file an assign-to-changelist action moves into a named
+// changelist: its path plus whether it must be `svn add`ed first (an unversioned
+// file being named directly, without staging it beforehand).
+type changelistTarget struct {
+	path string
+	add  bool // svn add first (unversioned → versioned)
+}
+
+// drillChangelist expands the selected changelist into its file list as a
+// drill-down sub-view, labeling the panel with the changelist and tracking which
+// one is open so a status reload can keep it in sync. The files render as the
+// same "/"-rooted tree as the Changes view, opening on the first file.
+func (m *Model) drillChangelist() tea.Cmd {
+	g, ok := m.changelists.Selected()
+	if !ok {
+		return nil
+	}
+	m.clItems = m.changelistItems(g.Name)
+	m.rebuildClTree()
+	if idx := firstFileIndex(m.clFiles.Items()); idx >= 0 {
+		m.clFiles.SetIndex(idx)
+	}
+	m.drilledCL = g.Name
+	cmd := m.filesViews.PushTitled(g.Label(), m.clFiles)
+	m.updateBar()
+	m.updateMain()
+	return tea.Batch(cmd, m.diffLoadForSelection())
+}
+
+// submitChangelist closes the name prompt and assigns the selected file to the
+// entered changelist, rejecting an empty or reserved name.
+func (m *Model) submitChangelist(name string) tea.Cmd {
+	name = strings.TrimSpace(name)
+	switch name {
+	case "":
+		m.showToast("changelist name cannot be empty", component.LevelWarning)
+		return nil
+	case stagedChangelist:
+		m.showToast("that changelist name is reserved", component.LevelWarning)
+		return nil
+	}
+	m.naming = false
+	m.nameEditor.Blur()
+	targets := m.nameTargets
+	return assignChangelistCmd(m.client, name, targets, m.applyOptimistic(changelistMutations(targets, name)))
+}
+
+// assignChangelist opens the changelist-name prompt for the files that will move
+// into a named changelist. When any files are staged (in the anonymous staged
+// bucket) the whole staged set is named as a unit; otherwise it falls back to
+// the single selected file. In that fallback a lone selected file already in a
+// named changelist is refused (one named changelist per file — unstage it
+// first), as is a state that cannot be staged. The prompt lists the existing
+// named changelists to pick from.
+func (m *Model) assignChangelist() tea.Cmd {
+	targets := m.stagedTargets()
+	if len(targets) == 0 {
+		it, ok := m.selectedFile()
+		if !ok || m.isPending(it.Path) {
+			return nil
+		}
+		if isNamedChangelist(it.Changelist) {
+			m.showToast(it.Path+" already in "+displayCL(it.Changelist)+" — unstage first (space)", component.LevelWarning)
+			return nil
+		}
+		if it.State != svn.StateUnversioned && !stageable(it.State) {
+			m.showToast("can't add "+it.Path+" to a changelist ("+it.State.Code()+")", component.LevelWarning)
+			return nil
+		}
+		targets = []changelistTarget{{path: it.Path, add: it.State == svn.StateUnversioned}}
+	}
+	m.naming = true
+	m.nameTargets = targets
+	m.nameEditor.Reset()
+	m.nameEditor.SetOptions("Existing changelists:", m.namedChangelists())
+	m.nameEditor.Focus()
+	m.sizeNameEditor()
+	return nil
+}
+
+// stagedTargets collects every file currently in the anonymous staged bucket as
+// changelist targets, so naming a changelist moves the whole staged set as a
+// unit. Staged files are already versioned, so in practice none need an
+// `svn add` first. Files already waiting on svn are left out.
+func (m *Model) stagedTargets() []changelistTarget {
+	var targets []changelistTarget
+	for _, it := range m.fileItems {
+		if it.Changelist == stagedChangelist && !m.isPending(it.Path) {
+			targets = append(targets, changelistTarget{path: it.Path, add: it.State == svn.StateUnversioned})
+		}
+	}
+	return targets
+}
+
+// syncDrill refreshes a drilled-in changelist after a status reload: it
+// repopulates the file list from the rebuilt groups, or collapses the drill when
+// that changelist no longer exists (e.g. its last file was unstaged).
+func (m *Model) syncDrill() {
+	if !m.filesViewIsChangelists() || m.filesViews.Depth() == 0 {
+		return
+	}
+	if items := m.changelistItems(m.drilledCL); len(items) > 0 {
+		m.clItems = items
+		m.rebuildClTree()
+		return
+	}
+	m.filesViews.Pop()
+	m.drilledCL = ""
+}
+
+// namedChangelists returns the existing user-named changelists (excluding the
+// anonymous staged/unstaged buckets), for the assign prompt to offer as options.
+func (m *Model) namedChangelists() []string {
+	var names []string
+	for _, g := range m.changelists.Items() {
+		if isNamedChangelist(g.Name) {
+			names = append(names, g.Name)
+		}
+	}
+	return names
+}
+
+// isNamedChangelist reports whether cl is a real user-named changelist, i.e. not
+// the empty default group or the anonymous staged bucket.
+func isNamedChangelist(cl string) bool {
+	return cl != "" && cl != stagedChangelist
+}
+
+// changelistItems returns every working-copy file in the named changelist from
+// the full (unfiltered) status set, so a drill snapshot stays independent of any
+// Files filter currently narrowing the view.
+func (m *Model) changelistItems(name string) []svn.StatusItem {
+	var items []svn.StatusItem
+	for _, it := range m.fileItems {
+		if isContainerDirEntry(it.Path, m.fileItems) {
+			continue
+		}
+		if it.Changelist == name {
+			items = append(items, it)
+		}
+	}
+	return items
+}
+
+// rebuildChangelists repopulates the Changelists overview from the filtered
+// status items.
+func (m *Model) rebuildChangelists() {
+	m.changelists.SetItems(groupChangelists(m.filteredStatusItems(m.fileItems)))
 }

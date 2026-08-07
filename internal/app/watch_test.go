@@ -265,27 +265,27 @@ func TestLiveRefreshDoesNotChaseItsOwnReload(t *testing.T) {
 
 	next, _ := m.Update(peek(m, root, true))
 	m = next.(*Model)
-	loads := m.statusGen.gen
+	loads := m.gens.status.gen
 
 	// alpha.txt is edited outside; only the full scan can see a file svn still
 	// reports as clean.
 	touch(t, root, "alpha.txt", "alpha, edited outside")
 	next, _ = m.Update(peek(m, root, true))
 	m = next.(*Model)
-	if m.statusGen.gen != loads+1 {
+	if m.gens.status.gen != loads+1 {
 		t.Fatal("the full scan should have re-read the working copy")
 	}
 
 	// svn answers: the file is a row on screen now, and so is watched from here on.
 	next, _ = m.Update(statusLoadedMsg{
 		items: []svn.StatusItem{{Path: "alpha.txt", State: svn.StateModified}},
-		gen:   m.statusGen.gen,
+		gen:   m.gens.status.gen,
 	})
 	m = next.(*Model)
 
 	next, _ = m.Update(peek(m, root, true))
 	m = next.(*Model)
-	if m.statusGen.gen != loads+1 {
+	if m.gens.status.gen != loads+1 {
 		t.Error("the poller chased its own reload")
 	}
 }
@@ -297,23 +297,23 @@ func TestLiveRefreshReloadsOnlyWhenTheWorkingCopyMoves(t *testing.T) {
 	m, gen := watching(t, loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "alpha.txt", State: svn.StateModified},
 	}))
-	loads := m.statusGen.gen
+	loads := m.gens.status.gen
 
 	next, _ := m.Update(saw(gen, "t-0", "f-0"))
 	m = next.(*Model)
-	if m.statusGen.gen != loads {
+	if m.gens.status.gen != loads {
 		t.Error("an unchanged working copy should cost no svn command")
 	}
 
 	next, _ = m.Update(saw(gen, "t-0", "f-1"))
 	m = next.(*Model)
-	if m.statusGen.gen != loads+1 {
-		t.Fatalf("a changed working copy should have been re-read once, got %d loads", m.statusGen.gen-loads)
+	if m.gens.status.gen != loads+1 {
+		t.Fatalf("a changed working copy should have been re-read once, got %d loads", m.gens.status.gen-loads)
 	}
 
 	next, _ = m.Update(saw(gen, "t-0", "f-1"))
 	m = next.(*Model)
-	if m.statusGen.gen != loads+1 {
+	if m.gens.status.gen != loads+1 {
 		t.Error("the same change should not be re-read on the next look")
 	}
 }
@@ -325,11 +325,11 @@ func TestLiveRefreshCatchesATrackedFileWithoutAScan(t *testing.T) {
 	m, gen := watching(t, loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "alpha.txt", State: svn.StateModified},
 	}))
-	loads := m.statusGen.gen
+	loads := m.gens.status.gen
 
 	next, _ := m.Update(workingCopyChangedMsg{tracked: "t-1", gen: gen})
 	m = next.(*Model)
-	if m.statusGen.gen != loads+1 {
+	if m.gens.status.gen != loads+1 {
 		t.Error("a saved file already on screen should be re-read without a full scan")
 	}
 }
@@ -346,11 +346,11 @@ func TestLiveRefreshWaitsForTheScreenToBeFree(t *testing.T) {
 	if !m.editing {
 		t.Fatal("expected the commit editor to open")
 	}
-	loads := m.statusGen.gen
+	loads := m.gens.status.gen
 
 	next, _ = m.Update(saw(gen, "t-0", "f-1"))
 	m = next.(*Model)
-	if m.statusGen.gen != loads {
+	if m.gens.status.gen != loads {
 		t.Fatal("the working copy must not be re-read behind an overlay")
 	}
 
@@ -364,12 +364,12 @@ func TestLiveRefreshWaitsForTheScreenToBeFree(t *testing.T) {
 
 	next, _ = m.Update(saw(gen, "t-0", "f-1"))
 	m = next.(*Model)
-	if m.statusGen.gen != loads+1 {
+	if m.gens.status.gen != loads+1 {
 		t.Error("the held refresh should be taken once the screen is free")
 	}
 	next, _ = m.Update(saw(gen, "t-0", "f-1"))
 	m = next.(*Model)
-	if m.statusGen.gen != loads+1 {
+	if m.gens.status.gen != loads+1 {
 		t.Error("the held refresh should be taken once, not on every look after")
 	}
 }
@@ -425,7 +425,7 @@ func TestLiveRefreshToggleStopsThePoller(t *testing.T) {
 	m, gen := watching(t, loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "alpha.txt", State: svn.StateModified},
 	}))
-	loads := m.statusGen.gen
+	loads := m.gens.status.gen
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
 	m = next.(*Model)
@@ -438,7 +438,7 @@ func TestLiveRefreshToggleStopsThePoller(t *testing.T) {
 	if cmd != nil {
 		t.Error("a stopped poller must not schedule another look")
 	}
-	if m.statusGen.gen != loads {
+	if m.gens.status.gen != loads {
 		t.Error("a stopped poller must not re-read the working copy")
 	}
 
@@ -506,7 +506,7 @@ func TestLiveRefreshDropsScanningItCannotAfford(t *testing.T) {
 	m, gen := watching(t, loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "alpha.txt", State: svn.StateModified},
 	}))
-	loads := m.statusGen.gen
+	loads := m.gens.status.gen
 
 	next, cmd := m.Update(workingCopyChangedMsg{tracked: "t-0", scanned: true, tooSlow: true, gen: gen})
 	m = next.(*Model)
@@ -525,7 +525,7 @@ func TestLiveRefreshDropsScanningItCannotAfford(t *testing.T) {
 
 	next, _ = m.Update(workingCopyChangedMsg{tracked: "t-1", gen: gen})
 	m = next.(*Model)
-	if m.statusGen.gen != loads+1 {
+	if m.gens.status.gen != loads+1 {
 		t.Error("a file already on screen should still be watched after scanning is dropped")
 	}
 }

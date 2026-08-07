@@ -56,9 +56,9 @@ func (m *Model) openSplitDiff() tea.Cmd {
 // one file, since there is no page to turn to otherwise.
 func splitDiffHint(files int) string {
 	if files > 1 {
-		return "[ ] file · esc close"
+		return "[ ] file · e edit · esc close"
 	}
-	return "esc close"
+	return "e edit · esc close"
 }
 
 // closeSplitDiff hides the side-by-side overlay.
@@ -90,6 +90,13 @@ func (m *Model) mainDiff() (diff, target string, ok bool) {
 			return "", "", false
 		}
 		return m.savedText, d.Name, true
+	}
+	if m.filesViewIsRejects() {
+		r, sel := m.selectedReject()
+		if !sel {
+			return "", "", false
+		}
+		return m.rejectText, r.Rel, true
 	}
 	if m.diffErr {
 		return "", "", false
@@ -146,7 +153,7 @@ func splitDiffPages(th theme.Theme, diff string) []component.SplitPage {
 	// line into rows, longest run first, and numbers each side as it goes.
 	flush := func() {
 		for i := 0; i < len(removed) || i < len(added); i++ {
-			var row component.SplitRow
+			row := component.SplitRow{Line: newNo}
 			if i < len(removed) {
 				row.Left = diffCell(meta, del, width, oldNo, "-", removed[i])
 				oldNo++
@@ -177,7 +184,7 @@ func splitDiffPages(th theme.Theme, diff string) []component.SplitPage {
 			flush()
 			before, after, ok := parseHunkHeader(ln)
 			oldNo, newNo, inHunk = before.start, after.start, ok
-			page.Rows = append(page.Rows, component.SplitRow{Left: head.Render(ln), Span: true})
+			page.Rows = append(page.Rows, component.SplitRow{Left: head.Render(ln), Span: true, Line: after.start})
 		case strings.HasPrefix(ln, "Index:"):
 			turn(strings.TrimSpace(ln[len("Index:"):]))
 		case !inHunk:
@@ -194,13 +201,14 @@ func splitDiffPages(th theme.Theme, diff string) []component.SplitPage {
 			added = append(added, ln[1:])
 		case strings.HasPrefix(ln, `\`):
 			// "\ No newline at end of file" annotates the line above, on both sides.
-			page.Rows = append(page.Rows, component.SplitRow{Left: meta.Render(ln), Span: true})
+			page.Rows = append(page.Rows, component.SplitRow{Left: meta.Render(ln), Span: true, Line: newNo})
 		default:
 			flush()
 			body := strings.TrimPrefix(ln, " ")
 			page.Rows = append(page.Rows, component.SplitRow{
 				Left:  diffCell(meta, text, width, oldNo, " ", body),
 				Right: diffCell(meta, text, width, newNo, " ", body),
+				Line:  newNo,
 			})
 			oldNo++
 			newNo++

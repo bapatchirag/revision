@@ -4,9 +4,11 @@ import (
 	"strings"
 	"sync"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/bapatchirag/revision/internal/svn"
+	"github.com/bapatchirag/revision/internal/tui/component"
 )
 
 // commandLogLimit is how many recent svn invocations the command log keeps.
@@ -135,4 +137,24 @@ func (m *Model) renderCommandLog(entries []svn.CommandRecord) string {
 		b.WriteString(mark + " " + cmd.Render(e.Command))
 	}
 	return b.String()
+}
+
+// toggleCmdLog flips the command-log panel shown below Main, which mirrors the
+// svn actions revision runs. It re-lays out the right column so Main reclaims
+// the space when the log is hidden, moves focus to Main if the log was focused
+// as it hides, and reports the new state with a toast.
+func (m *Model) toggleCmdLog() tea.Cmd {
+	m.showCmdLog = !m.showCmdLog
+	m.layout()
+	var cmd tea.Cmd
+	if !m.showCmdLog && m.focus.Index() == panelCmdLog {
+		m.focus.Focus(panelMain)
+		cmd = m.afterFocusChange()
+	}
+	if m.showCmdLog {
+		m.showToast("command log shown", component.LevelInfo)
+	} else {
+		m.showToast("command log hidden", component.LevelInfo)
+	}
+	return cmd
 }

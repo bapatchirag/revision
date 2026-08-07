@@ -60,6 +60,7 @@ export default defineConfig({
 						{ label: 'Changelists', link: '/workflows/changelists/' },
 						{ label: 'Working with diffs', link: '/workflows/diffs/' },
 						{ label: 'Updating the working copy', link: '/workflows/updating/' },
+						{ label: 'Resolving conflicts & rejects', link: '/workflows/conflicts/' },
 						{ label: 'Filtering & searching', link: '/workflows/filtering-and-searching/' },
 						{ label: 'Opening files in an editor', link: '/workflows/editor/' },
 					],

@@ -156,7 +156,15 @@ func HelpSections() []Section {
 			},
 			{
 				Action: "Revert / delete file", Keys: []string{"r", "d"}, Context: "Files",
-				Description: "Revert or delete the selected file, or everything under the selected directory. Both ask for confirmation.",
+				Description: "Revert or delete the selected file, or everything under the selected directory. In the Diffs view `d` deletes the highlighted patch file from `diffOutputDir` instead. All ask for confirmation.",
+			},
+			{
+				Action: "Apply saved patch", Keys: []string{"p"}, Context: "Diffs",
+				Description: "Apply the patch file highlighted in the Diffs view to the source path, after asking for confirmation. A patch taken from another directory — one whose files are not the ones here — is refused, as is one svn says would land nothing at all. A patch that only partly fits is applied for what it is worth, with the hunks svn could not place written out beside their targets as `.rej` files.",
+			},
+			{
+				Action: "Resolve conflict", Keys: []string{"m"}, Context: "Files",
+				Description: "Resolve the selection side by side. Which view you are in decides what it resolves, and the two are never mixed: in the Changes view (or an expanded changelist) it reads the conflict markers in the selected `C` file, and in the Rejects view it reads the selected `.rej` against the file it was written for. A patch that leaves a file both conflicted and with a reject beside it is therefore two pieces of work, one in each view. Each conflict, or each rejected hunk that still fits, is a page: `1` takes the left side, `2` the right, `3` both and `0` clears the choice. Once every page has been decided, `w` writes the file back out and clears what marked it — `svn resolve` for a conflict, removing the reject for a reject. `e` opens the file in your editor to merge it by hand instead.",
 			},
 		}},
 		{Title: "Working copy", Bindings: []Binding{
@@ -170,7 +178,7 @@ func HelpSections() []Section {
 			},
 			{
 				Action: "Open file in editor", Keys: []string{"e"}, Context: "Files",
-				Description: "Open the highlighted file in the configured editor.",
+				Description: "Open the highlighted file in the configured editor, positioned on its first changed hunk. Pressed with the Diff panel focused it opens on the line under the cursor instead, so the editor picks up where the eye left off — which is also how a file is picked out of a directory's combined diff. It works from the side-by-side and resolution overlays too, on the file whose page is open.",
 			},
 			{
 				Action: "Change source path", Keys: []string{"P"}, Context: "Global",

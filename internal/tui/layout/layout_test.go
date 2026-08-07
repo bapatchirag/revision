@@ -43,6 +43,29 @@ func TestOverlayIgnoresRowsPastBackground(t *testing.T) {
 	}
 }
 
+func TestOverlayClampsNegativeOrigin(t *testing.T) {
+	// A popup asked for above or left of the background lands at its corner
+	// rather than off it.
+	got := layout.Overlay("aaaa\nbbbb", "XX", -3, -2)
+	if want := "XXaa\nbbbb"; got != want {
+		t.Errorf("Overlay = %q, want %q", got, want)
+	}
+}
+
+func TestPlaceFillsTheBox(t *testing.T) {
+	got := layout.Place(9, 3, lipgloss.Right, lipgloss.Bottom, "x")
+	if lipgloss.Width(got) != 9 {
+		t.Errorf("Place width = %d, want 9", lipgloss.Width(got))
+	}
+	lines := strings.Split(got, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("Place height = %d, want 3", len(lines))
+	}
+	if last := lines[2]; !strings.HasSuffix(last, "x") {
+		t.Errorf("bottom-right placement put the content at %q", last)
+	}
+}
+
 func TestOverlayPreservesStyledBackground(t *testing.T) {
 	// A styled background (green on both sides of where the popup lands) must
 	// keep its visible text intact and stay ANSI-aware: slicing by display

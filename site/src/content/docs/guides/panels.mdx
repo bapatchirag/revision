@@ -103,6 +103,9 @@ directories above it carry the count of what is in flight beneath them. Those ro
 inert until `svn` answers — see [rows in
 flight](/workflows/staging-and-commit/#rows-in-flight).
 
+A conflicted file (`C`) is resolved with <KeyCap key="m" />, which opens its conflicts
+[side by side](/workflows/conflicts/).
+
 ### Changelists
 
 The same changes bucketed by [changelist](/workflows/changelists/): named lists first,
@@ -117,9 +120,22 @@ it and <KeyCap key="esc" /> goes back.
 
 Patches you have [saved with `w`](/workflows/diffs/#saving-a-diff), newest first, read
 from [`diffOutputDir`](/reference/configuration/#diffoutputdir). Selecting one shows it in
-Main; <KeyCap key="e" /> opens it in your [editor](/workflows/editor/).
+Main; <KeyCap key="e" /> opens it in your [editor](/workflows/editor/),
+<KeyCap key="p" /> [applies it](/workflows/diffs/#applying-a-saved-patch) to the working
+copy, and <KeyCap key="d" /> deletes it from the store.
 
-This view is read-only: stage, revert and delete do nothing here.
+The rows are files, not working-copy changes: stage and revert do nothing here.
+
+### Rejects
+
+The `.rej` files left behind by a patch, found by walking the [source
+path](#changing-the-source-path) recursively and laid out as the same tree as
+Changes — <KeyCap key="enter" /> expands and collapses a directory. svn ignores rejects,
+so this is the only view that shows them. Selecting one shows its contents in Main;
+<KeyCap key="m" /> [resolves it](/workflows/conflicts/) against the file it was written
+for, <KeyCap key="e" /> opens it in your [editor](/workflows/editor/) and
+<KeyCap key="d" /> deletes it from disk. See
+[Finding rejects](/workflows/diffs/#finding-rejects).
 
 ## Log
 

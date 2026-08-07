@@ -438,3 +438,174 @@ func TestIntegrationUpdateToRevision(t *testing.T) {
 		t.Errorf("first.txt should remain after updating to r1: %v", err)
 	}
 }
+
+// seedPatch builds a working copy holding a.txt and sub/b.txt, saves a patch of
+// a modification to both, then reverts the working copy. It returns the working
+// copy and the patch file, which is written outside it so it is not itself a
+// working-copy change.
+func seedPatch(t *testing.T) (wc, patch string) {
+	t.Helper()
+	wc = setupWC(t)
+	if err := os.Mkdir(filepath.Join(wc, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(wc, "a.txt"), "one\n")
+	writeFile(t, filepath.Join(wc, "sub", "b.txt"), "x\n")
+	mustRun(t, wc, "svn", "add", "a.txt", "sub")
+	mustRun(t, wc, "svn", "commit", "-m", "seed")
+	mustRun(t, wc, "svn", "update")
+
+	writeFile(t, filepath.Join(wc, "a.txt"), "ONE\n")
+	writeFile(t, filepath.Join(wc, "sub", "b.txt"), "y\n")
+	diff, err := New(wc).Diff(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	patch = filepath.Join(t.TempDir(), "wc.diff")
+	writeFile(t, patch, diff)
+	mustRun(t, wc, "svn", "revert", "-R", ".")
+	return wc, patch
+}
+
+func TestIntegrationPatch(t *testing.T) {
+	wc, patch := seedPatch(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	// The dry run reports both targets and changes nothing on disk.
+	dry, err := c.Patch(ctx, patch, true)
+	if err != nil {
+		t.Fatalf("Patch dry run: %v", err)
+	}
+	if want := []string{"a.txt", "sub/b.txt"}; !equalPaths(dry.Applied, want) {
+		t.Errorf("dry run Applied = %v, want %v", dry.Applied, want)
+	}
+	if dry.Targets() != 2 {
+		t.Errorf("dry run Targets() = %d, want 2", dry.Targets())
+	}
+	if data, _ := os.ReadFile(filepath.Join(wc, "a.txt")); string(data) != "one\n" {
+		t.Fatalf("a.txt = %q after a dry run, want it untouched", string(data))
+	}
+
+	// Applying for real leaves both files modified.
+	res, err := c.Patch(ctx, patch, false)
+	if err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	if want := []string{"a.txt", "sub/b.txt"}; !equalPaths(res.Applied, want) {
+		t.Errorf("Applied = %v, want %v", res.Applied, want)
+	}
+	if data, _ := os.ReadFile(filepath.Join(wc, "a.txt")); string(data) != "ONE\n" {
+		t.Errorf("a.txt = %q after the patch, want %q", string(data), "ONE\n")
+	}
+	if got := statusByPath(t, c, ctx)["sub/b.txt"].State; got != StateModified {
+		t.Errorf("sub/b.txt state = %s after the patch, want modified", got)
+	}
+}
+
+// TestIntegrationPatchFromAnotherDirectory is why a patch is checked against the
+// directory before it is applied: svn does not refuse one whose paths are
+// relative to somewhere else. Run a directory too deep, it creates each missing
+// target and rejects the patch's hunks into it.
+func TestIntegrationPatchFromAnotherDirectory(t *testing.T) {
+	wc, patch := seedPatch(t)
+	sub := filepath.Join(wc, "sub")
+
+	if PatchBelongsTo(readString(t, patch), sub) {
+		t.Fatal("a patch relative to the working copy's root does not belong to sub")
+	}
+
+	dry, err := New(sub).Patch(context.Background(), patch, true)
+	if err != nil {
+		t.Fatalf("Patch dry run: %v", err)
+	}
+	if len(dry.Applied) > 0 {
+		t.Errorf("Applied = %v, want nothing to go in cleanly from the wrong directory", dry.Applied)
+	}
+	if len(dry.Conflicted) == 0 {
+		t.Error("svn should report conflicts for a patch run from the wrong directory")
+	}
+}
+
+func readString(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+// numbered returns 30 numbered lines with the given 1-based lines replaced. Two
+// edits far enough apart in it produce two separate hunks, which is what a
+// partly applying patch needs.
+func numbered(replace map[int]string) string {
+	var b strings.Builder
+	for i := 1; i <= 30; i++ {
+		if s, ok := replace[i]; ok {
+			b.WriteString(s + "\n")
+			continue
+		}
+		b.WriteString(strconv.Itoa(i) + "\n")
+	}
+	return b.String()
+}
+
+// TestIntegrationPatchPartiallyApplies pins down what svn does with a patch that
+// only half fits, which is what the app's gate reads: the classification is per
+// file, so a file with one rejected hunk comes back conflicted even though its
+// other hunk went in, while a file that fits comes back applied.
+func TestIntegrationPatchPartiallyApplies(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	writeFile(t, filepath.Join(wc, "f.txt"), numbered(nil))
+	writeFile(t, filepath.Join(wc, "g.txt"), "clean\n")
+	mustRun(t, wc, "svn", "add", "f.txt", "g.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "seed")
+	mustRun(t, wc, "svn", "update")
+
+	// A patch touching both ends of f.txt, and all of g.txt.
+	writeFile(t, filepath.Join(wc, "f.txt"), numbered(map[int]string{2: "TWO", 28: "TWENTY-EIGHT"}))
+	writeFile(t, filepath.Join(wc, "g.txt"), "CLEAN\n")
+	diff, err := c.Diff(ctx, "")
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	patch := filepath.Join(t.TempDir(), "two-hunks.diff")
+	writeFile(t, patch, diff)
+	mustRun(t, wc, "svn", "revert", "-R", ".")
+
+	// f.txt then drifts under the second hunk, which can no longer be placed.
+	writeFile(t, filepath.Join(wc, "f.txt"), numbered(map[int]string{27: "twenty-seven-CHANGED"}))
+
+	dry, err := c.Patch(ctx, patch, true)
+	if err != nil {
+		t.Fatalf("Patch dry run: %v", err)
+	}
+	if !equalPaths(dry.Applied, []string{"g.txt"}) {
+		t.Errorf("dry run Applied = %v, want [g.txt]", dry.Applied)
+	}
+	if !equalPaths(dry.Conflicted, []string{"f.txt"}) {
+		t.Errorf("dry run Conflicted = %v, want [f.txt] — one rejected hunk conflicts the file", dry.Conflicted)
+	}
+	if got := readString(t, filepath.Join(wc, "g.txt")); got != "clean\n" {
+		t.Errorf("g.txt = %q after a dry run, want it untouched", got)
+	}
+
+	if _, err := c.Patch(ctx, patch, false); err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	lines := strings.Split(readString(t, filepath.Join(wc, "f.txt")), "\n")
+	if lines[1] != "TWO" {
+		t.Errorf("f.txt line 2 = %q, want the hunk that fits to have been applied", lines[1])
+	}
+	if lines[27] != "28" {
+		t.Errorf("f.txt line 28 = %q, want the rejected hunk left out", lines[27])
+	}
+	rejects, _ := filepath.Glob(filepath.Join(wc, "f.txt*.rej"))
+	if len(rejects) == 0 {
+		t.Error("svn should have written the rejected hunk out beside f.txt")
+	}
+}

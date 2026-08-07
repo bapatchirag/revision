@@ -52,7 +52,7 @@ matching.
 | Panel | Behaviour | Parameters | Free text matches |
 |---|---|---|---|
 | Log | filter | `rev:` (exact revision, with or without the leading `r`), `user:` / `author:`, `path:` (a changed path), `date:` (`YYYY-MM-DD`) | The **full** commit message, not just its first line |
-| Files — Changes, Changelists, Diffs | filter | `state:` (a status code such as `M`, or part of a state name such as `modified`), `cl:` / `changelist:` | The file path |
+| Files — Changes, Changelists, Diffs, Rejects | filter | `state:` (a status code such as `M`, or part of a state name such as `modified`), `cl:` / `changelist:` | The file path |
 | Main / Status | highlight + jump | — | The visible lines |
 
 Anything that is not a recognised `key:value` pair — including an unknown key — is treated
@@ -73,9 +73,10 @@ cl:staged
 Only the staged set. `cl:unstaged` is its counterpart, and `cl:feature-x` narrows to a
 [named changelist](/workflows/changelists/).
 
-The Files filter is shared by all three views — Changes, Changelists and Diffs — so
-switching views with <KeyCap key="[" /> / <KeyCap key="]" /> keeps the same query. In the
-Diffs view only the free text applies, matched against the patch file name.
+The Files filter is shared by all four views — Changes, Changelists, Diffs and Rejects —
+so switching views with <KeyCap key="[" /> / <KeyCap key="]" /> keeps the same query. In
+the Diffs view only the free text applies, matched against the patch file name, and in the
+Rejects view likewise, matched against the reject's path below the root.
 
 ### Log
 
