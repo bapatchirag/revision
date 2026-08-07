@@ -1,0 +1,201 @@
+package app
+
+import (
+	"strconv"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/bapatchirag/revision/internal/config"
+	"github.com/bapatchirag/revision/internal/tui/component"
+	"github.com/bapatchirag/revision/internal/tui/theme"
+)
+
+// previewTheme applies the named palette to every component without persisting,
+// so the settings editor can show each scheme live while its Theme field cycles.
+// It re-themes every component, rebuilds the Files list render closures that
+// captured the previous palette (so row glyph colors follow the switch), and
+// refreshes derived chrome (which re-colorizes the diff via the live theme). An
+// unrecognized name resolves to Auto (matching startup), so it is always safe.
+func (m *Model) previewTheme(name string) {
+	th, _ := theme.ByName(name)
+	m.theme = th
+	m.themeName = name
+	// Pin the color profile before re-theming so the palette (and the diff
+	// re-colorized by refreshChrome) renders in the profile the theme expects.
+	theme.ApplyColorProfile(name)
+	for _, p := range m.panels {
+		p.SetTheme(th)
+	}
+	m.bar.SetTheme(th)
+	m.editor.SetTheme(th)
+	m.nameEditor.SetTheme(th)
+	m.diffEditor.SetTheme(th)
+	m.pathEditor.SetTheme(th)
+	m.modal.SetTheme(th)
+	m.menu.SetTheme(th)
+	m.updateMenu.SetTheme(th)
+	m.form.SetTheme(th)
+	m.toast.SetTheme(th)
+	m.splitDiff.SetTheme(th)
+	m.mergeView.SetTheme(th)
+	m.files.SetRender(renderFileNode(th, m.pendingCount))
+	m.clFiles.SetRender(renderFileNode(th, m.pendingCount))
+	m.changelists.SetRender(renderChangelistGroup(th))
+	m.savedDiffs.SetRender(renderSavedDiff(th))
+	m.rejects.SetRender(renderRejectNode(th))
+	m.refreshChrome()
+}
+
+// openSettings shows the settings editor as a centered overlay, populating it
+// from the current configuration. The directory-diff field is seeded from the
+// live runtime state so the form reflects what the user currently sees; the
+// hide-untracked field is seeded from the persisted config instead, since its
+// keybind is a session-only toggle the editor must not capture.
+func (m *Model) openSettings() tea.Cmd {
+	m.form.SetFields(settingsFields(m.cfg, m.dirDiff))
+	// Remember the active theme so canceling reverts any live Theme-field preview.
+	m.themeBefore = m.cfg.Theme
+	m.configuring = true
+	m.form.Focus()
+	m.sizeForm()
+	return nil
+}
+
+// closeSettings hides the settings editor without saving, reverting any live
+// theme preview to the theme active before the editor opened. submitSettings
+// re-applies the chosen theme afterward when it persists a change.
+func (m *Model) closeSettings() {
+	m.previewTheme(m.themeBefore)
+	m.configuring = false
+	m.form.Blur()
+}
+
+// submitSettings reads the edited fields back into the configuration, applies the
+// changes that take effect immediately (the theme palette, the directory-diff
+// default, the hide-untracked toggle and the display scope), persists the result,
+// and closes the editor. A blank or non-positive log limit is ignored so the
+// previous value survives; a failed save is non-fatal and surfaced as a toast.
+func (m *Model) submitSettings() tea.Cmd {
+	vals := m.form.Values()
+	// Field order mirrors settingsFields.
+	cfg := m.cfg
+	if n, err := strconv.Atoi(strings.TrimSpace(vals[0])); err == nil && n > 0 {
+		cfg.LogLimit = n
+	}
+	cfg.Editor = strings.TrimSpace(vals[1])
+	if cfg.Editor == "" {
+		cfg.Editor = config.Default().Editor
+	}
+	cfg.Theme = strings.TrimSpace(vals[2])
+	cfg.DirectoryDiff = vals[3] == "true"
+	cfg.HideUntracked = vals[4] == "true"
+	cfg.SSHKeyPath = strings.TrimSpace(vals[5])
+	if cfg.SSHKeyPath == "" {
+		cfg.SSHKeyPath = config.Default().SSHKeyPath
+	}
+	cfg.DisplayFrom = strings.TrimSpace(vals[6])
+	cfg.DiffOutputDir = strings.TrimSpace(vals[7])
+	cfg.OptimisticUpdates = vals[8] == "true"
+	cfg.LiveRefresh = vals[9] == "true"
+
+	m.closeSettings()
+
+	themeChanged := cfg.Theme != m.cfg.Theme
+	untrackedChanged := cfg.HideUntracked != m.hideUntracked
+	liveChanged := cfg.LiveRefresh != m.liveRefresh
+	displayChanged := cfg.DisplayFrom != m.cfg.DisplayFrom
+	diffDirChanged := cfg.DiffOutputDir != m.cfg.DiffOutputDir
+	logLimitChanged := cfg.LogLimit != m.cfg.LogLimit
+	m.cfg = cfg
+	m.dirDiff = cfg.DirectoryDiff
+	m.hideUntracked = cfg.HideUntracked
+	m.liveRefresh = cfg.LiveRefresh
+	if themeChanged {
+		m.previewTheme(cfg.Theme)
+	}
+	if untrackedChanged {
+		m.rebuildFilesViews()
+	}
+	// A new display scope re-roots every svn command, so the status and history
+	// on screen no longer describe the tree being shown; load them afresh.
+	var reload tea.Cmd
+	if displayChanged {
+		m.retargetDisplay(cfg.DisplayFrom)
+		m.session.Purge()
+		m.clearDiff()
+		m.loading = true
+		m.refreshChrome()
+		reload = m.beginInitialLoad()
+	}
+	// A new display scope restarts the poller as part of the reload above; on its
+	// own the setting starts or stops it here.
+	if liveChanged && !displayChanged {
+		if m.liveRefresh {
+			reload = tea.Batch(reload, m.startWatch())
+		} else {
+			m.stopWatch()
+		}
+	}
+	// A new output directory means a different set of saved diffs to browse; the
+	// display scope changes it too, since a blank setting resolves to the root.
+	if diffDirChanged || displayChanged {
+		m.savedDiffItems, m.savedDiffsErr = nil, nil
+		m.savedPath, m.savedText, m.savedErr = "", "", false
+		m.rebuildSavedDiffs()
+		reload = tea.Batch(reload, m.reloadSavedDiffsIfShown())
+	}
+	// Rejects are found by walking the source path, so a new display scope is a
+	// different tree to search.
+	if displayChanged {
+		m.clearRejects()
+		reload = tea.Batch(reload, m.reloadRejectsIfShown())
+	}
+	// A new page size puts different revisions on every page, so the anchors
+	// reached with the old one no longer address anything.
+	if logLimitChanged && !displayChanged {
+		m.log.GoTop()
+		reload = tea.Batch(reload, m.resetLogPaging())
+	}
+	if err := config.Save(m.cfg); err != nil {
+		m.showToast("couldn't save settings: "+err.Error(), component.LevelWarning)
+		return reload
+	}
+	m.showToast("settings saved", component.LevelSuccess)
+	if reload != nil {
+		return reload
+	}
+	m.updateMain()
+	if m.source == sourceFiles {
+		return m.diffLoadForSelection()
+	}
+	return nil
+}
+
+// themeFieldIndex is the position of the Theme field within settingsFields; the
+// settings editor live-previews the palette when the field at this index
+// changes, and submitSettings reads the same position back as the theme.
+const themeFieldIndex = 2
+
+// settingsFields builds the settings editor's fields from the configuration, in
+// the field order submitSettings relies on. The directory-diff field is seeded
+// from the live runtime state (dirDiff) rather than cfg so the form shows what
+// the user currently sees. The hide-untracked field, by contrast, is seeded from
+// the persisted configuration: its keybind (U) is a session-only view toggle that
+// must never reach the saved config, so the editor shows and edits the global
+// default independently of any runtime override. Every other field comes straight
+// from the persisted configuration.
+func settingsFields(cfg config.Config, dirDiff bool) []component.Field {
+	return []component.Field{
+		{Label: "Log limit", Kind: component.FieldInt, Value: strconv.Itoa(cfg.LogLimit)},
+		{Label: "Editor", Kind: component.FieldChoice, Value: cfg.Editor, Options: config.EditorValues()},
+		{Label: "Theme", Kind: component.FieldChoice, Value: cfg.Theme, Options: theme.Names()},
+		{Label: "Directory diff", Kind: component.FieldBool, Value: strconv.FormatBool(dirDiff)},
+		{Label: "Hide untracked", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.HideUntracked)},
+		{Label: "SSH key", Kind: component.FieldText, Value: cfg.SSHKeyPath},
+		{Label: "Display from", Kind: component.FieldChoice, Value: cfg.DisplayFrom, Options: config.DisplayFromValues()},
+		{Label: "Diff output", Kind: component.FieldText, Value: cfg.DiffOutputDir},
+		{Label: "Optimistic updates", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.OptimisticUpdates)},
+		{Label: "Live refresh", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.LiveRefresh)},
+	}
+}
