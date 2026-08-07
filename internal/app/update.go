@@ -61,7 +61,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case statusLoadedMsg:
-		if m.statusGen.stale(msg.gen) {
+		if m.gens.status.stale(msg.gen) {
 			return m, nil
 		}
 		m.loading = false
@@ -90,7 +90,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case logLoadedMsg:
 		// A page turn taken while this load was in flight supersedes it.
-		if m.logGen.stale(msg.gen) || msg.page != m.logPage {
+		if m.gens.log.stale(msg.gen) || msg.page != m.logPage {
 			return m, nil
 		}
 		m.logLoading = false
@@ -120,16 +120,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case revisionPendingMsg:
 		// The cursor rested long enough for this revision's paths to be worth
 		// asking svn for.
-		if m.revGen.stale(msg.gen) {
+		if m.gens.rev.stale(msg.gen) {
 			return m, nil
 		}
-		ctx, gen := m.revGen.begin(loadTimeout)
+		ctx, gen := m.gens.rev.begin(loadTimeout)
 		return m, loadRevisionDetailCmd(ctx, m.client, msg.rev, gen)
 
 	case revisionDetailMsg:
 		// A revision that cannot be described leaves its metadata on screen; only
 		// the changed-path list is missing, which is not worth an error for.
-		if m.revGen.stale(msg.gen) || msg.err != nil {
+		if m.gens.rev.stale(msg.gen) || msg.err != nil {
 			return m, nil
 		}
 		m.session.PutRevDetail(msg.rev, msg.paths)
@@ -140,14 +140,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case diffPendingMsg:
 		// The cursor rested long enough for this diff to be worth asking svn for.
-		if m.diffGen.stale(msg.gen) {
+		if m.gens.diff.stale(msg.gen) {
 			return m, nil
 		}
-		ctx, gen := m.diffGen.begin(loadTimeout)
+		ctx, gen := m.gens.diff.begin(loadTimeout)
 		return m, loadDiffCmd(ctx, m.client, msg.key, gen)
 
 	case diffLoadedMsg:
-		if m.diffGen.stale(msg.gen) {
+		if m.gens.diff.stale(msg.gen) {
 			return m, nil
 		}
 		k := diffKey{path: msg.path, dir: msg.dir}
@@ -172,7 +172,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.reloadSavedDiffs()
 
 	case savedDiffsLoadedMsg:
-		if m.savedGen.stale(msg.gen) {
+		if m.gens.saved.stale(msg.gen) {
 			return m, nil
 		}
 		m.savedDiffsErr = msg.err
@@ -185,7 +185,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case savedDiffReadMsg:
-		if m.diffGen.stale(msg.gen) {
+		if m.gens.diff.stale(msg.gen) {
 			return m, nil
 		}
 		m.savedPath = msg.path
@@ -214,7 +214,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.reloadSavedDiffs()
 
 	case rejectsLoadedMsg:
-		if m.rejectGen.stale(msg.gen) {
+		if m.gens.reject.stale(msg.gen) {
 			return m, nil
 		}
 		m.rejectsErr = msg.err
@@ -227,7 +227,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case rejectReadMsg:
-		if m.diffGen.stale(msg.gen) {
+		if m.gens.diff.stale(msg.gen) {
 			return m, nil
 		}
 		m.rejectPath = msg.path

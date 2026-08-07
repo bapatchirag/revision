@@ -21,7 +21,7 @@ func (m *Model) loadLogPage(page int) tea.Cmd {
 	if p, ok := m.session.LogPage(k); ok {
 		// Whatever is in flight was for the page just left; its reply must not
 		// land on top of this one.
-		m.logGen.next()
+		m.gens.log.next()
 		m.logLoading = false
 		m.applyLogPage(p, nil)
 		return m.revisionDetailForSelection()
@@ -29,7 +29,7 @@ func (m *Model) loadLogPage(page int) tea.Cmd {
 	// The rows of the page being left stay on screen, dimmed, until the new page
 	// lands, so the panel never blanks mid-turn.
 	m.logLoading = true
-	ctx, gen := m.logGen.begin(loadTimeout)
+	ctx, gen := m.gens.log.begin(loadTimeout)
 	return loadLogCmd(ctx, m.client, k.anchor, page, m.cfg.LogLimit, gen)
 }
 
@@ -147,7 +147,7 @@ func (m *Model) logFooter() string {
 func (m *Model) revisionDetailForSelection() tea.Cmd {
 	// Whatever is in flight was for the row just left; its reply is of no use
 	// now, so it is dropped rather than rendered.
-	gen := m.revGen.next()
+	gen := m.gens.rev.next()
 	entry, ok := m.log.Selected()
 	if !ok || entry.Revision == "" {
 		return nil

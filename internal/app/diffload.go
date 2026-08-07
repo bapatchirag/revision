@@ -13,7 +13,7 @@ import (
 // still in flight and stamps the new one, so only the reply the model is still
 // waiting for is applied.
 func (m *Model) reloadStatus() tea.Cmd {
-	ctx, gen := m.statusGen.begin(loadTimeout)
+	ctx, gen := m.gens.status.begin(loadTimeout)
 	return loadStatusCmd(ctx, m.client, gen)
 }
 
@@ -24,14 +24,14 @@ func (m *Model) loadDiff(k diffKey) tea.Cmd {
 	if e, ok := m.session.Diff(k, m.diffStamp(k)); ok {
 		// Whatever is in flight was for the row just left; its reply must not
 		// land on top of this one.
-		m.diffGen.next()
+		m.gens.diff.next()
 		m.applyDiff(k, e)
 		if m.source == sourceFiles {
 			m.updateMain()
 		}
 		return nil
 	}
-	gen := m.diffGen.next()
+	gen := m.gens.diff.next()
 	return tea.Tick(diffDebounce, func(time.Time) tea.Msg {
 		return diffPendingMsg{key: k, gen: gen}
 	})
@@ -76,7 +76,7 @@ func (m *Model) rederiveDiff() {
 }
 
 func (m *Model) reloadSavedDiffs() tea.Cmd {
-	return loadSavedDiffsCmd(m.diffDir(), m.savedGen.next())
+	return loadSavedDiffsCmd(m.diffDir(), m.gens.saved.next())
 }
 
 // reloadSavedDiffsIfShown re-scans the patch files only while the Diffs view is
@@ -91,14 +91,14 @@ func (m *Model) reloadSavedDiffsIfShown() tea.Cmd {
 }
 
 func (m *Model) readSavedDiff(path string) tea.Cmd {
-	return readSavedDiffCmd(path, m.diffGen.next())
+	return readSavedDiffCmd(path, m.gens.diff.next())
 }
 
 // reloadRejects re-walks the source path for the .rej files a patch left behind.
 // They are ignored by svn and so are invisible to the Changes view; the disk is
 // the only place they can be found.
 func (m *Model) reloadRejects() tea.Cmd {
-	return loadRejectsCmd(m.patchRoot(), m.rejectGen.next())
+	return loadRejectsCmd(m.patchRoot(), m.gens.reject.next())
 }
 
 // reloadRejectsIfShown re-walks for rejects only while the Rejects view is the
@@ -113,7 +113,7 @@ func (m *Model) reloadRejectsIfShown() tea.Cmd {
 }
 
 func (m *Model) readReject(path string) tea.Cmd {
-	return readRejectCmd(path, m.diffGen.next())
+	return readRejectCmd(path, m.gens.diff.next())
 }
 
 // diffLoadForSelection returns a command to load the diff that Main should show
@@ -133,7 +133,7 @@ func (m *Model) diffLoadForSelection() tea.Cmd {
 	if !ok || m.diffPath == k.path {
 		// There is nothing to fetch, so a load still in flight is for a row that
 		// has been left; its reply must not land on this one.
-		m.diffGen.next()
+		m.gens.diff.next()
 		return nil
 	}
 	return m.loadDiff(k)

@@ -186,13 +186,13 @@ func TestSupersededDiffReplyIgnored(t *testing.T) {
 
 	// The status load requested alpha's diff; the two moves supersede it in turn.
 	move(tea.KeyDown)
-	beta := m.diffGen.gen
+	beta := m.gens.diff.gen
 	move(tea.KeyUp)
-	if m.diffGen.gen == beta {
+	if m.gens.diff.gen == beta {
 		t.Fatal("expected returning to alpha to issue a fresh diff load")
 	}
 
-	next, _ := m.Update(diffLoadedMsg{path: "alpha.txt", diff: "+fresh alpha", gen: m.diffGen.gen})
+	next, _ := m.Update(diffLoadedMsg{path: "alpha.txt", diff: "+fresh alpha", gen: m.gens.diff.gen})
 	m = next.(*Model)
 	if main := stripANSI(m.main.View()); !strings.Contains(main, "fresh alpha") {
 		t.Fatalf("main should show the current selection's diff, got:\n%s", main)
@@ -302,7 +302,7 @@ func TestCachedDiffSupersedesLoadInFlight(t *testing.T) {
 	m = next.(*Model)
 
 	move(tea.KeyDown) // beta: not cached, so a load is now in flight
-	inFlight := m.diffGen.gen
+	inFlight := m.gens.diff.gen
 	move(tea.KeyUp) // alpha: answered from the session before beta replies
 
 	next, _ = m.Update(diffLoadedMsg{path: "beta.txt", diff: "+beta body", gen: inFlight})
@@ -2338,14 +2338,14 @@ func TestInitDefersHistoryAndSavedDiffs(t *testing.T) {
 	m := sizedModel(t)
 	m.Init()
 
-	if m.logRequested || m.logGen.gen != 0 {
-		t.Errorf("startup should not fetch a page of history (requested=%v gen=%d)", m.logRequested, m.logGen.gen)
+	if m.logRequested || m.gens.log.gen != 0 {
+		t.Errorf("startup should not fetch a page of history (requested=%v gen=%d)", m.logRequested, m.gens.log.gen)
 	}
-	if m.savedGen.gen != 0 {
-		t.Errorf("savedGen = %d, want 0: the saved diffs are scanned when the Diffs view is opened", m.savedGen.gen)
+	if m.gens.saved.gen != 0 {
+		t.Errorf("gens.saved = %d, want 0: the saved diffs are scanned when the Diffs view is opened", m.gens.saved.gen)
 	}
-	if m.statusGen.gen != 1 {
-		t.Errorf("statusGen = %d, want 1: status is the load startup waits on", m.statusGen.gen)
+	if m.gens.status.gen != 1 {
+		t.Errorf("gens.status = %d, want 1: status is the load startup waits on", m.gens.status.gen)
 	}
 }
 
@@ -2355,8 +2355,8 @@ func TestHistoryIsFetchedOnce(t *testing.T) {
 
 	// The first status has landed, so the page can be prefetched behind it.
 	m = loadItems(t, m, nil)
-	if !m.logRequested || m.logGen.gen != 1 {
-		t.Fatalf("the first status should prefetch page 1 (requested=%v gen=%d)", m.logRequested, m.logGen.gen)
+	if !m.logRequested || m.gens.log.gen != 1 {
+		t.Fatalf("the first status should prefetch page 1 (requested=%v gen=%d)", m.logRequested, m.gens.log.gen)
 	}
 
 	// Neither another status nor a look at the panel asks for it again.
@@ -2365,8 +2365,8 @@ func TestHistoryIsFetchedOnce(t *testing.T) {
 	if cmd != nil {
 		t.Error("focusing the Log panel should not re-fetch a page already asked for")
 	}
-	if m.logGen.gen != 1 {
-		t.Errorf("logGen = %d, want 1: history is fetched once", m.logGen.gen)
+	if m.gens.log.gen != 1 {
+		t.Errorf("gens.log = %d, want 1: history is fetched once", m.gens.log.gen)
 	}
 }
 
@@ -2376,13 +2376,13 @@ func TestLogPanelFocusFetchesHistoryAndReportsTheWait(t *testing.T) {
 	// Focus the Log panel before the status arrives, so the panel is the first
 	// to ask for history.
 	m, cmd := pressRune(t, m, '3')
-	if cmd == nil || m.logGen.gen != 1 {
-		t.Fatalf("the first look at the Log panel should fetch page 1 (gen=%d)", m.logGen.gen)
+	if cmd == nil || m.gens.log.gen != 1 {
+		t.Fatalf("the first look at the Log panel should fetch page 1 (gen=%d)", m.gens.log.gen)
 	}
 
 	m = loadItems(t, m, nil)
-	if m.logGen.gen != 1 {
-		t.Errorf("logGen = %d, want 1: the status prefetch should find the page already asked for", m.logGen.gen)
+	if m.gens.log.gen != 1 {
+		t.Errorf("gens.log = %d, want 1: the status prefetch should find the page already asked for", m.gens.log.gen)
 	}
 	if main := stripANSI(m.main.View()); !strings.Contains(main, "Loading history") {
 		t.Errorf("expected the Log panel to report the wait, got:\n%s", main)

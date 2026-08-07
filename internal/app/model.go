@@ -130,17 +130,9 @@ type Model struct {
 	// stamps each such change so a reply can be matched to the state it belongs to.
 	optimistic    *optimisticState
 	optimisticTok uint64
-	// diffGen, statusGen, logGen and savedGen stamp the loads whose replies can
-	// be overtaken by a later request, so a superseded reply is dropped instead
-	// of rendered. diffGen covers every source feeding Main — the working copy,
-	// the saved-patch reader and the reject reader — since only one of them is on
-	// screen. savedGen and rejectGen stamp the two directory scans.
-	diffGen   loadGen
-	statusGen loadGen
-	logGen    loadGen
-	revGen    loadGen
-	savedGen  loadGen
-	rejectGen loadGen
+	// gens stamps the loads whose replies can be overtaken by a later request, so
+	// a superseded reply is dropped instead of rendered.
+	gens loadGens
 	// mainKey identifies the selection mainText was rendered for, so a refresh of
 	// what is already on screen can keep the reader's scroll position.
 	mainKey  string
@@ -409,12 +401,7 @@ func (m *Model) Init() tea.Cmd {
 // off to a self-update. Nothing was written outside the process, so there is
 // nothing to clean up beyond memory. It is safe to call more than once.
 func (m *Model) Close() {
-	m.diffGen.stop()
-	m.statusGen.stop()
-	m.logGen.stop()
-	m.revGen.stop()
-	m.savedGen.stop()
-	m.rejectGen.stop()
+	m.gens.stopAll()
 	m.stopWatch()
 	m.session.Close()
 	m.clearDiff()
