@@ -62,6 +62,27 @@ func (g *loadGen) begin(timeout time.Duration) (context.Context, uint64) {
 // and is always applied.
 func (g *loadGen) stale(gen uint64) bool { return gen != 0 && gen != g.gen }
 
+// loadGens is every class of load the model stamps. diff covers every source
+// feeding Main — the working copy, the saved-patch reader and the reject reader
+// — since only one of them is on screen; saved and reject stamp the two
+// directory scans.
+type loadGens struct {
+	diff   loadGen
+	status loadGen
+	log    loadGen
+	rev    loadGen
+	saved  loadGen
+	reject loadGen
+}
+
+// stopAll abandons every load in flight, releasing the context each holds. A
+// generation added above is abandoned at shutdown by listing it here.
+func (g *loadGens) stopAll() {
+	for _, l := range []*loadGen{&g.diff, &g.status, &g.log, &g.rev, &g.saved, &g.reject} {
+		l.stop()
+	}
+}
+
 // superseded reports whether ctx was cancelled by a later request for the same
 // data, in which case its reply is dropped. A deadline that simply expired is a
 // real failure and still surfaces.

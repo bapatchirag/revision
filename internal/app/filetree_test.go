@@ -205,3 +205,24 @@ func TestFileTreeIsRebuiltWhenItsInputsMove(t *testing.T) {
 		}
 	}
 }
+
+func TestFileLeafStats(t *testing.T) {
+	// A tree with the synthetic root, one directory and two files under it.
+	rows := buildFileTree([]svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "src/b.go", State: svn.StateModified},
+	}, nil)
+
+	if _, count := fileLeafStats(rows, 0); count != 2 {
+		t.Fatalf("leaf count = %d, want 2 (root and dir rows must not count)", count)
+	}
+	// Cursor on the root and the directory rows sits above/at zero passed leaves.
+	if index, _ := fileLeafStats(rows, 0); index != 0 {
+		t.Errorf("root cursor index = %d, want 0", index)
+	}
+	// Cursor on the first and second file leaf gives their 1-based positions.
+	last := len(rows) - 1
+	if index, _ := fileLeafStats(rows, last); index != 2 {
+		t.Errorf("last-leaf cursor index = %d, want 2", index)
+	}
+}
