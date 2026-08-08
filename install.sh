@@ -43,10 +43,13 @@ main() {
 	target="${os}-${arch}"
 	asset="${BINARY}-${target}"
 	version="${REVISION_VERSION:-}"
+	# REVISION_BASE_URL is not for general use; it exists so the test suite can
+	# serve releases from a local server.
+	base="${REVISION_BASE_URL:-https://github.com}"
 	if [ -n "$version" ]; then
-		url="https://github.com/${REPO}/releases/download/${version}/${asset}"
+		url="${base}/${REPO}/releases/download/${version}/${asset}"
 	else
-		url="https://github.com/${REPO}/releases/latest/download/${asset}"
+		url="${base}/${REPO}/releases/latest/download/${asset}"
 	fi
 
 	tmp=$(mktemp -d)

@@ -38,6 +38,11 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
+      # install.sh is what replaces the binary on a user's machine, so it is held
+      # to the same standard as the Go it is shipped with. shellcheck ships with
+      # the runner image.
+      - name: Shellcheck
+        run: shellcheck install.sh
 
   site:
     runs-on: ubuntu-latest
