@@ -79,55 +79,76 @@ func TestComparePreOrdersPreReleases(t *testing.T) {
 	}
 }
 
-// stubPath makes dir the whole of PATH, with an executable stub for each name
-// that records the argv it was called with into argv.txt.
+// stubPath makes the returned directory the whole of PATH, with an executable
+// stub for each name that records the argv it was called with into argv.txt and
+// the pinned version it inherited into env.txt.
 func stubPath(t *testing.T, names ...string) string {
 	t.Helper()
 	dir := t.TempDir()
-	argv := filepath.Join(dir, "argv.txt")
 	for _, name := range names {
-		body := "#!/bin/sh\necho \"$0 $@\" >> " + argv + "\n"
+		body := "#!/bin/sh\n" +
+			"echo \"$0 $@\" >> " + filepath.Join(dir, "argv.txt") + "\n" +
+			"echo \"REVISION_VERSION=$REVISION_VERSION\" >> " + filepath.Join(dir, "env.txt") + "\n"
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
 			t.Fatalf("write stub %s: %v", name, err)
 		}
 	}
 	t.Setenv("PATH", dir)
-	return argv
+	return dir
 }
 
 func TestExecUpdateRequiresItsTool(t *testing.T) {
 	stubPath(t) // an empty PATH
-	err := execUpdate("curl", "sh", "-c", "true")
+	err := execUpdate("curl", nil, "sh", "-c", "true")
 	if err == nil || !strings.Contains(err.Error(), "not found on your PATH") {
 		t.Errorf("err = %v, want the missing tool named", err)
 	}
 }
 
+func TestRunNeedsAReleaseToPinTo(t *testing.T) {
+	dir := stubPath(t, "go")
+	if err := Run(MethodGo, Release{}); err == nil {
+		t.Fatal("expected an error without a release to install")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "argv.txt")); err == nil {
+		t.Error("nothing should have been run without a release")
+	}
+}
+
 func TestRunBuildsTheRightCommand(t *testing.T) {
+	rel := Release{Tag: "v1.4.0", Version: "1.4.0"}
+
 	t.Run("go install", func(t *testing.T) {
-		argv := stubPath(t, "go")
-		if err := Run(MethodGo); err != nil {
+		dir := stubPath(t, "go")
+		if err := Run(MethodGo, rel); err != nil {
 			t.Fatalf("Run(MethodGo): %v", err)
 		}
-		got := readArgv(t, argv)
-		if !strings.Contains(got, "install") || !strings.Contains(got, goModule+"@latest") {
-			t.Errorf("argv = %q, want `go install %s@latest`", got, goModule)
+		got := readFile(t, filepath.Join(dir, "argv.txt"))
+		if !strings.Contains(got, "install") || !strings.Contains(got, goModule+"@"+rel.Tag) {
+			t.Errorf("argv = %q, want `go install %s@%s`", got, goModule, rel.Tag)
+		}
+		if strings.Contains(got, "@latest") {
+			t.Errorf("argv = %q, want the approved tag rather than @latest", got)
 		}
 	})
 
 	t.Run("curl", func(t *testing.T) {
-		argv := stubPath(t, "curl", "sh")
-		if err := Run(MethodCurl); err != nil {
+		dir := stubPath(t, "curl", "sh")
+		if err := Run(MethodCurl, rel); err != nil {
 			t.Fatalf("Run(MethodCurl): %v", err)
 		}
-		got := readArgv(t, argv)
+		got := readFile(t, filepath.Join(dir, "argv.txt"))
 		if !strings.Contains(got, "-c") || !strings.Contains(got, installURL) {
 			t.Errorf("argv = %q, want the install script piped through sh", got)
+		}
+		env := readFile(t, filepath.Join(dir, "env.txt"))
+		if !strings.Contains(env, "REVISION_VERSION="+rel.Tag) {
+			t.Errorf("env = %q, want the install script pinned to %s", env, rel.Tag)
 		}
 	})
 }
 
-func readArgv(t *testing.T, path string) string {
+func readFile(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
 	if err != nil {

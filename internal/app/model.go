@@ -416,10 +416,11 @@ func (m *Model) Close() {
 	m.cmdLog.clear()
 }
 
-// PendingUpdate reports the update method the user chose before quitting, if
-// any. The command layer runs it once the program has exited.
-func (m *Model) PendingUpdate() (selfupdate.Method, bool) {
-	return m.updateMethod, m.updateChosen
+// PendingUpdate reports the update method the user chose before quitting and
+// the release it was chosen for, if any. The command layer runs it once the
+// program has exited.
+func (m *Model) PendingUpdate() (selfupdate.Method, selfupdate.Release, bool) {
+	return m.updateMethod, m.updateRel, m.updateChosen
 }
 
 // SetStartupNotice schedules text to appear as a transient notice as soon as the

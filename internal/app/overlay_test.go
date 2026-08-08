@@ -191,9 +191,12 @@ func TestUpdatePromptCurlQuitsWithPendingMethod(t *testing.T) {
 	if _, ok := cmd().(tea.QuitMsg); !ok {
 		t.Fatalf("expected tea.QuitMsg, got %T", cmd())
 	}
-	method, chosen := m.PendingUpdate()
+	method, rel, chosen := m.PendingUpdate()
 	if !chosen || method != selfupdate.MethodCurl {
 		t.Errorf("PendingUpdate() = (%v, %v), want (curl, true)", method, chosen)
+	}
+	if rel != availableRelease {
+		t.Errorf("PendingUpdate() release = %+v, want %+v", rel, availableRelease)
 	}
 }
 
@@ -210,9 +213,12 @@ func TestUpdatePromptGoQuitsWithPendingMethod(t *testing.T) {
 	next, _ = m.Update(cmd())
 	m = next.(*Model)
 
-	method, chosen := m.PendingUpdate()
+	method, rel, chosen := m.PendingUpdate()
 	if !chosen || method != selfupdate.MethodGo {
 		t.Errorf("PendingUpdate() = (%v, %v), want (go, true)", method, chosen)
+	}
+	if rel != availableRelease {
+		t.Errorf("PendingUpdate() release = %+v, want %+v", rel, availableRelease)
 	}
 }
 
@@ -236,7 +242,7 @@ func TestUpdatePromptDeclineDismissesWithoutUpdate(t *testing.T) {
 	if m.updating {
 		t.Error("the prompt should close after declining")
 	}
-	if _, chosen := m.PendingUpdate(); chosen {
+	if _, _, chosen := m.PendingUpdate(); chosen {
 		t.Error("declining must not record a pending update")
 	}
 }
@@ -255,7 +261,7 @@ func TestUpdatePromptEscDismisses(t *testing.T) {
 	if m.updating {
 		t.Error("esc should dismiss the update prompt")
 	}
-	if _, chosen := m.PendingUpdate(); chosen {
+	if _, _, chosen := m.PendingUpdate(); chosen {
 		t.Error("dismissing must not record a pending update")
 	}
 	if view := stripANSI(m.View()); strings.Contains(view, "Update available") {

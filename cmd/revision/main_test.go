@@ -206,18 +206,23 @@ func TestPromptMethod(t *testing.T) {
 }
 
 func TestApplyUpdate(t *testing.T) {
+	rel := selfupdate.Release{Tag: "v1.4.0", Version: "1.4.0"}
+
 	stubPath(t, map[string]string{"go": "exit 0\n"})
 	var err error
-	out := captureOutput(t, func() { err = applyUpdate(selfupdate.MethodGo) })
+	out := captureOutput(t, func() { err = applyUpdate(selfupdate.MethodGo, rel) })
 	if err != nil {
 		t.Fatalf("applyUpdate: %v", err)
+	}
+	if !strings.Contains(out, rel.Tag) {
+		t.Errorf("output = %q, want the release being installed named", out)
 	}
 	if !strings.Contains(out, "Update complete") {
 		t.Errorf("output = %q, want the restart hint", out)
 	}
 
 	stubPath(t, nil)
-	captureOutput(t, func() { err = applyUpdate(selfupdate.MethodGo) })
+	captureOutput(t, func() { err = applyUpdate(selfupdate.MethodGo, rel) })
 	if err == nil || !strings.Contains(err.Error(), "update failed") {
 		t.Errorf("err = %v, want the missing tool reported as a failed update", err)
 	}

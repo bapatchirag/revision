@@ -184,15 +184,22 @@ func Latest(ctx context.Context) (Release, error) {
 	}, nil
 }
 
-// Run applies an update using the chosen method, streaming the underlying
-// command's output to the current terminal. It fails fast with a clear message
-// when the required tool (curl or go) is not on the PATH.
-func Run(m Method) error {
+// Run applies an update using the chosen method, pinned to the release the user
+// approved, and streams the underlying command's output to the current
+// terminal. It fails fast with a clear message when the required tool (curl or
+// go) is not on the PATH.
+func Run(m Method, rel Release) error {
+	if rel.Tag == "" {
+		return errors.New("no release to install")
+	}
 	switch m {
 	case MethodGo:
-		return execUpdate("go", "go", "install", goModule+"@latest")
+		return execUpdate("go", nil, "go", "install", goModule+"@"+rel.Tag)
 	default:
-		return execUpdate("curl", "sh", "-c", "curl -fsSL "+installURL+" | sh")
+		// install.sh takes the tag from the environment, so the script installs
+		// the release that was announced instead of re-resolving "latest".
+		env := []string{"REVISION_VERSION=" + rel.Tag}
+		return execUpdate("curl", env, "sh", "-c", "curl -fsSL "+installURL+" | sh")
 	}
 }
 
@@ -207,13 +214,15 @@ func (m Method) Label() string {
 }
 
 // execUpdate checks that require is installed, then runs name/args with the
-// process's own stdio so the user sees live progress.
-func execUpdate(require, name string, args ...string) error {
+// process's own stdio so the user sees live progress. env adds to the process
+// environment the child inherits.
+func execUpdate(require string, env []string, name string, args ...string) error {
 	if _, err := exec.LookPath(require); err != nil {
 		return fmt.Errorf("%s is required for this update method but was not found on your PATH", require)
 	}
 	cmd := exec.Command(name, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	cmd.Env = append(os.Environ(), env...)
 	return cmd.Run()
 }
 

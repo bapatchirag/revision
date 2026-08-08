@@ -129,8 +129,8 @@ func run(path string, build selfupdate.Build) error {
 	// If the user chose to self-update from the startup prompt, apply it now
 	// that the alt-screen is gone and the terminal is back to normal.
 	if m, ok := final.(*app.Model); ok {
-		if method, chosen := m.PendingUpdate(); chosen {
-			return applyUpdate(method)
+		if method, rel, chosen := m.PendingUpdate(); chosen {
+			return applyUpdate(method, rel)
 		}
 	}
 	return nil
@@ -165,7 +165,7 @@ func runUpdate(build selfupdate.Build, method string) error {
 		_, _ = fmt.Println("Update cancelled.")
 		return nil
 	}
-	return applyUpdate(m)
+	return applyUpdate(m, rel)
 }
 
 // resolveMethod turns the --update-with flag into a method. An explicit "curl"
@@ -208,11 +208,11 @@ func promptMethod() (selfupdate.Method, bool) {
 	}
 }
 
-// applyUpdate runs the chosen update method and prints a follow-up hint on
-// success so the user knows to restart.
-func applyUpdate(method selfupdate.Method) error {
-	_, _ = fmt.Printf("Updating revision with %s…\n", method.Label())
-	if err := selfupdate.Run(method); err != nil {
+// applyUpdate runs the chosen update method for the approved release and prints
+// a follow-up hint on success so the user knows to restart.
+func applyUpdate(method selfupdate.Method, rel selfupdate.Release) error {
+	_, _ = fmt.Printf("Updating revision to %s with %s…\n", rel.Tag, method.Label())
+	if err := selfupdate.Run(method, rel); err != nil {
 		return fmt.Errorf("update failed: %w", err)
 	}
 	_, _ = fmt.Println("Update complete. Re-run 'revision' to use the new version.")
