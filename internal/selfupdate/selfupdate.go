@@ -34,11 +34,6 @@ const (
 	// any binary produced from it.
 	module = "github.com/" + repo
 
-	// installURL is the raw install script used by the curl update path. It is
-	// the same one-liner documented in the README and installs the latest
-	// release for the host OS/arch.
-	installURL = "https://raw.githubusercontent.com/bapatchirag/revision/main/install.sh"
-
 	// goModule is the module path used by the `go install` update path.
 	goModule = module + "/cmd/revision"
 
@@ -51,6 +46,10 @@ const (
 // apiBase is the GitHub REST API root. It is a variable so tests can point it at
 // a local server.
 var apiBase = "https://api.github.com"
+
+// rawBase serves repository files. It is a variable so tests can point it at a
+// local server.
+var rawBase = "https://raw.githubusercontent.com"
 
 // httpClient bounds every update check so a slow or unreachable network can
 // never hang startup; callers still pass a context for finer control.
@@ -78,7 +77,7 @@ func installDir() (string, error) {
 type Method int
 
 const (
-	// MethodCurl pipes the install script through the shell (curl | sh).
+	// MethodCurl runs the install script published with the release.
 	MethodCurl Method = iota
 	// MethodGo runs `go install <module>@latest`.
 	MethodGo
@@ -196,6 +195,9 @@ func Latest(ctx context.Context) (Release, error) {
 	if payload.TagName == "" {
 		return Release{}, errors.New("github: latest release has no tag")
 	}
+	if !tagRE.MatchString(payload.TagName) {
+		return Release{}, fmt.Errorf("github: unusable release tag %q", payload.TagName)
+	}
 	return Release{
 		Tag:     payload.TagName,
 		Version: strings.TrimPrefix(payload.TagName, "v"),
@@ -206,7 +208,7 @@ func Latest(ctx context.Context) (Release, error) {
 // Run applies an update using the chosen method, pinned to the release the user
 // approved and aimed at the directory the running binary occupies, and streams
 // the underlying command's output to the current terminal. It fails fast with a
-// clear message when the required tool (curl or go) is not on the PATH.
+// clear message when the required tool (sh or go) is not on the PATH.
 func Run(m Method, rel Release) error {
 	if rel.Tag == "" {
 		return errors.New("no release to install")
@@ -222,6 +224,11 @@ func Run(m Method, rel Release) error {
 		env := []string{"GOBIN=" + dir}
 		return execUpdate("go", env, "go", "install", goModule+"@"+rel.Tag)
 	default:
+		script, cleanup, err := fetchInstallScript(rel)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
 		// install.sh takes both from the environment, so the script installs the
 		// release that was announced, over the binary that asked for it, instead
 		// of re-resolving "latest" into a directory of its own choosing.
@@ -229,8 +236,50 @@ func Run(m Method, rel Release) error {
 			"REVISION_VERSION=" + rel.Tag,
 			"REVISION_INSTALL_DIR=" + dir,
 		}
-		return execUpdate("curl", env, "sh", "-c", "curl -fsSL "+installURL+" | sh")
+		return execUpdate("sh", env, "sh", script)
 	}
+}
+
+// fetchInstallScript downloads the install script as it was published with the
+// given release into a private temporary directory, returning its path and a
+// cleanup. Fetching it here rather than piping `curl … | sh` means a failed
+// download is an error rather than an empty script the shell exits 0 on, and
+// pins the script to the tag being installed instead of whatever the default
+// branch happens to hold.
+func fetchInstallScript(rel Release) (string, func(), error) {
+	url := rawBase + "/" + repo + "/" + rel.Tag + "/install.sh"
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	req.Header.Set("User-Agent", "revision-selfupdate")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", nil, fmt.Errorf("downloading the install script: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("downloading the install script for %s: unexpected status %s", rel.Tag, resp.Status)
+	}
+	// Bound the body so a malformed or hostile response cannot exhaust memory.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", nil, fmt.Errorf("downloading the install script: %w", err)
+	}
+
+	// MkdirTemp is owner-only, so nothing can swap the script between the write
+	// and the shell reading it.
+	dir, err := os.MkdirTemp("", "revision-update-")
+	if err != nil {
+		return "", nil, err
+	}
+	path := filepath.Join(dir, "install.sh")
+	if err := os.WriteFile(path, body, 0o700); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", nil, err
+	}
+	return path, func() { _ = os.RemoveAll(dir) }, nil
 }
 
 // Label returns a short human name for a method, used in prompts and messages.
@@ -290,6 +339,11 @@ func parseSemver(s string) (semver, bool) {
 	}
 	return semver{major: nums[0], minor: nums[1], patch: nums[2], pre: pre}, true
 }
+
+// tagRE bounds a release tag to the characters a version tag is made of. The
+// tag becomes a path segment of the install-script URL and an argument to
+// `go install`, so a hostile API response must not be able to steer either.
+var tagRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
 
 // pseudoVersionRE matches the timestamp and commit the Go toolchain appends
 // when it synthesises a version for an untagged commit, in all three of the

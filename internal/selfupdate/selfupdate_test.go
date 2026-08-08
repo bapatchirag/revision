@@ -223,6 +223,19 @@ func TestCheckSurfacesHTTPError(t *testing.T) {
 	}
 }
 
+func TestLatestRejectsAnUnusableTag(t *testing.T) {
+	// The tag becomes a path segment of the install-script URL and an argument
+	// to `go install`, so it is checked before it is used for either.
+	for _, tag := range []string{"../../elsewhere/main", "v1.4.0 rm -rf /", "-v1.4.0"} {
+		t.Run(tag, func(t *testing.T) {
+			withAPI(t, tag, http.StatusOK)
+			if _, err := Latest(context.Background()); err == nil {
+				t.Errorf("Latest() accepted the tag %q", tag)
+			}
+		})
+	}
+}
+
 func TestMethodLabel(t *testing.T) {
 	if MethodCurl.Label() != "curl" {
 		t.Errorf("MethodCurl.Label() = %q", MethodCurl.Label())

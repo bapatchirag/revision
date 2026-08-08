@@ -2,6 +2,8 @@ package selfupdate
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,6 +110,90 @@ func stubExecutable(t *testing.T, path string) {
 	t.Cleanup(func() { executablePath = prev })
 }
 
+// failPath is stubPath with stubs that exit non-zero, so a failing update can be
+// checked for being reported as one.
+func failPath(t *testing.T, names ...string) string {
+	t.Helper()
+	dir := stubPath(t, names...)
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 3\n"), 0o755); err != nil {
+			t.Fatalf("write failing stub %s: %v", name, err)
+		}
+	}
+	return dir
+}
+
+// withRaw serves body as the install script published with tag, for the
+// duration of a test.
+func withRaw(t *testing.T, tag, body string, status int) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/"+repo+"/"+tag+"/install.sh" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(status)
+		if status == http.StatusOK {
+			_, _ = w.Write([]byte(body))
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	prev := rawBase
+	rawBase = srv.URL
+	t.Cleanup(func() { rawBase = prev })
+}
+
+func TestFetchInstallScriptTakesItFromTheTag(t *testing.T) {
+	const want = "#!/bin/sh\necho installed\n"
+	withRaw(t, "v1.4.0", want, http.StatusOK)
+
+	path, cleanup, err := fetchInstallScript(Release{Tag: "v1.4.0"})
+	if err != nil {
+		t.Fatalf("fetchInstallScript: %v", err)
+	}
+	if got := readFile(t, path); got != want {
+		t.Errorf("script = %q, want %q", got, want)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat script: %v", err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Errorf("script mode = %v, want it readable by its owner alone", info.Mode().Perm())
+	}
+
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("the downloaded script should not outlive the update")
+	}
+}
+
+func TestFetchInstallScriptReportsAFailedDownload(t *testing.T) {
+	// The script is served for v1.4.0 only, so another tag 404s — as a release
+	// published before the script was pinned would.
+	withRaw(t, "v1.4.0", "", http.StatusOK)
+
+	if _, _, err := fetchInstallScript(Release{Tag: "v9.9.9"}); err == nil {
+		t.Fatal("expected an error when the script cannot be downloaded")
+	} else if !strings.Contains(err.Error(), "v9.9.9") {
+		t.Errorf("err = %v, want the tag named", err)
+	}
+}
+
+func TestRunReportsAFailingInstallScript(t *testing.T) {
+	// A `curl … | sh` pipeline exits with the status of the shell, which is 0
+	// even when the download produced nothing. Running the script directly is
+	// what makes its failure visible.
+	failPath(t, "sh")
+	stubExecutable(t, filepath.Join(t.TempDir(), "revision"))
+	withRaw(t, "v1.4.0", "#!/bin/sh\nexit 3\n", http.StatusOK)
+
+	if err := Run(MethodCurl, Release{Tag: "v1.4.0"}); err == nil {
+		t.Fatal("expected a failing install script to be reported")
+	}
+}
+
 func TestInstallDirFollowsTheRunningBinary(t *testing.T) {
 	home := t.TempDir()
 	stubExecutable(t, filepath.Join(home, "revision"))
@@ -205,15 +291,19 @@ func TestRunBuildsTheRightCommand(t *testing.T) {
 	})
 
 	t.Run("curl", func(t *testing.T) {
-		dir := stubPath(t, "curl", "sh")
+		dir := stubPath(t, "sh")
 		home := t.TempDir()
 		stubExecutable(t, filepath.Join(home, "revision"))
+		withRaw(t, rel.Tag, "#!/bin/sh\nexit 0\n", http.StatusOK)
 		if err := Run(MethodCurl, rel); err != nil {
 			t.Fatalf("Run(MethodCurl): %v", err)
 		}
 		got := readFile(t, filepath.Join(dir, "argv.txt"))
-		if !strings.Contains(got, "-c") || !strings.Contains(got, installURL) {
-			t.Errorf("argv = %q, want the install script piped through sh", got)
+		if !strings.Contains(got, "install.sh") {
+			t.Errorf("argv = %q, want the downloaded script run directly", got)
+		}
+		if strings.Contains(got, "|") {
+			t.Errorf("argv = %q, want no pipeline to swallow the exit status", got)
 		}
 		env := readFile(t, filepath.Join(dir, "env.txt"))
 		if !strings.Contains(env, "REVISION_VERSION="+rel.Tag) {
