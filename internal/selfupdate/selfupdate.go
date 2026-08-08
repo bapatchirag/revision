@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime/debug"
 	"strconv"
@@ -54,6 +55,24 @@ var apiBase = "https://api.github.com"
 // httpClient bounds every update check so a slow or unreachable network can
 // never hang startup; callers still pass a context for finer control.
 var httpClient = &http.Client{Timeout: 8 * time.Second}
+
+// executablePath locates the running binary. It is a variable so tests can
+// stand a temporary path in for it.
+var executablePath = os.Executable
+
+// installDir is the directory an update has to land in: the one the running
+// binary occupies. Symlinks are resolved so the update replaces the real file
+// rather than leaving a stale copy behind the link.
+func installDir() (string, error) {
+	exe, err := executablePath()
+	if err != nil {
+		return "", fmt.Errorf("locating the running binary: %w", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return filepath.Dir(exe), nil
+}
 
 // Method identifies how an update is applied.
 type Method int
@@ -185,20 +204,31 @@ func Latest(ctx context.Context) (Release, error) {
 }
 
 // Run applies an update using the chosen method, pinned to the release the user
-// approved, and streams the underlying command's output to the current
-// terminal. It fails fast with a clear message when the required tool (curl or
-// go) is not on the PATH.
+// approved and aimed at the directory the running binary occupies, and streams
+// the underlying command's output to the current terminal. It fails fast with a
+// clear message when the required tool (curl or go) is not on the PATH.
 func Run(m Method, rel Release) error {
 	if rel.Tag == "" {
 		return errors.New("no release to install")
 	}
+	dir, err := installDir()
+	if err != nil {
+		return err
+	}
 	switch m {
 	case MethodGo:
-		return execUpdate("go", nil, "go", "install", goModule+"@"+rel.Tag)
+		// Without GOBIN the new binary lands in $GOPATH/bin, leaving the running
+		// one untouched and the PATH order to decide which of the two wins.
+		env := []string{"GOBIN=" + dir}
+		return execUpdate("go", env, "go", "install", goModule+"@"+rel.Tag)
 	default:
-		// install.sh takes the tag from the environment, so the script installs
-		// the release that was announced instead of re-resolving "latest".
-		env := []string{"REVISION_VERSION=" + rel.Tag}
+		// install.sh takes both from the environment, so the script installs the
+		// release that was announced, over the binary that asked for it, instead
+		// of re-resolving "latest" into a directory of its own choosing.
+		env := []string{
+			"REVISION_VERSION=" + rel.Tag,
+			"REVISION_INSTALL_DIR=" + dir,
+		}
 		return execUpdate("curl", env, "sh", "-c", "curl -fsSL "+installURL+" | sh")
 	}
 }

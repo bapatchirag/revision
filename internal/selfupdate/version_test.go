@@ -1,6 +1,7 @@
 package selfupdate
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,20 +82,85 @@ func TestComparePreOrdersPreReleases(t *testing.T) {
 
 // stubPath makes the returned directory the whole of PATH, with an executable
 // stub for each name that records the argv it was called with into argv.txt and
-// the pinned version it inherited into env.txt.
+// the update environment it inherited into env.txt.
 func stubPath(t *testing.T, names ...string) string {
 	t.Helper()
 	dir := t.TempDir()
 	for _, name := range names {
 		body := "#!/bin/sh\n" +
 			"echo \"$0 $@\" >> " + filepath.Join(dir, "argv.txt") + "\n" +
-			"echo \"REVISION_VERSION=$REVISION_VERSION\" >> " + filepath.Join(dir, "env.txt") + "\n"
+			"echo \"REVISION_VERSION=$REVISION_VERSION\" >> " + filepath.Join(dir, "env.txt") + "\n" +
+			"echo \"REVISION_INSTALL_DIR=$REVISION_INSTALL_DIR\" >> " + filepath.Join(dir, "env.txt") + "\n" +
+			"echo \"GOBIN=$GOBIN\" >> " + filepath.Join(dir, "env.txt") + "\n"
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
 			t.Fatalf("write stub %s: %v", name, err)
 		}
 	}
 	t.Setenv("PATH", dir)
 	return dir
+}
+
+// stubExecutable pretends the running binary lives at path.
+func stubExecutable(t *testing.T, path string) {
+	t.Helper()
+	prev := executablePath
+	executablePath = func() (string, error) { return path, nil }
+	t.Cleanup(func() { executablePath = prev })
+}
+
+func TestInstallDirFollowsTheRunningBinary(t *testing.T) {
+	home := t.TempDir()
+	stubExecutable(t, filepath.Join(home, "revision"))
+	got, err := installDir()
+	if err != nil {
+		t.Fatalf("installDir: %v", err)
+	}
+	if got != home {
+		t.Errorf("installDir() = %q, want %q", got, home)
+	}
+}
+
+func TestInstallDirResolvesSymlinks(t *testing.T) {
+	// A binary reached through a link on the PATH must still be replaced where
+	// it really lives, or the link keeps pointing at the old file.
+	real := t.TempDir()
+	linked := t.TempDir()
+	target := filepath.Join(real, "revision")
+	if err := os.WriteFile(target, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	link := filepath.Join(linked, "revision")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	stubExecutable(t, link)
+	got, err := installDir()
+	if err != nil {
+		t.Fatalf("installDir: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatalf("resolve want: %v", err)
+	}
+	if got != want {
+		t.Errorf("installDir() = %q, want the link's target directory %q", got, want)
+	}
+}
+
+func TestRunReportsAnUnlocatableBinary(t *testing.T) {
+	dir := stubPath(t, "go")
+	prev := executablePath
+	executablePath = func() (string, error) { return "", errors.New("boom") }
+	t.Cleanup(func() { executablePath = prev })
+
+	err := Run(MethodGo, Release{Tag: "v1.4.0"})
+	if err == nil || !strings.Contains(err.Error(), "locating the running binary") {
+		t.Errorf("err = %v, want the lookup failure reported", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "argv.txt")); err == nil {
+		t.Error("nothing should have been run without a target directory")
+	}
 }
 
 func TestExecUpdateRequiresItsTool(t *testing.T) {
@@ -120,6 +186,8 @@ func TestRunBuildsTheRightCommand(t *testing.T) {
 
 	t.Run("go install", func(t *testing.T) {
 		dir := stubPath(t, "go")
+		home := t.TempDir()
+		stubExecutable(t, filepath.Join(home, "revision"))
 		if err := Run(MethodGo, rel); err != nil {
 			t.Fatalf("Run(MethodGo): %v", err)
 		}
@@ -130,10 +198,16 @@ func TestRunBuildsTheRightCommand(t *testing.T) {
 		if strings.Contains(got, "@latest") {
 			t.Errorf("argv = %q, want the approved tag rather than @latest", got)
 		}
+		env := readFile(t, filepath.Join(dir, "env.txt"))
+		if !strings.Contains(env, "GOBIN="+home) {
+			t.Errorf("env = %q, want GOBIN aimed at %s", env, home)
+		}
 	})
 
 	t.Run("curl", func(t *testing.T) {
 		dir := stubPath(t, "curl", "sh")
+		home := t.TempDir()
+		stubExecutable(t, filepath.Join(home, "revision"))
 		if err := Run(MethodCurl, rel); err != nil {
 			t.Fatalf("Run(MethodCurl): %v", err)
 		}
@@ -144,6 +218,9 @@ func TestRunBuildsTheRightCommand(t *testing.T) {
 		env := readFile(t, filepath.Join(dir, "env.txt"))
 		if !strings.Contains(env, "REVISION_VERSION="+rel.Tag) {
 			t.Errorf("env = %q, want the install script pinned to %s", env, rel.Tag)
+		}
+		if !strings.Contains(env, "REVISION_INSTALL_DIR="+home) {
+			t.Errorf("env = %q, want the install script aimed at %s", env, home)
 		}
 	})
 }
