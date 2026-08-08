@@ -25,6 +25,23 @@ func stubPath(t *testing.T, scripts map[string]string) {
 	t.Setenv("PATH", dir)
 }
 
+// stubInstalled puts a stand-in for the installed binary next to the test
+// binary. That directory is where the update lands and where selfupdate re-runs
+// it to confirm the new version is really in place.
+func stubInstalled(t *testing.T, version string) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Skipf("cannot locate the test binary: %v", err)
+	}
+	path := filepath.Join(filepath.Dir(exe), "revision")
+	body := "#!/bin/sh\necho 'revision " + version + "'\n"
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Skipf("cannot write next to the test binary: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+}
+
 // withStdin replaces os.Stdin with a pipe carrying input for the duration of fn.
 func withStdin(t *testing.T, input string, fn func()) {
 	t.Helper()
@@ -208,6 +225,7 @@ func TestPromptMethod(t *testing.T) {
 func TestApplyUpdate(t *testing.T) {
 	rel := selfupdate.Release{Tag: "v1.4.0", Version: "1.4.0"}
 
+	stubInstalled(t, rel.Version)
 	stubPath(t, map[string]string{"go": "exit 0\n"})
 	var err error
 	out := captureOutput(t, func() { err = applyUpdate(selfupdate.MethodGo, rel) })

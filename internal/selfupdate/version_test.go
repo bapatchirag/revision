@@ -194,15 +194,104 @@ func TestRunReportsAFailingInstallScript(t *testing.T) {
 	}
 }
 
+// stubInstalled writes a stand-in for an installed binary into dir that reports
+// the given version, so post-update verification has something to re-run. A body
+// of "" leaves the directory empty, which is how the "nothing was installed"
+// branch is reached.
+func stubInstalled(t *testing.T, dir, body string) {
+	t.Helper()
+	if body == "" {
+		return
+	}
+	if err := os.WriteFile(filepath.Join(dir, binaryName), []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatalf("write installed stub: %v", err)
+	}
+}
+
+func TestReportedVersion(t *testing.T) {
+	cases := map[string]string{
+		"revision 1.5.1\n":             "1.5.1",
+		"revision v1.5.1":              "v1.5.1",
+		"revision 1.5.1\nextra line\n": "1.5.1",
+		"  revision 1.5.1  \n":         "1.5.1",
+		"":                             "",
+		"\n\n":                         "",
+	}
+	for out, want := range cases {
+		if got := reportedVersion(out); got != want {
+			t.Errorf("reportedVersion(%q) = %q, want %q", out, got, want)
+		}
+	}
+}
+
+func TestVerifyInstalled(t *testing.T) {
+	rel := Release{Tag: "v1.5.1", Version: "1.5.1"}
+	cases := []struct {
+		name string
+		body string
+		ok   bool
+	}{
+		{"the release that was asked for", "echo 'revision 1.5.1'\n", true},
+		{"a v-prefixed report of it", "echo 'revision v1.5.1'\n", true},
+		{"still the old version", "echo 'revision 1.5.0'\n", false},
+		{"a newer version than asked for", "echo 'revision 1.6.0'\n", false},
+		{"no version at all", "echo ''\n", false},
+		{"an unparseable version", "echo 'revision dev'\n", false},
+		{"a binary that will not run", "exit 1\n", false},
+		{"nothing installed", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			stubInstalled(t, dir, tc.body)
+			err := verifyInstalled(dir, rel)
+			if tc.ok && err != nil {
+				t.Errorf("verifyInstalled: %v", err)
+			}
+			if !tc.ok && err == nil {
+				t.Error("expected the update to be reported as not landed")
+			}
+		})
+	}
+}
+
+func TestRunFailsWhenTheUpdateDidNotLand(t *testing.T) {
+	// The installer exits 0 without replacing anything, which is exactly what a
+	// write to the wrong directory looks like from here.
+	stubPath(t, "go")
+	home := t.TempDir()
+	stubExecutable(t, filepath.Join(home, binaryName))
+	stubInstalled(t, home, "echo 'revision 1.5.0'\n")
+
+	err := Run(MethodGo, Release{Tag: "v1.5.1", Version: "1.5.1"})
+	if err == nil {
+		t.Fatal("expected an installer that changed nothing to be reported")
+	}
+	if !strings.Contains(err.Error(), "1.5.0") || !strings.Contains(err.Error(), "1.5.1") {
+		t.Errorf("err = %v, want both the installed and the wanted version named", err)
+	}
+}
+
+// realDir is dir with any symlinks resolved, which is what installDir reports.
+func realDir(t *testing.T, dir string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("resolve %s: %v", dir, err)
+	}
+	return resolved
+}
+
 func TestInstallDirFollowsTheRunningBinary(t *testing.T) {
 	home := t.TempDir()
-	stubExecutable(t, filepath.Join(home, "revision"))
+	stubInstalled(t, home, "exit 0\n")
+	stubExecutable(t, filepath.Join(home, binaryName))
 	got, err := installDir()
 	if err != nil {
 		t.Fatalf("installDir: %v", err)
 	}
-	if got != home {
-		t.Errorf("installDir() = %q, want %q", got, home)
+	if want := realDir(t, home); got != want {
+		t.Errorf("installDir() = %q, want %q", got, want)
 	}
 }
 
@@ -273,7 +362,8 @@ func TestRunBuildsTheRightCommand(t *testing.T) {
 	t.Run("go install", func(t *testing.T) {
 		dir := stubPath(t, "go")
 		home := t.TempDir()
-		stubExecutable(t, filepath.Join(home, "revision"))
+		stubExecutable(t, filepath.Join(home, binaryName))
+		stubInstalled(t, home, "echo 'revision "+rel.Version+"'\n")
 		if err := Run(MethodGo, rel); err != nil {
 			t.Fatalf("Run(MethodGo): %v", err)
 		}
@@ -285,15 +375,16 @@ func TestRunBuildsTheRightCommand(t *testing.T) {
 			t.Errorf("argv = %q, want the approved tag rather than @latest", got)
 		}
 		env := readFile(t, filepath.Join(dir, "env.txt"))
-		if !strings.Contains(env, "GOBIN="+home) {
-			t.Errorf("env = %q, want GOBIN aimed at %s", env, home)
+		if want := "GOBIN=" + realDir(t, home); !strings.Contains(env, want) {
+			t.Errorf("env = %q, want %q", env, want)
 		}
 	})
 
 	t.Run("curl", func(t *testing.T) {
 		dir := stubPath(t, "sh")
 		home := t.TempDir()
-		stubExecutable(t, filepath.Join(home, "revision"))
+		stubExecutable(t, filepath.Join(home, binaryName))
+		stubInstalled(t, home, "echo 'revision "+rel.Version+"'\n")
 		withRaw(t, rel.Tag, "#!/bin/sh\nexit 0\n", http.StatusOK)
 		if err := Run(MethodCurl, rel); err != nil {
 			t.Fatalf("Run(MethodCurl): %v", err)
@@ -309,8 +400,8 @@ func TestRunBuildsTheRightCommand(t *testing.T) {
 		if !strings.Contains(env, "REVISION_VERSION="+rel.Tag) {
 			t.Errorf("env = %q, want the install script pinned to %s", env, rel.Tag)
 		}
-		if !strings.Contains(env, "REVISION_INSTALL_DIR="+home) {
-			t.Errorf("env = %q, want the install script aimed at %s", env, home)
+		if want := "REVISION_INSTALL_DIR=" + realDir(t, home); !strings.Contains(env, want) {
+			t.Errorf("env = %q, want %q", env, want)
 		}
 	})
 }

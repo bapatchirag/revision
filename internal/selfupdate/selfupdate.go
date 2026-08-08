@@ -37,6 +37,10 @@ const (
 	// goModule is the module path used by the `go install` update path.
 	goModule = module + "/cmd/revision"
 
+	// binaryName is the file both install paths write, and the one re-run to
+	// confirm an update landed.
+	binaryName = "revision"
+
 	// releaseChannel is the channel value that marks an official release build.
 	// Any other value (e.g. "dev") is treated as a development build and never
 	// checks for or applies updates.
@@ -207,8 +211,10 @@ func Latest(ctx context.Context) (Release, error) {
 
 // Run applies an update using the chosen method, pinned to the release the user
 // approved and aimed at the directory the running binary occupies, and streams
-// the underlying command's output to the current terminal. It fails fast with a
-// clear message when the required tool (sh or go) is not on the PATH.
+// the underlying command's output to the current terminal. It returns nil only
+// once the newly installed binary has been seen to report the release that was
+// asked for. It fails fast with a clear message when the required tool (sh or
+// go) is not on the PATH.
 func Run(m Method, rel Release) error {
 	if rel.Tag == "" {
 		return errors.New("no release to install")
@@ -217,6 +223,14 @@ func Run(m Method, rel Release) error {
 	if err != nil {
 		return err
 	}
+	if err := apply(m, rel, dir); err != nil {
+		return err
+	}
+	return verifyInstalled(dir, rel)
+}
+
+// apply installs the release into dir using the chosen method.
+func apply(m Method, rel Release, dir string) error {
 	switch m {
 	case MethodGo:
 		// Without GOBIN the new binary lands in $GOPATH/bin, leaving the running
@@ -238,6 +252,37 @@ func Run(m Method, rel Release) error {
 		}
 		return execUpdate("sh", env, "sh", script)
 	}
+}
+
+// verifyInstalled runs the binary the update should have written and checks it
+// reports the release that was asked for. An installer exiting 0 is not evidence
+// the update landed: it may have written somewhere else, or skipped the work
+// entirely, and the user would be told to restart into the same old version.
+func verifyInstalled(dir string, rel Release) error {
+	path := filepath.Join(dir, binaryName)
+	out, err := exec.Command(path, "--version").Output()
+	if err != nil {
+		return fmt.Errorf("the update ran but %s could not be started: %w", path, err)
+	}
+	got := reportedVersion(string(out))
+	if got == "" {
+		return fmt.Errorf("the update ran but %s reported no version", path)
+	}
+	if cmp, err := compareVersions(got, rel.Version); err != nil || cmp != 0 {
+		return fmt.Errorf("the update ran but %s reports %s, not %s", path, got, rel.Version)
+	}
+	return nil
+}
+
+// reportedVersion picks the version out of `revision --version` output, a single
+// "revision <version>" line.
+func reportedVersion(out string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[len(fields)-1]
 }
 
 // fetchInstallScript downloads the install script as it was published with the
