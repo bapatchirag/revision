@@ -269,7 +269,7 @@ func TestUpdatePromptEscDismisses(t *testing.T) {
 	}
 }
 
-func TestUpdatePromptSuppressedWhileOverlayActive(t *testing.T) {
+func TestUpdatePromptIsHeldUntilTheOverlayCloses(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "modified.go", State: svn.StateModified, Changelist: "revision:staged"},
 	})
@@ -283,6 +283,98 @@ func TestUpdatePromptSuppressedWhileOverlayActive(t *testing.T) {
 	m = next.(*Model)
 	if m.updating {
 		t.Error("the update prompt must not steal focus from an active overlay")
+	}
+	if m.deferredUpdate == nil {
+		t.Fatal("the release must be held rather than dropped")
+	}
+
+	// Dismissing the editor frees the screen, and the prompt takes its turn.
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd())
+		m = next.(*Model)
+	}
+	if !m.updating {
+		t.Fatal("the held update should be offered once the screen is free")
+	}
+	if m.updateRel != availableRelease {
+		t.Errorf("offered %+v, want %+v", m.updateRel, availableRelease)
+	}
+	if m.deferredUpdate != nil {
+		t.Error("an offered release must not stay queued")
+	}
+}
+
+func TestUpdatePromptIsHeldUntilTheWorkingCopyLoads(t *testing.T) {
+	// The check is batched with the initial load, so it can land first.
+	m := sizedModel(t)
+	next, _ := m.Update(updateAvailableMsg{rel: availableRelease})
+	m = next.(*Model)
+	if m.updating {
+		t.Error("the update prompt must not land before the working copy does")
+	}
+
+	m = loadItems(t, m, []svn.StatusItem{{Path: "modified.go", State: svn.StateModified}})
+	if !m.updating {
+		t.Fatal("the held update should be offered once the status arrives")
+	}
+}
+
+func TestUpdatePromptStepsAsideForTheUnlockOverlay(t *testing.T) {
+	// Both run in the same startup batch with no ordering guarantee. With the
+	// prompt already up, the passphrase overlay would otherwise be drawn over it
+	// while the prompt kept the keyboard.
+	m := loadItems(t, sizedModel(t), nil)
+	next, _ := m.Update(updateAvailableMsg{rel: availableRelease})
+	m = next.(*Model)
+	if !m.updating {
+		t.Fatal("expected the update prompt to be open")
+	}
+
+	next, _ = m.Update(sshCheckedMsg{})
+	m = next.(*Model)
+	if m.updating {
+		t.Error("the update prompt must give the screen up to the passphrase overlay")
+	}
+	if !m.unlocking {
+		t.Fatal("expected the passphrase overlay to be open")
+	}
+	if m.deferredUpdate == nil {
+		t.Fatal("the release must be held rather than dropped")
+	}
+
+	// Unlocking frees the screen again, and the prompt returns rather than
+	// reappearing abruptly on top of a working copy it was never dismissed from.
+	next, _ = m.Update(sshAddedMsg{})
+	m = next.(*Model)
+	if m.unlocking {
+		t.Fatal("expected the passphrase overlay to close")
+	}
+	if !m.updating {
+		t.Fatal("the held update should be offered once the key is unlocked")
+	}
+	if m.updateRel != availableRelease {
+		t.Errorf("offered %+v, want %+v", m.updateRel, availableRelease)
+	}
+}
+
+func TestUpdatePromptIsNotReofferedAfterBeingDeclined(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	next, _ := m.Update(updateAvailableMsg{rel: availableRelease})
+	m = next.(*Model)
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*Model)
+	if cmd != nil {
+		next, _ = m.Update(cmd())
+		m = next.(*Model)
+	}
+	// A few more messages: a dismissal is final for the session.
+	next, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = next.(*Model)
+	if m.updating {
+		t.Error("a dismissed update must not come back")
 	}
 }
 

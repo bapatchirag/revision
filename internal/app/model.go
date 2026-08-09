@@ -218,6 +218,9 @@ type Model struct {
 	updateRel    selfupdate.Release
 	updateMethod selfupdate.Method
 	updateChosen bool
+	// deferredUpdate holds a release the prompt could not be shown for yet. The
+	// check runs once per session, so a dropped one would never come back.
+	deferredUpdate *selfupdate.Release
 
 	width   int
 	height  int
