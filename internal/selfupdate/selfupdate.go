@@ -160,11 +160,17 @@ func Check(ctx context.Context, b Build) (Release, bool, error) {
 	if err != nil {
 		return Release{}, false, err
 	}
+	newer, err := isNewer(rel, b)
+	return rel, newer, err
+}
+
+// isNewer reports whether a release supersedes the running build.
+func isNewer(rel Release, b Build) (bool, error) {
 	cmp, err := compareVersions(rel.Version, b.Version)
 	if err != nil {
-		return rel, false, err
+		return false, err
 	}
-	return rel, cmp > 0, nil
+	return cmp > 0, nil
 }
 
 // Latest fetches the most recent published release from the GitHub API.
@@ -177,6 +183,11 @@ func Latest(ctx context.Context) (Release, error) {
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	req.Header.Set("User-Agent", "revision-selfupdate")
+	// Anonymous callers share 60 requests an hour per address, which a machine
+	// behind a busy NAT can exhaust without ever running revision.
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {

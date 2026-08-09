@@ -6,6 +6,19 @@ description: Keep the revision binary current, in-app or from the command line.
 Release builds check for a newer version on startup. Development builds — anything from
 `go install`, `make build`, or a local cross-compile — never check for or apply updates.
 
+## How often it checks
+
+At most once a day. The answer is remembered in
+`~/.config/revision/update-check.json`, so launching `revision` repeatedly costs one
+call to the GitHub API rather than one per launch. A check that fails — offline, or
+rate-limited — is remembered too, and is not retried for six hours.
+
+GitHub allows anonymous callers 60 requests an hour per address, which a shared address
+can exhaust without you running `revision` at all. Set `GITHUB_TOKEN` and the check is
+made with it, against your own much larger allowance.
+
+`revision --update` ignores all of this and always asks.
+
 ## The startup prompt
 
 When a newer release is available, `revision` offers three choices:
