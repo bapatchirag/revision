@@ -115,25 +115,44 @@ func run(path string, build selfupdate.Build) error {
 	// terminal's detected profile so it stays adaptive.
 	theme.ApplyColorProfile(cfg.Theme)
 
+	chosen, err := runTUI(client, info, build, cfg, rec.Notice())
+	if err != nil || chosen == nil {
+		return err
+	}
+	// The session is closed by now, so no watcher tick and no svn command is
+	// still running against a binary that is about to be replaced.
+	return applyUpdate(chosen.method, chosen.rel)
+}
+
+// chosenUpdate is the update a session ended on.
+type chosenUpdate struct {
+	method selfupdate.Method
+	rel    selfupdate.Release
+}
+
+// runTUI runs the program to completion and reports the update the user picked
+// from the startup prompt on the way out, if any. The session is torn down
+// before it returns, so the caller applies that update to a quiet process.
+func runTUI(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.Config, notice string) (*chosenUpdate, error) {
 	model := app.New(client, info, build, cfg)
 	// Every return path below leaves the session purged and any svn command
 	// still in flight abandoned.
 	defer model.Close()
-	model.SetStartupNotice(rec.Notice())
-	program := tea.NewProgram(model, tea.WithAltScreen())
-	final, err := program.Run()
-	if err != nil {
-		return err
-	}
+	model.SetStartupNotice(notice)
 
-	// If the user chose to self-update from the startup prompt, apply it now
-	// that the alt-screen is gone and the terminal is back to normal.
-	if m, ok := final.(*app.Model); ok {
-		if method, rel, chosen := m.PendingUpdate(); chosen {
-			return applyUpdate(method, rel)
-		}
+	final, err := tea.NewProgram(model, tea.WithAltScreen()).Run()
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	m, ok := final.(*app.Model)
+	if !ok {
+		return nil, nil
+	}
+	method, rel, picked := m.PendingUpdate()
+	if !picked {
+		return nil, nil
+	}
+	return &chosenUpdate{method: method, rel: rel}, nil
 }
 
 // runUpdate implements the `--update` CLI path: it refuses to run on a
