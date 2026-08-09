@@ -67,7 +67,7 @@ SVN's command line is powerful but verbose for day-to-day work. `revision` wraps
 curl -fsSL https://raw.githubusercontent.com/bapatchirag/revision/main/install.sh | sh
 ```
 
-The script detects your OS and architecture, downloads the matching binary from the latest release, and installs it without `sudo` (falling back to `~/.local/bin`). Prebuilt binaries cover macOS on Apple silicon and Intel, and Linux on x86-64 and 64-bit ARM.
+The script detects your OS and architecture, downloads the matching binary from the latest release, and installs it without `sudo` (falling back to `~/.local/bin`). The download is checked against the SHA-256 the release publishes and is abandoned if it does not match. Prebuilt binaries cover macOS on Apple silicon and Intel, and Linux on x86-64 and 64-bit ARM.
 
 ### With Go
 
