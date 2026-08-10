@@ -433,23 +433,25 @@ func mergeTitle(d *mergeDoc) string {
 
 // mergeHint is the footer legend: the keys that decide the region on screen, and
 // — once every region has been decided — the key that writes the result out,
-// which is offered only when it would do anything. Which side a region has been
-// given is left to the ticks heading the panes.
+// which is offered only when it would do anything. It spells out only the two
+// choices that head no pane; 1 and 2 are named where they act, above the side
+// each one takes.
 func mergeHint(d *mergeDoc) string {
 	if d.unresolved() > 0 {
-		return "1/2/3 pick · 0 clear · [ ] next · esc close"
+		return "3 take both · 0 undo · [ ] next · esc close"
 	}
-	return "1/2/3 pick · 0 clear · w write · esc close"
+	return "3 take both · 0 undo · w write · esc close"
 }
 
-// mergePaneLabel heads a pane with the key that takes it and a tick once it has
+// mergePaneLabel heads a pane with what its key does to it — "1 take mine"
+// rather than a bare digit, so the keys need no legend — and a tick once it has
 // been taken.
 func mergePaneLabel(key, name string, taken bool) string {
 	mark := "  "
 	if taken {
 		mark = "✓ "
 	}
-	return key + " " + mark + name
+	return key + " " + mark + "take " + name
 }
 
 // mergeNothingToDo explains a file that turned out to need no decisions, which
