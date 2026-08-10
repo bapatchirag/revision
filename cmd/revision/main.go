@@ -58,6 +58,11 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 
+	if err := checkFlags(doUpdate, updateWith); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "revision:", err)
+		os.Exit(2)
+	}
+
 	if showVersion {
 		_, _ = fmt.Printf("revision %s\n", version)
 		return
@@ -81,6 +86,14 @@ func usage() {
 	_, _ = fmt.Fprintf(os.Stderr, "revision %s — a lazygit-style TUI for Subversion\n\n"+
 		"Usage:\n  revision [flags]\n\nFlags:\n", version)
 	flag.PrintDefaults()
+}
+
+// checkFlags rejects combinations that would otherwise be accepted and ignored.
+func checkFlags(doUpdate bool, updateWith string) error {
+	if updateWith != "" && !doUpdate {
+		return fmt.Errorf("--update-with only applies to --update; did you mean 'revision --update --update-with %s'?", updateWith)
+	}
+	return nil
 }
 
 func run(path string, build selfupdate.Build) error {

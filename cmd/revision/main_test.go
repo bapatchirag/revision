@@ -82,6 +82,36 @@ func captureOutput(t *testing.T, fn func()) string {
 	return string(b)
 }
 
+func TestCheckFlags(t *testing.T) {
+	cases := []struct {
+		name       string
+		doUpdate   bool
+		updateWith string
+		wantErr    bool
+	}{
+		{"no flags", false, "", false},
+		{"update alone", true, "", false},
+		{"update with a method", true, "curl", false},
+		// Without --update the method was read by nobody and the TUI launched
+		// as if it had not been asked for.
+		{"method without update", false, "go", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkFlags(tc.doUpdate, tc.updateWith)
+			if tc.wantErr && err == nil {
+				t.Fatal("expected the combination to be rejected")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("checkFlags: %v", err)
+			}
+			if tc.wantErr && !strings.Contains(err.Error(), "--update --update-with "+tc.updateWith) {
+				t.Errorf("err = %v, want the working command spelled out", err)
+			}
+		})
+	}
+}
+
 func TestUsageNamesTheFlags(t *testing.T) {
 	// flag.PrintDefaults reads the command line's own flag set, which the test
 	// binary owns, so give usage a set holding the real flags.

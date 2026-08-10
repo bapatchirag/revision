@@ -16,7 +16,7 @@ With no flags, `revision` opens the TUI on the current directory.
 | `--path <dir>` | `.` | The SVN working copy to operate on. |
 | `--version` | — | Print the version and exit. |
 | `--update` | — | Check for a newer release and update the binary. Release builds only. |
-| `--update-with <curl\|go>` | prompt | The method `--update` uses. |
+| `--update-with <curl\|go>` | prompt | The method `--update` uses. Requires `--update`. |
 | `--help` | — | Show usage and exit. |
 
 ### `--path`
@@ -44,18 +44,23 @@ $ revision --version
 revision v1.4.0
 ```
 
-Development builds print `revision dev`.
+A `go install …@<tag>` build reports that tag, `make build` reports what `git describe`
+gave it, and a plain `go build` reports `dev`.
 
 ### `--update` and `--update-with`
 
 ```sh
 revision --update                      # check, then prompt for a method
-revision --update --update-with curl   # non-interactive: re-run the install script
-revision --update --update-with go     # non-interactive: go install …@latest
+revision --update --update-with curl   # non-interactive: run the release's install script
+revision --update --update-with go     # non-interactive: go install …@<tag>
 ```
 
-Only official release builds check for or apply updates — development and locally
-cross-compiled builds never do. See [Updating revision](/operations/updating-revision/).
+`--update-with` without `--update` is a usage error, not a silent no-op.
+
+A build checks for and applies updates when it came from the release pipeline, or from
+`go install …@<tag>` at a published tag. `make build`, a local cross-compile and an
+untagged `go install` never do. See
+[Updating revision](/operations/updating-revision/).
 
 ## Exit status
 
@@ -63,6 +68,7 @@ cross-compiled builds never do. See [Updating revision](/operations/updating-rev
 |---|---|
 | `0` | Clean exit, including quitting the TUI. |
 | `1` | `svn` is not on your `PATH`, the path is not a working copy, or an update failed. |
+| `2` | The flags given do not go together. |
 
 Errors are written to stderr, prefixed `revision:`.
 

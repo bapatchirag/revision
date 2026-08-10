@@ -75,9 +75,10 @@ REVISION_INSTALL_DIR="$HOME/bin" REVISION_VERSION=v1.4.0 \
 go install github.com/bapatchirag/revision/cmd/revision@latest
 ```
 
-This is the fallback for any platform without a prebuilt binary. Builds produced this way
-are development builds: they never check for or apply
-[self-updates](/operations/updating-revision/).
+This is the fallback for any platform without a prebuilt binary. Installing at a
+published tag produces a release build, which does check for
+[self-updates](/operations/updating-revision/); installing at an untagged commit does
+not, and neither does a local `go build`.
 
 ## Prebuilt binaries
 

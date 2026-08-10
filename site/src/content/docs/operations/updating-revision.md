@@ -3,8 +3,10 @@ title: Updating revision
 description: Keep the revision binary current, in-app or from the command line.
 ---
 
-Release builds check for a newer version on startup. Development builds — anything from
-`go install`, `make build`, or a local cross-compile — never check for or apply updates.
+Release builds check for a newer version on startup. A build counts as a release when it
+came from the release pipeline, or from `go install …@<tag>` at a published tag.
+Everything else — `make build`, a local cross-compile, or `go install …@main` at an
+untagged commit — is a development build, and never checks for or applies updates.
 
 ## How often it checks
 
@@ -25,11 +27,15 @@ When a newer release is available, `revision` offers three choices:
 
 | Choice | What it does |
 |---|---|
-| **Update with cURL** | Re-runs the [install script](/guides/installation/), replacing the binary in place. |
-| **Update with Go** | Runs `go install github.com/bapatchirag/revision/cmd/revision@latest`. |
+| **Update with cURL** | Runs the [install script](/guides/installation/) as it was published with that release, replacing the binary in place. |
+| **Update with Go** | Runs `go install github.com/bapatchirag/revision/cmd/revision@<tag>` for that release. |
 | **Don't update this time** | Dismisses the prompt for this session. |
 
 Pick one with the arrow keys and <kbd>enter</kbd>, or press <kbd>esc</kbd> to dismiss.
+
+Either way the update is pinned to the release the prompt named, installed over the
+binary you are running, and checked afterwards: `revision` only reports success once the
+new binary reports the new version.
 
 ## From the command line
 
@@ -40,16 +46,25 @@ revision --update --update-with go     # non-interactive: use go install
 ```
 
 The non-interactive forms are the ones to use from a script or a dotfiles bootstrap.
+`--update-with` on its own is an error rather than a no-op, so a typo cannot quietly
+launch the TUI instead of updating.
 
 ## Which method should I use?
 
-Use the method you installed with.
+The install script, unless you have a reason not to. Both methods install over the
+binary you are running — the Go path is pointed at that directory too, so it cannot
+leave a second copy in `$GOBIN` for your `PATH` to choose between — but they differ in
+what they cost and what they check.
 
-- **cURL** replaces the binary wherever the install script put it. It needs write access
-  to that directory — the same one the original install used.
-- **Go** writes to `$GOBIN` (or `$GOPATH/bin`). If that is a *different* directory that
-  also happens to be on your `PATH`, you can end up with two copies and the shell picking
-  whichever comes first. `command -v revision` tells you which one wins.
+- **cURL** downloads the prebuilt binary and verifies it against the SHA-256 the release
+  publishes. It needs `curl` or `wget`, and write access to the install directory.
+- **Go** compiles from source. It needs a Go toolchain new enough for the module's `go`
+  directive — an older one downloads a matching toolchain first, and `GOTOOLCHAIN=local`
+  fails outright — plus the network and time that compiling takes. Nothing is
+  checksum-verified by the script, though the module proxy verifies the source.
+
+Either way, an install directory you cannot write to now fails loudly instead of
+silently putting the new binary somewhere else.
 
 ## Verifying
 
