@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/bapatchirag/revision/internal/config"
 	"github.com/bapatchirag/revision/internal/selfupdate"
 	"github.com/bapatchirag/revision/internal/sshagent"
 	"github.com/bapatchirag/revision/internal/svn"
@@ -371,17 +372,29 @@ func sshAddCmd(keyPath, passphrase string) tea.Cmd {
 // checkUpdateCmd asks GitHub, off the UI goroutine, whether a newer release
 // exists. It emits updateAvailableMsg only when one does; a development build,
 // an up-to-date binary, or any network/parse failure yields no message so the
-// check can never disrupt startup.
+// check can never disrupt startup. The answer is remembered between launches,
+// so starting revision repeatedly does not repeatedly call the API.
 func checkUpdateCmd(build selfupdate.Build) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
-		rel, newer, err := selfupdate.Check(ctx, build)
+		rel, newer, err := selfupdate.CheckCached(ctx, build, updateCheckPath())
 		if err != nil || !newer {
 			return nil
 		}
 		return updateAvailableMsg{rel: rel}
 	}
+}
+
+// updateCheckPath is where the startup check remembers its last answer. An
+// unresolvable config directory yields "", which turns the memo off rather than
+// failing the check.
+func updateCheckPath() string {
+	dir, err := config.Dir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "update-check.json")
 }
 
 // loadStatusCmd runs `svn status` off the UI goroutine and reports the result.

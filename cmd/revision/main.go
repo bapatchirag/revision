@@ -24,6 +24,8 @@ import (
 // version and channel are overridden via -ldflags at build time. channel is
 // "release" only for official release builds; every development or locally
 // cross-compiled build keeps the default, which disables the self-update paths.
+// A `go install` build gets neither, so selfupdate.Resolve recovers both from
+// the module version the toolchain records.
 var (
 	version = "dev"
 	channel = "dev"
@@ -38,6 +40,11 @@ func main() {
 		return
 	}
 
+	// Resolved before the flags are declared so usage and --version report the
+	// recovered identity too.
+	build := selfupdate.Resolve(version, channel)
+	version = build.Version
+
 	var (
 		path        string
 		showVersion bool
@@ -51,7 +58,10 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 
-	build := selfupdate.Build{Version: version, Channel: channel}
+	if err := checkFlags(doUpdate, updateWith); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "revision:", err)
+		os.Exit(2)
+	}
 
 	if showVersion {
 		_, _ = fmt.Printf("revision %s\n", version)
@@ -76,6 +86,14 @@ func usage() {
 	_, _ = fmt.Fprintf(os.Stderr, "revision %s — a lazygit-style TUI for Subversion\n\n"+
 		"Usage:\n  revision [flags]\n\nFlags:\n", version)
 	flag.PrintDefaults()
+}
+
+// checkFlags rejects combinations that would otherwise be accepted and ignored.
+func checkFlags(doUpdate bool, updateWith string) error {
+	if updateWith != "" && !doUpdate {
+		return fmt.Errorf("--update-with only applies to --update; did you mean 'revision --update --update-with %s'?", updateWith)
+	}
+	return nil
 }
 
 func run(path string, build selfupdate.Build) error {
@@ -110,25 +128,44 @@ func run(path string, build selfupdate.Build) error {
 	// terminal's detected profile so it stays adaptive.
 	theme.ApplyColorProfile(cfg.Theme)
 
+	chosen, err := runTUI(client, info, build, cfg, rec.Notice())
+	if err != nil || chosen == nil {
+		return err
+	}
+	// The session is closed by now, so no watcher tick and no svn command is
+	// still running against a binary that is about to be replaced.
+	return applyUpdate(chosen.method, chosen.rel)
+}
+
+// chosenUpdate is the update a session ended on.
+type chosenUpdate struct {
+	method selfupdate.Method
+	rel    selfupdate.Release
+}
+
+// runTUI runs the program to completion and reports the update the user picked
+// from the startup prompt on the way out, if any. The session is torn down
+// before it returns, so the caller applies that update to a quiet process.
+func runTUI(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.Config, notice string) (*chosenUpdate, error) {
 	model := app.New(client, info, build, cfg)
 	// Every return path below leaves the session purged and any svn command
 	// still in flight abandoned.
 	defer model.Close()
-	model.SetStartupNotice(rec.Notice())
-	program := tea.NewProgram(model, tea.WithAltScreen())
-	final, err := program.Run()
-	if err != nil {
-		return err
-	}
+	model.SetStartupNotice(notice)
 
-	// If the user chose to self-update from the startup prompt, apply it now
-	// that the alt-screen is gone and the terminal is back to normal.
-	if m, ok := final.(*app.Model); ok {
-		if method, chosen := m.PendingUpdate(); chosen {
-			return applyUpdate(method)
-		}
+	final, err := tea.NewProgram(model, tea.WithAltScreen()).Run()
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	m, ok := final.(*app.Model)
+	if !ok {
+		return nil, nil
+	}
+	method, rel, picked := m.PendingUpdate()
+	if !picked {
+		return nil, nil
+	}
+	return &chosenUpdate{method: method, rel: rel}, nil
 }
 
 // runUpdate implements the `--update` CLI path: it refuses to run on a
@@ -160,7 +197,7 @@ func runUpdate(build selfupdate.Build, method string) error {
 		_, _ = fmt.Println("Update cancelled.")
 		return nil
 	}
-	return applyUpdate(m)
+	return applyUpdate(m, rel)
 }
 
 // resolveMethod turns the --update-with flag into a method. An explicit "curl"
@@ -203,11 +240,11 @@ func promptMethod() (selfupdate.Method, bool) {
 	}
 }
 
-// applyUpdate runs the chosen update method and prints a follow-up hint on
-// success so the user knows to restart.
-func applyUpdate(method selfupdate.Method) error {
-	_, _ = fmt.Printf("Updating revision with %s…\n", method.Label())
-	if err := selfupdate.Run(method); err != nil {
+// applyUpdate runs the chosen update method for the approved release and prints
+// a follow-up hint on success so the user knows to restart.
+func applyUpdate(method selfupdate.Method, rel selfupdate.Release) error {
+	_, _ = fmt.Printf("Updating revision to %s with %s…\n", rel.Tag, method.Label())
+	if err := selfupdate.Run(method, rel); err != nil {
 		return fmt.Errorf("update failed: %w", err)
 	}
 	_, _ = fmt.Println("Update complete. Re-run 'revision' to use the new version.")

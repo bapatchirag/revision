@@ -57,9 +57,10 @@ vet:
 fmt:
 	gofmt -l -w .
 
-## lint: run golangci-lint (must be installed)
+## lint: run golangci-lint (must be installed) and shellcheck (if installed)
 lint:
 	golangci-lint run
+	@if command -v shellcheck >/dev/null 2>&1; then shellcheck install.sh; else echo "shellcheck not installed; skipping install.sh (CI runs it)"; fi
 
 ## tidy: tidy go.mod/go.sum
 tidy:

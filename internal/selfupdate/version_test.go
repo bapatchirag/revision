@@ -1,6 +1,9 @@
 package selfupdate
 
 import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,55 +82,331 @@ func TestComparePreOrdersPreReleases(t *testing.T) {
 	}
 }
 
-// stubPath makes dir the whole of PATH, with an executable stub for each name
-// that records the argv it was called with into argv.txt.
+// stubPath makes the returned directory the whole of PATH, with an executable
+// stub for each name that records the argv it was called with into argv.txt and
+// the update environment it inherited into env.txt.
 func stubPath(t *testing.T, names ...string) string {
 	t.Helper()
 	dir := t.TempDir()
-	argv := filepath.Join(dir, "argv.txt")
 	for _, name := range names {
-		body := "#!/bin/sh\necho \"$0 $@\" >> " + argv + "\n"
+		body := "#!/bin/sh\n" +
+			"echo \"$0 $@\" >> " + filepath.Join(dir, "argv.txt") + "\n" +
+			"echo \"REVISION_VERSION=$REVISION_VERSION\" >> " + filepath.Join(dir, "env.txt") + "\n" +
+			"echo \"REVISION_INSTALL_DIR=$REVISION_INSTALL_DIR\" >> " + filepath.Join(dir, "env.txt") + "\n" +
+			"echo \"GOBIN=$GOBIN\" >> " + filepath.Join(dir, "env.txt") + "\n"
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
 			t.Fatalf("write stub %s: %v", name, err)
 		}
 	}
 	t.Setenv("PATH", dir)
-	return argv
+	return dir
+}
+
+// stubExecutable pretends the running binary lives at path.
+func stubExecutable(t *testing.T, path string) {
+	t.Helper()
+	prev := executablePath
+	executablePath = func() (string, error) { return path, nil }
+	t.Cleanup(func() { executablePath = prev })
+}
+
+// failPath is stubPath with stubs that exit non-zero, so a failing update can be
+// checked for being reported as one.
+func failPath(t *testing.T, names ...string) string {
+	t.Helper()
+	dir := stubPath(t, names...)
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 3\n"), 0o755); err != nil {
+			t.Fatalf("write failing stub %s: %v", name, err)
+		}
+	}
+	return dir
+}
+
+// withRaw serves body as the install script published with tag, for the
+// duration of a test.
+func withRaw(t *testing.T, tag, body string, status int) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/"+repo+"/"+tag+"/install.sh" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(status)
+		if status == http.StatusOK {
+			_, _ = w.Write([]byte(body))
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	prev := rawBase
+	rawBase = srv.URL
+	t.Cleanup(func() { rawBase = prev })
+}
+
+func TestFetchInstallScriptTakesItFromTheTag(t *testing.T) {
+	const want = "#!/bin/sh\necho installed\n"
+	withRaw(t, "v1.4.0", want, http.StatusOK)
+
+	path, cleanup, err := fetchInstallScript(Release{Tag: "v1.4.0"})
+	if err != nil {
+		t.Fatalf("fetchInstallScript: %v", err)
+	}
+	if got := readFile(t, path); got != want {
+		t.Errorf("script = %q, want %q", got, want)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat script: %v", err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Errorf("script mode = %v, want it readable by its owner alone", info.Mode().Perm())
+	}
+
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("the downloaded script should not outlive the update")
+	}
+}
+
+func TestFetchInstallScriptReportsAFailedDownload(t *testing.T) {
+	// The script is served for v1.4.0 only, so another tag 404s — as a release
+	// published before the script was pinned would.
+	withRaw(t, "v1.4.0", "", http.StatusOK)
+
+	if _, _, err := fetchInstallScript(Release{Tag: "v9.9.9"}); err == nil {
+		t.Fatal("expected an error when the script cannot be downloaded")
+	} else if !strings.Contains(err.Error(), "v9.9.9") {
+		t.Errorf("err = %v, want the tag named", err)
+	}
+}
+
+func TestRunReportsAFailingInstallScript(t *testing.T) {
+	// A `curl … | sh` pipeline exits with the status of the shell, which is 0
+	// even when the download produced nothing. Running the script directly is
+	// what makes its failure visible.
+	failPath(t, "sh")
+	stubExecutable(t, filepath.Join(t.TempDir(), "revision"))
+	withRaw(t, "v1.4.0", "#!/bin/sh\nexit 3\n", http.StatusOK)
+
+	if err := Run(MethodCurl, Release{Tag: "v1.4.0"}); err == nil {
+		t.Fatal("expected a failing install script to be reported")
+	}
+}
+
+// stubInstalled writes a stand-in for an installed binary into dir that reports
+// the given version, so post-update verification has something to re-run. A body
+// of "" leaves the directory empty, which is how the "nothing was installed"
+// branch is reached.
+func stubInstalled(t *testing.T, dir, body string) {
+	t.Helper()
+	if body == "" {
+		return
+	}
+	if err := os.WriteFile(filepath.Join(dir, binaryName), []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatalf("write installed stub: %v", err)
+	}
+}
+
+func TestReportedVersion(t *testing.T) {
+	cases := map[string]string{
+		"revision 1.5.1\n":             "1.5.1",
+		"revision v1.5.1":              "v1.5.1",
+		"revision 1.5.1\nextra line\n": "1.5.1",
+		"  revision 1.5.1  \n":         "1.5.1",
+		"":                             "",
+		"\n\n":                         "",
+	}
+	for out, want := range cases {
+		if got := reportedVersion(out); got != want {
+			t.Errorf("reportedVersion(%q) = %q, want %q", out, got, want)
+		}
+	}
+}
+
+func TestVerifyInstalled(t *testing.T) {
+	rel := Release{Tag: "v1.5.1", Version: "1.5.1"}
+	cases := []struct {
+		name string
+		body string
+		ok   bool
+	}{
+		{"the release that was asked for", "echo 'revision 1.5.1'\n", true},
+		{"a v-prefixed report of it", "echo 'revision v1.5.1'\n", true},
+		{"still the old version", "echo 'revision 1.5.0'\n", false},
+		{"a newer version than asked for", "echo 'revision 1.6.0'\n", false},
+		{"no version at all", "echo ''\n", false},
+		{"an unparseable version", "echo 'revision dev'\n", false},
+		{"a binary that will not run", "exit 1\n", false},
+		{"nothing installed", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			stubInstalled(t, dir, tc.body)
+			err := verifyInstalled(dir, rel)
+			if tc.ok && err != nil {
+				t.Errorf("verifyInstalled: %v", err)
+			}
+			if !tc.ok && err == nil {
+				t.Error("expected the update to be reported as not landed")
+			}
+		})
+	}
+}
+
+func TestRunFailsWhenTheUpdateDidNotLand(t *testing.T) {
+	// The installer exits 0 without replacing anything, which is exactly what a
+	// write to the wrong directory looks like from here.
+	stubPath(t, "go")
+	home := t.TempDir()
+	stubExecutable(t, filepath.Join(home, binaryName))
+	stubInstalled(t, home, "echo 'revision 1.5.0'\n")
+
+	err := Run(MethodGo, Release{Tag: "v1.5.1", Version: "1.5.1"})
+	if err == nil {
+		t.Fatal("expected an installer that changed nothing to be reported")
+	}
+	if !strings.Contains(err.Error(), "1.5.0") || !strings.Contains(err.Error(), "1.5.1") {
+		t.Errorf("err = %v, want both the installed and the wanted version named", err)
+	}
+}
+
+// realDir is dir with any symlinks resolved, which is what installDir reports.
+func realDir(t *testing.T, dir string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("resolve %s: %v", dir, err)
+	}
+	return resolved
+}
+
+func TestInstallDirFollowsTheRunningBinary(t *testing.T) {
+	home := t.TempDir()
+	stubInstalled(t, home, "exit 0\n")
+	stubExecutable(t, filepath.Join(home, binaryName))
+	got, err := installDir()
+	if err != nil {
+		t.Fatalf("installDir: %v", err)
+	}
+	if want := realDir(t, home); got != want {
+		t.Errorf("installDir() = %q, want %q", got, want)
+	}
+}
+
+func TestInstallDirResolvesSymlinks(t *testing.T) {
+	// A binary reached through a link on the PATH must still be replaced where
+	// it really lives, or the link keeps pointing at the old file.
+	real := t.TempDir()
+	linked := t.TempDir()
+	target := filepath.Join(real, "revision")
+	if err := os.WriteFile(target, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	link := filepath.Join(linked, "revision")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	stubExecutable(t, link)
+	got, err := installDir()
+	if err != nil {
+		t.Fatalf("installDir: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatalf("resolve want: %v", err)
+	}
+	if got != want {
+		t.Errorf("installDir() = %q, want the link's target directory %q", got, want)
+	}
+}
+
+func TestRunReportsAnUnlocatableBinary(t *testing.T) {
+	dir := stubPath(t, "go")
+	prev := executablePath
+	executablePath = func() (string, error) { return "", errors.New("boom") }
+	t.Cleanup(func() { executablePath = prev })
+
+	err := Run(MethodGo, Release{Tag: "v1.4.0"})
+	if err == nil || !strings.Contains(err.Error(), "locating the running binary") {
+		t.Errorf("err = %v, want the lookup failure reported", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "argv.txt")); err == nil {
+		t.Error("nothing should have been run without a target directory")
+	}
 }
 
 func TestExecUpdateRequiresItsTool(t *testing.T) {
 	stubPath(t) // an empty PATH
-	err := execUpdate("curl", "sh", "-c", "true")
+	err := execUpdate("curl", nil, "sh", "-c", "true")
 	if err == nil || !strings.Contains(err.Error(), "not found on your PATH") {
 		t.Errorf("err = %v, want the missing tool named", err)
 	}
 }
 
+func TestRunNeedsAReleaseToPinTo(t *testing.T) {
+	dir := stubPath(t, "go")
+	if err := Run(MethodGo, Release{}); err == nil {
+		t.Fatal("expected an error without a release to install")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "argv.txt")); err == nil {
+		t.Error("nothing should have been run without a release")
+	}
+}
+
 func TestRunBuildsTheRightCommand(t *testing.T) {
+	rel := Release{Tag: "v1.4.0", Version: "1.4.0"}
+
 	t.Run("go install", func(t *testing.T) {
-		argv := stubPath(t, "go")
-		if err := Run(MethodGo); err != nil {
+		dir := stubPath(t, "go")
+		home := t.TempDir()
+		stubExecutable(t, filepath.Join(home, binaryName))
+		stubInstalled(t, home, "echo 'revision "+rel.Version+"'\n")
+		if err := Run(MethodGo, rel); err != nil {
 			t.Fatalf("Run(MethodGo): %v", err)
 		}
-		got := readArgv(t, argv)
-		if !strings.Contains(got, "install") || !strings.Contains(got, goModule+"@latest") {
-			t.Errorf("argv = %q, want `go install %s@latest`", got, goModule)
+		got := readFile(t, filepath.Join(dir, "argv.txt"))
+		if !strings.Contains(got, "install") || !strings.Contains(got, goModule+"@"+rel.Tag) {
+			t.Errorf("argv = %q, want `go install %s@%s`", got, goModule, rel.Tag)
+		}
+		if strings.Contains(got, "@latest") {
+			t.Errorf("argv = %q, want the approved tag rather than @latest", got)
+		}
+		env := readFile(t, filepath.Join(dir, "env.txt"))
+		if want := "GOBIN=" + realDir(t, home); !strings.Contains(env, want) {
+			t.Errorf("env = %q, want %q", env, want)
 		}
 	})
 
 	t.Run("curl", func(t *testing.T) {
-		argv := stubPath(t, "curl", "sh")
-		if err := Run(MethodCurl); err != nil {
+		dir := stubPath(t, "sh")
+		home := t.TempDir()
+		stubExecutable(t, filepath.Join(home, binaryName))
+		stubInstalled(t, home, "echo 'revision "+rel.Version+"'\n")
+		withRaw(t, rel.Tag, "#!/bin/sh\nexit 0\n", http.StatusOK)
+		if err := Run(MethodCurl, rel); err != nil {
 			t.Fatalf("Run(MethodCurl): %v", err)
 		}
-		got := readArgv(t, argv)
-		if !strings.Contains(got, "-c") || !strings.Contains(got, installURL) {
-			t.Errorf("argv = %q, want the install script piped through sh", got)
+		got := readFile(t, filepath.Join(dir, "argv.txt"))
+		if !strings.Contains(got, "install.sh") {
+			t.Errorf("argv = %q, want the downloaded script run directly", got)
+		}
+		if strings.Contains(got, "|") {
+			t.Errorf("argv = %q, want no pipeline to swallow the exit status", got)
+		}
+		env := readFile(t, filepath.Join(dir, "env.txt"))
+		if !strings.Contains(env, "REVISION_VERSION="+rel.Tag) {
+			t.Errorf("env = %q, want the install script pinned to %s", env, rel.Tag)
+		}
+		if want := "REVISION_INSTALL_DIR=" + realDir(t, home); !strings.Contains(env, want) {
+			t.Errorf("env = %q, want %q", env, want)
 		}
 	})
 }
 
-func readArgv(t *testing.T, path string) string {
+func readFile(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
 	if err != nil {

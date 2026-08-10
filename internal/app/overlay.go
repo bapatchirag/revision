@@ -46,6 +46,46 @@ func (m *Model) overlayActive() bool {
 	return m.aborting || m.unlocking || m.editing || m.naming || m.savingDiff || m.retargeting || m.splitting || m.merging || m.confirming || m.helping || m.updating || m.configuring
 }
 
+// updateHeld reports whether now is the wrong moment to interrupt with the
+// update prompt: something else owns the screen or the keyboard, or the working
+// copy has not finished arriving. Wider than overlayActive, because the filter
+// bar and the update progress modal both take keys without being overlays.
+func (m *Model) updateHeld() bool {
+	return m.overlayActive() || m.updatingWC || m.filtering || m.loading
+}
+
+// offerUpdate shows the prompt for a release, or holds it until the screen is
+// free.
+func (m *Model) offerUpdate(rel selfupdate.Release) {
+	if m.updateHeld() {
+		m.deferredUpdate = &rel
+		return
+	}
+	m.deferredUpdate = nil
+	m.openUpdate(rel)
+}
+
+// deferUpdate takes the prompt off the screen and holds its release for the next
+// quiet moment, for when something with a stronger claim to the screen arrives.
+func (m *Model) deferUpdate() {
+	if !m.updating {
+		return
+	}
+	rel := m.updateRel
+	m.closeUpdate()
+	m.deferredUpdate = &rel
+}
+
+// retakeUpdate offers a held release again once nothing is in its way.
+func (m *Model) retakeUpdate() {
+	if m.deferredUpdate == nil || m.updateHeld() {
+		return
+	}
+	rel := *m.deferredUpdate
+	m.deferredUpdate = nil
+	m.openUpdate(rel)
+}
+
 // openUpdate shows the startup update prompt for the given release as a centered
 // overlay, titling it with the new version.
 func (m *Model) openUpdate(rel selfupdate.Release) {

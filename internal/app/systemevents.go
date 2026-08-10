@@ -67,11 +67,7 @@ func (m *Model) systemEvent(msg tea.Msg) (tea.Cmd, bool) {
 		return m.observeWorkingCopy(msg), true
 
 	case updateAvailableMsg:
-		// Offer the update only when nothing else is on screen, so the prompt
-		// never steals focus from an in-flight commit, confirmation, or menu.
-		if !m.overlayActive() {
-			m.openUpdate(msg.rel)
-		}
+		m.offerUpdate(msg.rel)
 		return nil, true
 
 	case startupNoticeMsg:
@@ -89,6 +85,10 @@ func (m *Model) systemEvent(msg tea.Msg) (tea.Cmd, bool) {
 		case msg.loaded:
 			return m.beginInitialLoad(), true
 		default:
+			// The passphrase overlay is about to take the screen. An update prompt
+			// already on it would be drawn over but still hold the keyboard, so put
+			// it back in the queue rather than bury it.
+			m.deferUpdate()
 			m.openUnlock()
 			return nil, true
 		}
