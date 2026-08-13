@@ -30,9 +30,12 @@ border (`1 of 3`) where a count makes sense.
 - <KeyCap key="tab" /> / <KeyCap key="shift+tab" /> — cycle forwards and backwards.
 - <KeyCap key="x" /> — show or hide the Command Log.
 
+With [`allowMouse`](/reference/configuration/#allowmouse) on, clicking a panel focuses it.
+
 ## Moving inside a panel
 
-Every panel scrolls on both axes, with scrollbars that show how much is off-screen.
+Every panel scrolls on both axes, with scrollbars that show how much is off-screen. With
+the mouse on, the wheel scrolls whichever panel the pointer rests on, focused or not.
 
 | Keys | Action |
 |---|---|
@@ -110,8 +113,9 @@ guards the switch fails as an authentication error and nothing changes.
 
 ## Files
 
-The Files panel has three views. <KeyCap key="[" /> and <KeyCap key="]" /> turn between
-them, and the active one is named in the top border.
+The Files panel has four views. <KeyCap key="[" /> and <KeyCap key="]" /> turn between
+them, and the active one is named in the top border — where all four can be clicked, with
+the mouse on.
 
 ### Changes
 

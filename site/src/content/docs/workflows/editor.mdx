@@ -13,6 +13,9 @@ the [Diffs view](/workflows/diffs/#the-diffs-view), or a `.rej` in the
 The Changelists overview has no single file to open, so <KeyCap key="e" /> says so
 instead.
 
+With [`allowMouse`](/reference/configuration/#allowmouse) on, double-clicking a file row
+opens it the same way.
+
 ## Where in the file it opens
 
 A file opens on its change rather than on line one.
@@ -27,7 +30,8 @@ A file opens on its change rather than on line one.
 When the Diff panel has focus it marks its current line with a highlight bar: that is the
 line <KeyCap key="e" /> will land on. Jumping to a
 [search](/workflows/filtering-and-searching/) match moves the cursor onto it, so
-<KeyCap key="n" /> then <KeyCap key="e" /> opens the file at the hit.
+<KeyCap key="n" /> then <KeyCap key="e" /> opens the file at the hit. So does
+double-clicking a line of the diff, which marks it and opens there in one go.
 
 **Directory rows** work the same way through their combined diff: which file a hunk
 belongs to is written in the diff itself, so reading down a directory's changes and

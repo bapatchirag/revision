@@ -17,6 +17,8 @@ const (
 	// panelCmdLog is the command-log panel below Main. It is last in the focus
 	// ring and is skipped by Tab while hidden.
 	panelCmdLog = 4
+
+	panelCount = 5
 )
 
 // stagedChangelist is the SVN changelist name revision uses to emulate a

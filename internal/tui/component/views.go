@@ -239,6 +239,34 @@ func (v *Views) SetTheme(th theme.Theme) {
 	}
 }
 
+// Activate selects the view at i, as [ and ] do, and emits ViewSelectedMsg.
+// Like them it is locked while drilled into a sub-view, and unlike them it takes
+// an exact index rather than wrapping.
+func (v *Views) Activate(i int) tea.Cmd {
+	if v.Depth() > 0 || i < 0 || i >= len(v.views) {
+		return nil
+	}
+	return v.switchView(i)
+}
+
+// ClickRow passes a row click to the component on top, when it has a selection
+// to move.
+func (v *Views) ClickRow(row int) tea.Cmd {
+	if rs, ok := v.top().(rowSelectable); ok {
+		return rs.ClickRow(row)
+	}
+	return nil
+}
+
+// Scroll passes a scroll to the component on top, which is the only one on
+// screen.
+func (v *Views) Scroll(dx, dy int) tea.Cmd {
+	if s, ok := v.top().(scrollable); ok {
+		return s.Scroll(dx, dy)
+	}
+	return nil
+}
+
 // switchView moves the active view to i (wrapping), preserving each view's own
 // drill stack, and emits ViewSelectedMsg. A lone view has nothing to switch to.
 func (v *Views) switchView(i int) tea.Cmd {

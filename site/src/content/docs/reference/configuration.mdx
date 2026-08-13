@@ -39,7 +39,7 @@ Press <KeyCap key="S" />:
 Cycling the theme applies it live so you can preview each scheme in place;
 <KeyCap key="esc" /> reverts the preview and <KeyCap key="ctrl+s" /> keeps it. Saving
 writes the same `config.json`, and the theme, directory-diff, hide-untracked,
-live-refresh and display-scope changes take effect immediately.
+live-refresh, mouse and display-scope changes take effect immediately.
 
 ## Settings
 
@@ -55,6 +55,7 @@ live-refresh and display-scope changes take effect immediately.
 | `editor` | string | `native` | Which editor <KeyCap key="e" /> opens the highlighted file in. |
 | `optimisticUpdates` | bool | `true` | Show an action as done the moment it is asked for, with `svn` confirming afterwards. |
 | `liveRefresh` | bool | `true` | Watch the working copy in the background and pick up changes made outside `revision`. |
+| `allowMouse` | bool | `false` | Let the pointer click and scroll the panels. |
 
 ### theme
 
@@ -139,6 +140,30 @@ the commit editor or the settings form is open — the refresh waits for the scr
 Turn it off on a network filesystem or a very large working copy, where the periodic scan
 costs more than it is worth — see
 [troubleshooting](/operations/troubleshooting/#live-refresh-is-expensive-on-my-working-copy).
+
+### allowMouse
+
+With `allowMouse` on the panels answer the pointer, and every gesture is a key as well:
+
+| Gesture | Same as |
+|---|---|
+| Click a panel | Its number key |
+| Click a view name in the border | <KeyCap key="[" /> / <KeyCap key="]" /> |
+| Click a row | Walking to it with <KeyCap key="↑" /> / <KeyCap key="↓" /> |
+| Double-click a file | <KeyCap key="e" /> — [open it in your editor](/workflows/editor/) |
+| Double-click a directory | <KeyCap key="enter" /> — fold or unfold it |
+| Double-click a changelist | <KeyCap key="enter" /> — [drill into it](/workflows/changelists/#drilling-into-a-list) |
+| Double-click a revision | <KeyCap key="space" /> — [update the working copy to it](/workflows/updating/#to-a-specific-revision) |
+| Double-click a diff line | <KeyCap key="e" /> — open the file at that line |
+| Wheel | The scroll keys, on the panel under the pointer |
+
+The wheel scrolls sideways with <KeyCap key="shift" /> held and never moves focus. The
+overlays — the side-by-side view, the resolution window, every prompt — stay on the
+keyboard.
+
+It is off by default because reporting the pointer takes it from the terminal: while it is
+on, selecting text on screen needs <KeyCap key="shift" /> held. Nothing is mouse-only, so
+leaving it off costs nothing but the pointer.
 
 ## Example
 
