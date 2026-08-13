@@ -17,6 +17,28 @@ func click(x, y int) tea.MouseMsg {
 	return tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
 }
 
+// mouseModel is a sized model that reads the pointer, which is off by default.
+func mouseModel(t testing.TB) *Model {
+	t.Helper()
+	cfg := config.Default()
+	cfg.AllowMouse = true
+	return sizedModelCfg(t, cfg)
+}
+
+func TestTheMouseIsIgnoredUntilItIsTurnedOn(t *testing.T) {
+	m := sizedModel(t)
+	if m.cfg.AllowMouse {
+		t.Fatal("the mouse is off unless the config says otherwise")
+	}
+	before := m.focus.Index()
+
+	next, _ := m.Update(click(5, 18))
+	m = next.(*Model)
+	if got := m.focus.Index(); got != before {
+		t.Errorf("focus moved to %d with the mouse off, want it left on %d", got, before)
+	}
+}
+
 // The coordinates below are read off sizedModel's 80x24 screen: the left column
 // is 32 wide and stacks Status (rows 0-7), Files (8-14) and Log (15-22); the
 // right column holds Main (rows 0-16) over the command log (17-22); the bar has
@@ -35,7 +57,7 @@ func TestClickFocusesThePanelUnderThePointer(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := sizedModel(t)
+			m := mouseModel(t)
 			next, _ := m.Update(click(tc.x, tc.y))
 			m = next.(*Model)
 			if got := m.focus.Index(); got != tc.want {
@@ -46,7 +68,7 @@ func TestClickFocusesThePanelUnderThePointer(t *testing.T) {
 }
 
 func TestClickBelowThePanelsLeavesFocusAlone(t *testing.T) {
-	m := sizedModel(t)
+	m := mouseModel(t)
 	before := m.focus.Index()
 	// Row 23 is the status bar, which belongs to no panel.
 	next, _ := m.Update(click(10, 23))
@@ -57,7 +79,7 @@ func TestClickBelowThePanelsLeavesFocusAlone(t *testing.T) {
 }
 
 func TestHidingTheCommandLogGivesItsRowsToMain(t *testing.T) {
-	m := sizedModel(t)
+	m := mouseModel(t)
 	m, _ = pressRune(t, m, 'x')
 	if m.showCmdLog {
 		t.Fatal("x should hide the command log")
@@ -78,7 +100,7 @@ func TestOnlyALeftPressMovesFocus(t *testing.T) {
 	}
 	for name, msg := range ignored {
 		t.Run(name, func(t *testing.T) {
-			m := sizedModel(t)
+			m := mouseModel(t)
 			before := m.focus.Index()
 			next, _ := m.Update(msg)
 			m = next.(*Model)
@@ -90,7 +112,7 @@ func TestOnlyALeftPressMovesFocus(t *testing.T) {
 }
 
 func TestClicksAreIgnoredWhileAnOverlayIsOpen(t *testing.T) {
-	m := sizedModel(t)
+	m := mouseModel(t)
 	m, _ = pressRune(t, m, '?')
 	if !m.helping {
 		t.Fatal("? should open the help menu")
@@ -107,7 +129,7 @@ func TestClicksAreIgnoredWhileAnOverlayIsOpen(t *testing.T) {
 }
 
 func TestClickingAViewNameSelectsItAndItsPanel(t *testing.T) {
-	m := sizedModel(t)
+	m := mouseModel(t)
 	m, _ = pressRune(t, m, ']')
 	if name := m.filesViews.ActiveName(); name != "Changelists" {
 		t.Fatalf("active files view = %q, want ] to have moved off Changes", name)
@@ -141,7 +163,7 @@ const (
 // TestClickingARowSelectsIt is the pointer's half of "navigate to a row": the
 // same SelectedMsg the arrow keys emit, which is what loads the diff for it.
 func TestClickingARowSelectsIt(t *testing.T) {
-	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+	m := loadItems(t, mouseModel(t), []svn.StatusItem{
 		{Path: "alpha.go", State: svn.StateModified},
 		{Path: "beta.go", State: svn.StateModified},
 		{Path: "gamma.go", State: svn.StateModified},
@@ -203,7 +225,7 @@ func fileRow(t *testing.T, m *Model, path string) int {
 }
 
 func TestDoubleClickingADirectoryFoldsIt(t *testing.T) {
-	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+	m := loadItems(t, mouseModel(t), []svn.StatusItem{
 		{Path: "src/a.go", State: svn.StateModified},
 		{Path: "src/b.go", State: svn.StateModified},
 	})
@@ -220,6 +242,7 @@ func TestDoubleClickingADirectoryFoldsIt(t *testing.T) {
 
 func TestDoubleClickingAFileOpensTheEditor(t *testing.T) {
 	cfg := config.Default()
+	cfg.AllowMouse = true
 	cfg.Editor = config.EditorVim
 	m := loadItems(t, sizedModelCfg(t, cfg), []svn.StatusItem{
 		{Path: "src/a.go", State: svn.StateModified},
@@ -235,7 +258,7 @@ func TestDoubleClickingAFileOpensTheEditor(t *testing.T) {
 }
 
 func TestDoubleClickingARevisionAsksToUpdateToIt(t *testing.T) {
-	m := loadItems(t, sizedModel(t), nil)
+	m := loadItems(t, mouseModel(t), nil)
 	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{
 		{Revision: "42", Author: "alice", Message: "first"},
 		{Revision: "41", Author: "bob", Message: "second"},
@@ -253,7 +276,7 @@ func TestDoubleClickingARevisionAsksToUpdateToIt(t *testing.T) {
 }
 
 func TestDoubleClickingAChangelistOpensIt(t *testing.T) {
-	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+	m := loadItems(t, mouseModel(t), []svn.StatusItem{
 		{Path: "a.go", State: svn.StateModified, Changelist: "feature"},
 	})
 	next, _ := m.Update(click(tabColumn(t, m, "Changelist"), filesTop))
@@ -269,7 +292,7 @@ func TestDoubleClickingAChangelistOpensIt(t *testing.T) {
 }
 
 func TestDoubleClickingADiffLineAimsTheEditorAtIt(t *testing.T) {
-	m := loadItems(t, sizedModel(t), []svn.StatusItem{{Path: "src/a.go", State: svn.StateModified}})
+	m := loadItems(t, mouseModel(t), []svn.StatusItem{{Path: "src/a.go", State: svn.StateModified}})
 	next, _ := m.Update(diffLoadedMsg{path: "src/a.go", diff: scrollableDiff()})
 	m = next.(*Model)
 
@@ -291,7 +314,7 @@ func wheel(t *testing.T, m *Model, x, y int, button tea.MouseButton) *Model {
 }
 
 func TestTheWheelScrollsThePanelUnderThePointer(t *testing.T) {
-	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+	m := loadItems(t, mouseModel(t), []svn.StatusItem{
 		{Path: "a.go", State: svn.StateModified},
 		{Path: "b.go", State: svn.StateModified},
 	})
@@ -317,7 +340,7 @@ func TestTheWheelScrollsThePanelUnderThePointer(t *testing.T) {
 }
 
 func TestTwoSlowClicksAreNotADoubleClick(t *testing.T) {
-	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+	m := loadItems(t, mouseModel(t), []svn.StatusItem{
 		{Path: "src/a.go", State: svn.StateModified},
 	})
 	row := fileRow(t, m, "src")

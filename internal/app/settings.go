@@ -99,12 +99,14 @@ func (m *Model) submitSettings() tea.Cmd {
 	cfg.DiffOutputDir = strings.TrimSpace(vals[7])
 	cfg.OptimisticUpdates = vals[8] == "true"
 	cfg.LiveRefresh = vals[9] == "true"
+	cfg.AllowMouse = vals[10] == "true"
 
 	m.closeSettings()
 
 	themeChanged := cfg.Theme != m.cfg.Theme
 	untrackedChanged := cfg.HideUntracked != m.hideUntracked
 	liveChanged := cfg.LiveRefresh != m.liveRefresh
+	mouseChanged := cfg.AllowMouse != m.cfg.AllowMouse
 	displayChanged := cfg.DisplayFrom != m.cfg.DisplayFrom
 	diffDirChanged := cfg.DiffOutputDir != m.cfg.DiffOutputDir
 	logLimitChanged := cfg.LogLimit != m.cfg.LogLimit
@@ -137,6 +139,11 @@ func (m *Model) submitSettings() tea.Cmd {
 		} else {
 			m.stopWatch()
 		}
+	}
+	// Turning the mouse on or off asks the terminal to start or stop reporting it,
+	// so the setting takes effect without a restart.
+	if mouseChanged {
+		reload = tea.Batch(reload, mouseReporting(cfg.AllowMouse))
 	}
 	// A new output directory means a different set of saved diffs to browse; the
 	// display scope changes it too, since a blank setting resolves to the root.
@@ -198,5 +205,6 @@ func settingsFields(cfg config.Config, dirDiff bool) []component.Field {
 		{Label: "Diff output", Kind: component.FieldText, Value: cfg.DiffOutputDir},
 		{Label: "Optimistic updates", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.OptimisticUpdates)},
 		{Label: "Live refresh", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.LiveRefresh)},
+		{Label: "Allow mouse", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.AllowMouse)},
 	}
 }

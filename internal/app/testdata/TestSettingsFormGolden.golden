@@ -2,18 +2,18 @@
 │Root      /home/alice/work/wc ││Loading diff…                                 │
 │Source    /home/alice/work/wc ││                                              │
 │CWD       /home/alice/work/wc ││                                              │
-│Branch    trunk               ││                                              │
-│Revision  r42  ╭─ Settings ───────────────────────────────────╮               │
-│               │> Log limit          100                      │               │
-╰───────────────│  Editor             native                   │               │
-╭─ [2] ─ Changes│  Theme              auto                     │               │
-│  ▾ /          │  Directory diff     on                       │               │
-│>     M modifie│  Hide untracked     off                      │               │
-│               │  SSH key            ~/.ssh/id_rsa            │               │
+│Branch    trunk╭─ Settings ───────────────────────────────────╮               │
+│Revision  r42  │> Log limit          100                      │               │
+│               │  Editor             native                   │               │
+╰───────────────│  Theme              auto                     │               │
+╭─ [2] ─ Changes│  Directory diff     on                       │               │
+│  ▾ /          │  Hide untracked     off                      │               │
+│>     M modifie│  SSH key            ~/.ssh/id_rsa            │               │
 │               │  Display from       cwd                      │               │
 │               │  Diff output                                 │               │
-╰───────────────│  Optimistic updates on                       │               │
-╭─ [3] Log ─────│  Live refresh       on                       │               │
+│               │  Optimistic updates on                       │               │
+╰───────────────│  Live refresh       on                       │               │
+╭─ [3] Log ─────│  Allow mouse        off                      │               │
 │  Rev Author Me│                                              │───────────────╯
 │               │ctrl+s save · ↑↓ move · esc cancel            │───────────────╮
 │               ╰──────────────────────────────────────────────╯               │

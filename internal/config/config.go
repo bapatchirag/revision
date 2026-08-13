@@ -117,6 +117,10 @@ type Config struct {
 	// an explicit refresh. Turn it off on a network filesystem or a very large
 	// working copy, where the periodic scan costs more than it is worth.
 	LiveRefresh bool `json:"liveRefresh"`
+	// AllowMouse controls whether the terminal reports the pointer to revision,
+	// making panels clickable and scrollable. It is off by default: reporting the
+	// mouse takes it from the terminal, so selecting text needs shift held.
+	AllowMouse bool `json:"allowMouse"`
 }
 
 // Default returns the configuration used when no file exists yet or when a
@@ -133,6 +137,7 @@ func Default() Config {
 		DiffOutputDir:     "",
 		OptimisticUpdates: true,
 		LiveRefresh:       true,
+		AllowMouse:        false,
 	}
 }
 

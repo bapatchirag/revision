@@ -153,7 +153,13 @@ func runTUI(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg conf
 	defer model.Close()
 	model.SetStartupNotice(notice)
 
-	final, err := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	if cfg.AllowMouse {
+		// Reporting the mouse takes it from the terminal, so it is asked for only
+		// when the setting is on; selecting text then needs shift held.
+		opts = append(opts, tea.WithMouseCellMotion())
+	}
+	final, err := tea.NewProgram(model, opts...).Run()
 	if err != nil {
 		return nil, err
 	}

@@ -17,6 +17,17 @@ type clickAt struct {
 	at   time.Time
 }
 
+// mouseReporting asks the terminal to start or stop reporting the pointer.
+// Bubble Tea turns reporting on once at startup and off whenever it gives the
+// terminal back, so this is how it is armed again — and the only way the setting
+// takes effect without a restart.
+func mouseReporting(on bool) tea.Cmd {
+	if on {
+		return tea.EnableMouseCellMotion
+	}
+	return tea.DisableMouse
+}
+
 // routeMouse gives a left click the effect of the clicked panel's number key:
 // it moves focus there. Inside the panel the click lands on something: one of
 // the view names inlaid in its border selects that view, as [ and ] do, and a
@@ -24,6 +35,11 @@ type clickAt struct {
 // second time runs what it is for — see doubleClick. The wheel scrolls whatever
 // the pointer rests on. Nothing else is read from the mouse.
 func (m *Model) routeMouse(msg tea.MouseMsg) tea.Cmd {
+	// The terminal only reports the pointer while the setting is on, but a report
+	// already in flight when it went off must not act either.
+	if !m.cfg.AllowMouse {
+		return nil
+	}
 	// An overlay, the update progress modal or the filter bar owns the screen or
 	// the keyboard; the panels below are not what is being pointed at.
 	if m.overlayActive() || m.updatingWC || m.filtering {
