@@ -1,5 +1,31 @@
 [
   {
+    "tag": "v1.6.0",
+    "name": "v1.6.0",
+    "date": "2026-08-13T06:23:33Z",
+    "url": "https://github.com/bapatchirag/revision/releases/tag/v1.6.0",
+    "prerelease": false,
+    "entries": [
+      "Recover build identity for `go install` binaries (@bapatchirag)",
+      "Pin the approved release through the apply path (@bapatchirag)",
+      "Install over the running binary, not a re-derived path (@bapatchirag)",
+      "Fetch the install script over HTTPS instead of piping curl (@bapatchirag)",
+      "Verify the update actually landed (@bapatchirag)",
+      "Test and lint install.sh (@bapatchirag)",
+      "Verify the download and install it atomically (@bapatchirag)",
+      "Never lose the update prompt (@bapatchirag)",
+      "Close the session before swapping the binary (@bapatchirag)",
+      "Throttle the startup update check (@bapatchirag)",
+      "Reject --update-with without --update, and relax the toolchain (@bapatchirag)",
+      "Say what the keys do in the resolution overlay (@bapatchirag)",
+      "Switch working copies without restarting (@bapatchirag)",
+      "Give the landing page a distinct og:title (@bapatchirag)",
+      "Added FAQs to the site docs (@bapatchirag)",
+      "Put the release history on the site (@bapatchirag)",
+      "Re-record every demo wide enough for the Files tabs (@bapatchirag)"
+    ]
+  },
+  {
     "tag": "v1.5.1",
     "name": "v1.5.1",
     "date": "2026-08-07T09:29:22Z",
