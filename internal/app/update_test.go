@@ -116,6 +116,17 @@ func TestKeysAreLeftToRouteKey(t *testing.T) {
 	}
 }
 
+// TestMouseIsLeftToRouteMouse is the same line for the pointer: a dispatcher
+// claiming a mouse message would leave routeMouse dead.
+func TestMouseIsLeftToRouteMouse(t *testing.T) {
+	for i, name := range handlerNames {
+		m := sizedModel(t)
+		if _, ok := dispatchers(m)[i](click(0, 0)); ok {
+			t.Errorf("%s claimed a mouse event; the mouse belongs to routeMouse", name)
+		}
+	}
+}
+
 // TestProbeCoversEveryMessageType stops a message type added later from
 // escaping the partition check above unnoticed.
 func TestProbeCoversEveryMessageType(t *testing.T) {

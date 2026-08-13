@@ -153,7 +153,7 @@ func runTUI(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg conf
 	defer model.Close()
 	model.SetStartupNotice(notice)
 
-	final, err := tea.NewProgram(model, tea.WithAltScreen()).Run()
+	final, err := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	if err != nil {
 		return nil, err
 	}
