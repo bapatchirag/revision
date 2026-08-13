@@ -10,8 +10,8 @@
 
 Set Shell "bash"
 Set FontSize 18
-Set Width 1200
-Set Height 700
+Set Width 1600
+Set Height 900
 Set Padding 14
 Set Margin 0
 Set TypingSpeed 55ms

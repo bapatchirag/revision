@@ -7,39 +7,64 @@
 #
 # Requires: vhs, svn + svnadmin on PATH, and a Go toolchain (to build the
 # binary). The hidden setup block builds a throwaway SVN working copy so the
-# TUI has real status, diffs, changelists, and history to show, and points
-# XDG_CONFIG_HOME at the same throwaway directory so the settings demo never
-# touches the real ~/.config/revision/config.json.
+# TUI has real status, diffs, changelists, saved patches, a reject and history
+# to show, and points XDG_CONFIG_HOME at the same throwaway directory so the
+# settings demo never touches the real ~/.config/revision/config.json.
+#
+# Unlike the per-feature tapes in docs/tapes, this one keeps a window bar and a
+# margin — it is the poster shot. The palette is Cipher either way: once for the
+# terminal VHS renders into, once for revision itself via docs/tapes/config.json.
+#
+# The width is not arbitrary. With all four views named, the Files panel's tab
+# strip is 53 cells and the left column is 2/5 of the terminal, so under about
+# 140 columns "Rejects" is truncated off the border.
 
 Output site/public/demos/hero.gif
 
 Set Shell "bash"
 Set FontSize 16
-Set Width 1240
-Set Height 760
+Set Width 1560
+Set Height 940
 Set Padding 18
 Set Margin 26
-Set MarginFill "#16161e"
+Set MarginFill "#111927"
 Set BorderRadius 10
 Set WindowBar Colorful
 Set TypingSpeed 55ms
 Set Framerate 20
-Set Theme { "name": "Tokyo Night", "background": "#1a1b26", "foreground": "#c0caf5", "black": "#15161e", "red": "#f7768e", "green": "#9ece6a", "yellow": "#e0af68", "blue": "#7aa2f7", "magenta": "#bb9af7", "cyan": "#7dcfff", "white": "#a9b1d6", "brightBlack": "#414868", "brightRed": "#f7768e", "brightGreen": "#9ece6a", "brightYellow": "#e0af68", "brightBlue": "#7aa2f7", "brightMagenta": "#bb9af7", "brightCyan": "#7dcfff", "brightWhite": "#c0caf5", "selection": "#283457", "cursor": "#c0caf5" }
+Set WaitTimeout 3m
+Set Theme { "name": "Cipher", "background": "#111927", "foreground": "#e6e9f2", "black": "#141d2b", "red": "#ff3e3e", "green": "#9fef00", "yellow": "#ffaf00", "blue": "#5cb2ff", "magenta": "#c88dea", "cyan": "#4dd2e1", "white": "#a4b1cd", "brightBlack": "#7a7899", "brightRed": "#ff8484", "brightGreen": "#c5f467", "brightYellow": "#ffcc5c", "brightBlue": "#5cb2ff", "brightMagenta": "#c88dea", "brightCyan": "#4dd2e1", "brightWhite": "#ffffff", "selection": "#302540", "cursor": "#9fef00" }
 
 # --- hidden setup: build the demo working copy and put revision on PATH ---
 Hide
-Type "bash docs/demo-setup.sh /tmp/revision-demo && go build -o /tmp/revision-demo/revision ./cmd/revision && echo READY" Enter
-Sleep 9s
-Type 'export PATH="/tmp/revision-demo:$PATH"' Enter
-Type 'export XDG_CONFIG_HOME=/tmp/revision-demo/config' Enter
-Type "cd /tmp/revision-demo/wc && clear" Enter
+
+# A bare prompt: nothing is recorded here, but a default PS1 carries the
+# hostname and the checkout path, and one mistimed frame would publish both.
+Type 'export PS1="$ "' Enter
+
+# Build the binary outside the demo directory — demo-setup.sh wipes that — then
+# build the throwaway repository and working copy. The script's own closing
+# "demo ready:" line is the signal that both are done, so no guessed sleep.
+Type "mkdir -p /tmp/revision-demo-bin && go build -o /tmp/revision-demo-bin/revision ./cmd/revision && bash docs/demo-setup.sh /tmp/revision-demo" Enter
+Wait+Screen /demo ready:/
+
+Type 'export PATH="/tmp/revision-demo-bin:$PATH"' Enter
+Type "export XDG_CONFIG_HOME=/tmp/revision-demo/config" Enter
+Type "mkdir -p $XDG_CONFIG_HOME/revision && cp docs/tapes/config.json $XDG_CONFIG_HOME/revision/config.json" Enter
+
+# Enter the working copy by its physical path. svn reports the working copy root
+# with symlinks resolved, so on macOS — where /tmp is a link to /private/tmp —
+# landing here via /tmp would put a different string in the Status panel's Root
+# row than in its Source and CWD rows. A no-op on Linux.
+Type 'cd /tmp/revision-demo/wc && cd "$(pwd -P)" && clear' Enter
 Show
 
 # --- launch: the lazygit-style layout ---------------------------------------
 # Status, Files and Log on the left, the Main detail view on the right, and the
 # command log of every svn action underneath it.
 Type "revision" Enter
-Sleep 3s
+Wait+Screen /Command Log/
+Sleep 2.5s
 
 # The Status panel names the working copy: its root, the branch it came from,
 # and the revision it sits at against HEAD.
@@ -77,7 +102,7 @@ Sleep 1.4s
 Escape
 Sleep 700ms
 
-# --- the Files panel --------------------------------------------------------
+# --- the Files panel: Changes -----------------------------------------------
 Type "2"
 Sleep 700ms
 
@@ -112,6 +137,14 @@ Sleep 1.8s
 Space
 Sleep 2s
 
+# w writes whatever diff is on screen out as a patch file.
+Type "w"
+Sleep 1.1s
+Type "server-health"
+Sleep 1.1s
+Enter
+Sleep 2s
+
 # Name the entire staged set as one changelist in a single step.
 Type "n"
 Sleep 900ms
@@ -120,13 +153,29 @@ Sleep 1.1s
 Enter
 Sleep 1.9s
 
-# --- the changelist lives in a tabbed view inside the Files panel -----------
+# --- the Files panel holds four views, cycled with [ and ] -------------------
+# Changelists: the staged set, grouped under the name it was just given.
 Type "]"
-Sleep 1.6s
+Sleep 1.8s
 
-# Drill into it to see just its files.
+# Drill into one to see only its files; esc comes back out.
 Enter
 Sleep 1.8s
+Escape
+Sleep 1.2s
+
+# Diffs: the patches saved with w, the highlighted one rendered in Main.
+Type "]"
+Sleep 2.4s
+
+# Rejects: the hunks a patch could not place, found by walking the working copy.
+# svn ignores .rej files, so the Changes view never lists them.
+Type "]"
+Sleep 2.6s
+
+# Back round to Changes.
+Type "]"
+Sleep 1.2s
 
 # --- history: full revision numbers and authors, working copy marked with * --
 Type "3"
