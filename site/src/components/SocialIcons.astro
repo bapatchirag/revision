@@ -13,8 +13,10 @@ import Default from '@astrojs/starlight/components/SocialIcons.astro';
 
 const REPO = 'https://github.com/bapatchirag/revision';
 const OWNER = 'https://github.com/bapatchirag';
+const base = import.meta.env.BASE_URL;
 
 const actions = [
+	{ text: 'Changelog', href: `${base}changelog/`, label: 'What changed in each release' },
 	{ text: 'Star', href: REPO, label: 'Star revision on GitHub' },
 	{ text: 'Fork', href: `${REPO}/fork`, label: 'Fork revision on GitHub' },
 	{ text: 'Watch', href: `${REPO}/subscription`, label: 'Watch revision on GitHub' },

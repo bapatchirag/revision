@@ -7,7 +7,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 # Every tape in docs/tapes except the settings-and-setup fragment they all source.
 TAPES   := $(filter-out docs/tapes/common.tape,$(wildcard docs/tapes/*.tape))
 
-.PHONY: all build run run-gallery site-data site-build site-dev demos test cover vet fmt lint tidy cross build-darwin-arm64 build-darwin-amd64 build-linux-amd64 build-linux-arm64 clean
+.PHONY: all build run run-gallery site-data site-changelog site-build site-dev demos test cover vet fmt lint tidy cross build-darwin-arm64 build-darwin-amd64 build-linux-amd64 build-linux-arm64 clean
 
 all: build
 
@@ -26,6 +26,10 @@ run-gallery:
 ## site-data: regenerate the website's keybindings table from the Go source
 site-data:
 	go run ./cmd/keymapdump > site/src/data/keybindings.json
+
+## site-changelog: regenerate the website's release history from the GitHub releases
+site-changelog:
+	npm --prefix site run changelog
 
 ## site-build: regenerate the keybindings table, then build the website into site/dist
 site-build: site-data
