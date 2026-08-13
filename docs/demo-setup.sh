@@ -211,4 +211,23 @@ svn add -q internal/server/handler.go
 printf 'ORBIT_ADDR=:9090\nORBIT_LOG_LEVEL=debug\n' > .env
 printf 'TODO: graceful shutdown timeout\nTODO: structured logging\n' > notes.txt
 
+# A reject left behind by a patch that would not apply, so the Rejects view has
+# something to show. svn searches the whole target for a hunk's text, so a hunk
+# is only rejected once that text is gone: the setting is edited one way to make
+# the patch, then another way so the patch can no longer place it. The file is
+# restored afterwards and the reject outlives it. svn's default global-ignores
+# cover *.rej, so this never appears in the Changes tree.
+retarget() {
+	sed "s/LogLevel: \"info\"/LogLevel: \"$1\"/" internal/config/config.go > "$DEMO/config.tmp"
+	cp "$DEMO/config.tmp" internal/config/config.go
+}
+
+retarget debug
+svn diff internal/config/config.go > "$DEMO/config.patch"
+svn revert -q internal/config/config.go
+retarget warn
+svn patch "$DEMO/config.patch" > /dev/null
+svn revert -q internal/config/config.go
+rm -f "$DEMO/config.tmp"
+
 echo "demo ready: $WC"
