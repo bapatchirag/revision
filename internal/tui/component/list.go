@@ -99,6 +99,23 @@ func (l *List[T]) Focused() bool { return l.focused }
 // SetTheme implements tui.Themeable.
 func (l *List[T]) SetTheme(th theme.Theme) { l.theme = th }
 
+// Scroll steps the cursor dy rows down the list and the window dx columns
+// across it, as the arrow keys do, reporting the move as SelectedMsg. A list
+// scrolls by its selection: the window only ever follows the cursor.
+func (l *List[T]) Scroll(dx, dy int) tea.Cmd {
+	prev := l.cursor
+	l.cursor += dy
+	l.xOffset += dx * hScrollStep
+	l.clampCursor()
+	l.clampOffset()
+	l.clampXOffset()
+	if l.cursor == prev {
+		return nil
+	}
+	id, idx := l.id, l.cursor
+	return func() tea.Msg { return msg.SelectedMsg{ID: id, Index: idx} }
+}
+
 // ClickRow moves the cursor to the item drawn on row of the list's own area (0
 // is its first row) and emits SelectedMsg, exactly as the arrow keys do. A row
 // holding no item — past the last one, or the horizontal scrollbar's — selects

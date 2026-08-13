@@ -261,6 +261,26 @@ func newStringTable() *component.Table[[]string] {
 	}, func(r []string) []string { return r }, testTheme(), testKeys())
 }
 
+func TestViewportScrollMovesTheWindowThenTheCursor(t *testing.T) {
+	v := component.NewViewport(testTheme(), testKeys())
+	v.SetContent("a\nb\nc\nd\ne\nf")
+	v.SetSize(10, 3)
+
+	v.Scroll(0, 1)
+	if v.Offset() != 1 {
+		t.Errorf("offset = %d, want the window itself moved when there is no cursor", v.Offset())
+	}
+
+	v.SetCursorLine(true)
+	v.Scroll(0, 1)
+	if v.Cursor() != 1 {
+		t.Errorf("cursor = %d, want the cursor moved once there is one", v.Cursor())
+	}
+	if v.Offset() != 1 {
+		t.Errorf("offset = %d, want the window left alone while the cursor is in it", v.Offset())
+	}
+}
+
 func TestViewportClickRowMovesTheLineCursor(t *testing.T) {
 	v := component.NewViewport(testTheme(), testKeys())
 	v.SetContent("a\nb\nc\nd")
@@ -279,6 +299,41 @@ func TestViewportClickRowMovesTheLineCursor(t *testing.T) {
 	v.ClickRow(9)
 	if v.Cursor() != 2 {
 		t.Errorf("cursor = %d, want a row past the content to leave it alone", v.Cursor())
+	}
+}
+
+// TestListScrollMovesTheSelection covers the wheel's half of navigation: a list
+// scrolls by its selection, since its window only ever follows the cursor.
+func TestListScrollMovesTheSelection(t *testing.T) {
+	l := component.NewList[string]("files", func(s string) string { return s }, testTheme(), testKeys())
+	l.SetItems([]string{"aaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbb", "cc"})
+	l.SetSize(10, 4)
+	l.Focus()
+
+	got := mustCmd(t, l.Scroll(0, 1))
+	sel, ok := got.(msg.SelectedMsg)
+	if !ok {
+		t.Fatalf("expected SelectedMsg, got %T", got)
+	}
+	if sel.Index != 1 || l.Index() != 1 {
+		t.Errorf("got %+v (cursor %d), want the row below", sel, l.Index())
+	}
+	mustCmd(t, l.Scroll(0, -5))
+	if l.Index() != 0 {
+		t.Errorf("cursor = %d, want scrolling past the top to stop at it", l.Index())
+	}
+	if cmd := l.Scroll(0, -1); cmd != nil {
+		t.Error("the top does not wrap, so there is nothing to report")
+	}
+
+	top := l.View()
+	l.Scroll(1, 0)
+	if l.View() == top {
+		t.Error("scrolling across should shift the window")
+	}
+	l.Scroll(-1, 0)
+	if l.View() != top {
+		t.Error("scrolling back to the left edge should restore the view")
 	}
 }
 

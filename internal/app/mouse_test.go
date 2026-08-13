@@ -283,6 +283,39 @@ func TestDoubleClickingADiffLineAimsTheEditorAtIt(t *testing.T) {
 	}
 }
 
+// wheel sends one notch of the given wheel button over a cell.
+func wheel(t *testing.T, m *Model, x, y int, button tea.MouseButton) *Model {
+	t.Helper()
+	next, _ := m.Update(tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionPress, Button: button})
+	return next.(*Model)
+}
+
+func TestTheWheelScrollsThePanelUnderThePointer(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "a.go", State: svn.StateModified},
+		{Path: "b.go", State: svn.StateModified},
+	})
+	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{
+		{Revision: "42"}, {Revision: "41"},
+	}})
+	m = next.(*Model)
+
+	before := m.files.Index()
+	m = wheel(t, m, 4, filesTop+1, tea.MouseButtonWheelDown)
+	if got := m.files.Index(); got != before+1 {
+		t.Errorf("the Changes cursor = %d, want the wheel to have moved it from %d", got, before)
+	}
+
+	// The Log panel is not focused, and scrolling it is not a reason to be.
+	m = wheel(t, m, 4, logTop+1, tea.MouseButtonWheelDown)
+	if got := m.log.Index(); got != 1 {
+		t.Errorf("the Log cursor = %d, want the wheel to have moved it", got)
+	}
+	if got := m.focus.Index(); got != panelFiles {
+		t.Errorf("focused panel %d, want scrolling to leave focus alone", got)
+	}
+}
+
 func TestTwoSlowClicksAreNotADoubleClick(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "src/a.go", State: svn.StateModified},

@@ -258,6 +258,15 @@ func (v *Views) ClickRow(row int) tea.Cmd {
 	return nil
 }
 
+// Scroll passes a scroll to the component on top, which is the only one on
+// screen.
+func (v *Views) Scroll(dx, dy int) tea.Cmd {
+	if s, ok := v.top().(scrollable); ok {
+		return s.Scroll(dx, dy)
+	}
+	return nil
+}
+
 // switchView moves the active view to i (wrapping), preserving each view's own
 // drill stack, and emits ViewSelectedMsg. A lone view has nothing to switch to.
 func (v *Views) switchView(i int) tea.Cmd {

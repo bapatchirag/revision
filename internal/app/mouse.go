@@ -21,20 +21,24 @@ type clickAt struct {
 // it moves focus there. Inside the panel the click lands on something: one of
 // the view names inlaid in its border selects that view, as [ and ] do, and a
 // row moves the selection to it, as the arrow keys do. Clicking that row a
-// second time runs what it is for — see doubleClick. Nothing else is read from
-// the mouse — no mouse event ever reaches a panel — so a drag or a wheel cannot
-// move a selection or a scroll position out from under the keyboard.
+// second time runs what it is for — see doubleClick. The wheel scrolls whatever
+// the pointer rests on. Nothing else is read from the mouse.
 func (m *Model) routeMouse(msg tea.MouseMsg) tea.Cmd {
 	// An overlay, the update progress modal or the filter bar owns the screen or
 	// the keyboard; the panels below are not what is being pointed at.
 	if m.overlayActive() || m.updatingWC || m.filtering {
 		return nil
 	}
-	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
-		return nil
-	}
 	idx, r, ok := m.panelAt(msg.X, msg.Y)
 	if !ok {
+		return nil
+	}
+	if dx, dy, wheel := wheelStep(msg); wheel {
+		// The wheel scrolls what the pointer rests on, focus untouched: reading
+		// somewhere is not working there.
+		return m.panels[idx].Scroll(dx, dy)
+	}
+	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
 		return nil
 	}
 	x, y := msg.X-r.x, msg.Y-r.y
@@ -61,6 +65,30 @@ func (m *Model) routeMouse(msg tea.MouseMsg) tea.Cmd {
 		cmds = append(cmds, m.doubleClick(idx))
 	}
 	return tea.Batch(cmds...)
+}
+
+// wheelStep turns a wheel event into a scroll step: dy down the content, dx
+// across it. It reports false for any other mouse event. A panel whose window
+// follows a selection scrolls by moving it, exactly as its arrow keys do.
+func wheelStep(msg tea.MouseMsg) (dx, dy int, ok bool) {
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		dy = -1
+	case tea.MouseButtonWheelDown:
+		dy = 1
+	case tea.MouseButtonWheelLeft:
+		dx = -1
+	case tea.MouseButtonWheelRight:
+		dx = 1
+	default:
+		return 0, 0, false
+	}
+	// A mouse with no sideways wheel scrolls across with shift held, which
+	// terminals report as a plain wheel carrying the modifier.
+	if msg.Shift && dy != 0 {
+		dx, dy = dy, 0
+	}
+	return dx, dy, true
 }
 
 // doubleClicked records a click and reports whether it completes a double click:

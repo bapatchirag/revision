@@ -42,6 +42,12 @@ type rowSelectable interface {
 	ClickRow(row int) tea.Cmd
 }
 
+// scrollable is implemented by a Panel child the pointer can scroll: dy steps
+// down the content, dx across it.
+type scrollable interface {
+	Scroll(dx, dy int) tea.Cmd
+}
+
 var (
 	_ tui.Component = (*Panel)(nil)
 	_ tui.Sizeable  = (*Panel)(nil)
@@ -138,6 +144,16 @@ func (p *Panel) ClickRow(x, y int) tea.Cmd {
 		return nil
 	}
 	return rs.ClickRow(y - 1)
+}
+
+// Scroll steps the child dy rows down its content and dx columns across it, and
+// returns what it emits for the move. A child that does not scroll ignores it.
+func (p *Panel) Scroll(dx, dy int) tea.Cmd {
+	s, ok := p.child.(scrollable)
+	if !ok {
+		return nil
+	}
+	return s.Scroll(dx, dy)
 }
 
 // SetTitle replaces the panel's heading so a single panel can be reused with a

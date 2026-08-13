@@ -112,6 +112,23 @@ func (t *Table[T]) Focused() bool { return t.focused }
 // SetTheme implements tui.Themeable.
 func (t *Table[T]) SetTheme(th theme.Theme) { t.theme = th }
 
+// Scroll steps the cursor dy rows down the table and the window dx columns
+// across it, as the arrow keys do, reporting the move as SelectedMsg. A table
+// scrolls by its selection: the window only ever follows the cursor.
+func (t *Table[T]) Scroll(dx, dy int) tea.Cmd {
+	prev := t.cursor
+	t.cursor += dy
+	t.xOffset += dx * hScrollStep
+	t.clampCursor()
+	t.clampOffset()
+	t.clampXOffset()
+	if t.cursor == prev {
+		return nil
+	}
+	id, idx := t.id, t.cursor
+	return func() tea.Msg { return msg.SelectedMsg{ID: id, Index: idx} }
+}
+
 // ClickRow moves the cursor to the item drawn on row of the table's own area (0
 // is the header row) and emits SelectedMsg, exactly as the arrow keys do. A row
 // holding no item — the header, one past the last item, or the horizontal
