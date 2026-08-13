@@ -100,6 +100,19 @@ func (v *Viewport) Cursor() int {
 // window.
 func (v *Viewport) Offset() int { return v.offset }
 
+// ClickRow moves the line cursor to row of the viewport's own area (0 is its
+// first row), as the scroll keys move it. A viewport with no cursor has nothing
+// to point at, and a row past the content has no line to point to.
+func (v *Viewport) ClickRow(row int) tea.Cmd {
+	_, innerH, _, _ := v.layout()
+	i := v.offset + row
+	if !v.hasCursor || row < 0 || row >= innerH || i >= len(v.lines) {
+		return nil
+	}
+	v.cursor = i
+	return nil
+}
+
 // setLines splits content into the rendered lines and re-measures the horizontal
 // extent, leaving the scroll offsets to the caller.
 func (v *Viewport) setLines(content string) {

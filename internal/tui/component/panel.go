@@ -122,13 +122,19 @@ func (p *Panel) ClickTab(x, y int) (tea.Cmd, bool) {
 	return nil, false
 }
 
+// InBody reports whether a cell, in coordinates relative to the panel's top-left
+// corner, falls inside the border rather than on it.
+func (p *Panel) InBody(x, y int) bool {
+	return x >= 1 && x < p.width-1 && y >= 1 && y < p.height-1
+}
+
 // ClickRow moves the child's selection to the row covering a cell, given in
 // coordinates relative to the panel's top-left corner, and returns what the
 // child emits for it — the same message navigating to that row with the keys
 // would. The border, and a child with no selection, yield nothing.
 func (p *Panel) ClickRow(x, y int) tea.Cmd {
 	rs, ok := p.child.(rowSelectable)
-	if !ok || x < 1 || x >= p.width-1 || y < 1 || y >= p.height-1 {
+	if !ok || !p.InBody(x, y) {
 		return nil
 	}
 	return rs.ClickRow(y - 1)

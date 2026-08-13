@@ -3,9 +3,11 @@ package app
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/bapatchirag/revision/internal/config"
 	"github.com/bapatchirag/revision/internal/svn"
 	uimsg "github.com/bapatchirag/revision/internal/tui/msg"
 )
@@ -129,6 +131,13 @@ func TestClickingAViewNameSelectsItAndItsPanel(t *testing.T) {
 // its view names. Its rows are the lines below it.
 const filesTop = 8
 
+// logTop and mainLeft are the Log panel's top border row and the Main panel's
+// left border column on the same 80x24 screen.
+const (
+	logTop   = 15
+	mainLeft = 32
+)
+
 // TestClickingARowSelectsIt is the pointer's half of "navigate to a row": the
 // same SelectedMsg the arrow keys emit, which is what loads the diff for it.
 func TestClickingARowSelectsIt(t *testing.T) {
@@ -171,4 +180,123 @@ func tabColumn(t *testing.T, m *Model, name string) int {
 	}
 	t.Fatalf("the Files panel should name %q in its border, got %q", name, string(border))
 	return 0
+}
+
+// doubleClick sends two presses on one cell, close enough together to count.
+func doubleClick(t *testing.T, m *Model, x, y int) (*Model, tea.Cmd) {
+	t.Helper()
+	next, _ := m.Update(click(x, y))
+	next, cmd := next.(*Model).Update(click(x, y))
+	return next.(*Model), cmd
+}
+
+// fileRow returns the screen row the Changes tree draws path on.
+func fileRow(t *testing.T, m *Model, path string) int {
+	t.Helper()
+	for i, n := range m.files.Items() {
+		if n.Path == path {
+			return filesTop + 1 + i
+		}
+	}
+	t.Fatalf("no row for %q in the Changes tree", path)
+	return 0
+}
+
+func TestDoubleClickingADirectoryFoldsIt(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+		{Path: "src/b.go", State: svn.StateModified},
+	})
+
+	m, _ = doubleClick(t, m, 4, fileRow(t, m, "src"))
+	if !m.collapsedDirs["src"] {
+		t.Fatal("a double click on a directory row should fold it")
+	}
+	m, _ = doubleClick(t, m, 4, fileRow(t, m, "src"))
+	if m.collapsedDirs["src"] {
+		t.Error("a second double click should unfold it again")
+	}
+}
+
+func TestDoubleClickingAFileOpensTheEditor(t *testing.T) {
+	cfg := config.Default()
+	cfg.Editor = config.EditorVim
+	m := loadItems(t, sizedModelCfg(t, cfg), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+	})
+	// With nothing on PATH the editor cannot be resolved, so the attempt says so
+	// instead of launching one — which names the file it was going to open.
+	fakeBins(t)
+
+	m, _ = doubleClick(t, m, 4, fileRow(t, m, "src/a.go"))
+	if view := stripANSI(m.View()); !strings.Contains(view, "can't open src/a.go") {
+		t.Errorf("a double click on a file should open it in the editor, got:\n%s", view)
+	}
+}
+
+func TestDoubleClickingARevisionAsksToUpdateToIt(t *testing.T) {
+	m := loadItems(t, sizedModel(t), nil)
+	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{
+		{Revision: "42", Author: "alice", Message: "first"},
+		{Revision: "41", Author: "bob", Message: "second"},
+	}})
+	m = next.(*Model)
+
+	// The Log panel's first row is its header, so r41 is the second row under it.
+	m, _ = doubleClick(t, m, 4, logTop+2)
+	if !m.confirming {
+		t.Fatal("a double click on a revision should ask before moving the working copy")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "Update to revision?") || !strings.Contains(view, "r41") {
+		t.Errorf("expected the prompt to name the double-clicked revision, got:\n%s", view)
+	}
+}
+
+func TestDoubleClickingAChangelistOpensIt(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "a.go", State: svn.StateModified, Changelist: "feature"},
+	})
+	next, _ := m.Update(click(tabColumn(t, m, "Changelist"), filesTop))
+	m = next.(*Model)
+	if !m.filesViewIsChangelists() {
+		t.Fatal("the Changelists view should be showing")
+	}
+
+	m, _ = doubleClick(t, m, 4, filesTop+1)
+	if m.filesViews.Depth() != 1 {
+		t.Errorf("drill depth = %d, want the double-clicked changelist opened", m.filesViews.Depth())
+	}
+}
+
+func TestDoubleClickingADiffLineAimsTheEditorAtIt(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{{Path: "src/a.go", State: svn.StateModified}})
+	next, _ := m.Update(diffLoadedMsg{path: "src/a.go", diff: scrollableDiff()})
+	m = next.(*Model)
+
+	// Row 8 of the diff is the second hunk's header, which starts at file line 201.
+	m, _ = doubleClick(t, m, mainLeft+2, 1+8)
+	if got := m.main.Cursor(); got != 8 {
+		t.Fatalf("the diff cursor is on row %d, want the double-clicked one", got)
+	}
+	if got := editLine(t, m); got != 201 {
+		t.Errorf("line = %d, want 201 — the hunk the click landed in", got)
+	}
+}
+
+func TestTwoSlowClicksAreNotADoubleClick(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+	})
+	row := fileRow(t, m, "src")
+
+	next, _ := m.Update(click(4, row))
+	m = next.(*Model)
+	// The pause a reader takes between looking at two rows.
+	m.lastClick.at = time.Now().Add(-2 * doubleClickWindow)
+	next, _ = m.Update(click(4, row))
+	m = next.(*Model)
+
+	if m.collapsedDirs["src"] {
+		t.Error("two clicks a pause apart are two clicks, not a double click")
+	}
 }

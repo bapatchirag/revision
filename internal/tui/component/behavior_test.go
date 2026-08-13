@@ -261,6 +261,27 @@ func newStringTable() *component.Table[[]string] {
 	}, func(r []string) []string { return r }, testTheme(), testKeys())
 }
 
+func TestViewportClickRowMovesTheLineCursor(t *testing.T) {
+	v := component.NewViewport(testTheme(), testKeys())
+	v.SetContent("a\nb\nc\nd")
+	v.SetSize(10, 4)
+
+	v.ClickRow(2)
+	if v.Cursor() != -1 {
+		t.Errorf("cursor = %d, want none until the viewport carries one", v.Cursor())
+	}
+
+	v.SetCursorLine(true)
+	v.ClickRow(2)
+	if v.Cursor() != 2 {
+		t.Errorf("cursor = %d, want the clicked line", v.Cursor())
+	}
+	v.ClickRow(9)
+	if v.Cursor() != 2 {
+		t.Errorf("cursor = %d, want a row past the content to leave it alone", v.Cursor())
+	}
+}
+
 func TestListClickRowSelectsIt(t *testing.T) {
 	l := component.NewList[string]("files", func(s string) string { return s }, testTheme(), testKeys())
 	l.SetItems([]string{"a", "b", "c"})

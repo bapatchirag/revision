@@ -233,6 +233,9 @@ type Model struct {
 	height  int
 	loading bool
 	err     error
+	// lastClick is the left click a following one is judged against, for
+	// spotting a double click.
+	lastClick clickAt
 }
 
 var _ tea.Model = (*Model)(nil)
