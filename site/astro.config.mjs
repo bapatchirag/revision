@@ -94,6 +94,7 @@ export default defineConfig({
 						{ label: 'Regenerating demos', link: '/develop/demos/' },
 					],
 				},
+				{ label: 'FAQ', link: '/faq/' },
 			],
 			customCss: ['./src/styles/fonts.css', './src/styles/cipher.css'],
 			components: {
