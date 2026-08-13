@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/bapatchirag/revision/internal/tui"
 	"github.com/bapatchirag/revision/internal/tui/theme"
@@ -32,6 +33,7 @@ type tabbed interface {
 	ActiveIndex() int
 	Depth() int
 	CrumbTitle() string
+	Activate(i int) tea.Cmd
 }
 
 var (
@@ -87,6 +89,31 @@ func (p *Panel) titleText() string {
 		return fmt.Sprintf("[%d] %s", p.number, p.title)
 	}
 	return p.title
+}
+
+// ClickTab selects the view whose name in the top border covers a cell, given in
+// coordinates relative to the panel's top-left corner, and reports whether the
+// cell was a view name at all. It answers false for a panel that draws no tab
+// strip: one without several views, or one drilled into a sub-view, where
+// switching is locked just as it is for the keys.
+func (p *Panel) ClickTab(x, y int) (tea.Cmd, bool) {
+	tb, ok := p.child.(tabbed)
+	if !ok || y != 0 || tb.Depth() > 0 {
+		return nil, false
+	}
+	tabs := tb.Tabs()
+	if len(tabs) <= 1 {
+		return nil, false
+	}
+	for i, col := range tabColumns(p.number, tabs) {
+		// The strip is cut off at the right corner, so only what is on screen can
+		// be clicked.
+		end := min(col+ansi.StringWidth(tabs[i]), p.width-1)
+		if x >= col && x < end {
+			return tb.Activate(i), true
+		}
+	}
+	return nil, false
 }
 
 // SetTitle replaces the panel's heading so a single panel can be reused with a

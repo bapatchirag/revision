@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -98,4 +99,45 @@ func TestClicksAreIgnoredWhileAnOverlayIsOpen(t *testing.T) {
 	if got := m.focus.Index(); got != before {
 		t.Errorf("focus moved to %d behind the overlay, want it left on %d", got, before)
 	}
+}
+
+func TestClickingAViewNameSelectsItAndItsPanel(t *testing.T) {
+	m := sizedModel(t)
+	m, _ = pressRune(t, m, ']')
+	if name := m.filesViews.ActiveName(); name != "Changelists" {
+		t.Fatalf("active files view = %q, want ] to have moved off Changes", name)
+	}
+	m, _ = pressRune(t, m, '3')
+	if m.focus.Index() != panelLog {
+		t.Fatal("3 should focus the Log panel")
+	}
+
+	next, _ := m.Update(click(tabColumn(t, m, "Changes"), filesTop))
+	m = next.(*Model)
+	if name := m.filesViews.ActiveName(); name != "Changes" {
+		t.Errorf("active files view = %q, want the clicked one", name)
+	}
+	if got := m.focus.Index(); got != panelFiles {
+		t.Errorf("focused panel %d, want the clicked view's panel", got)
+	}
+}
+
+// filesTop is the screen row of the Files panel's top border, where it inlays
+// its view names.
+const filesTop = 8
+
+// tabColumn returns the column that border row starts name at. Every rune in it
+// is one cell wide, so a rune offset is a column.
+func tabColumn(t *testing.T, m *Model, name string) int {
+	t.Helper()
+	rows := strings.Split(stripANSI(m.View()), "\n")
+	// The right-hand column shares the row, so only the Files panel is searched.
+	border := []rune(rows[filesTop])[:32]
+	for i := range border {
+		if strings.HasPrefix(string(border[i:]), name) {
+			return i
+		}
+	}
+	t.Fatalf("the Files panel should name %q in its border, got %q", name, string(border))
+	return 0
 }

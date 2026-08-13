@@ -702,6 +702,71 @@ func TestViewsCrumbTitle(t *testing.T) {
 	}
 }
 
+// tabbedPanel is a Views inside a Panel, plus the column its border row starts
+// name at. Every rune in the border is one cell wide, so a rune offset into it
+// is a column — which is what ClickTab is given.
+func tabbedPanel(t *testing.T, name string) (*component.Panel, *component.Views, int) {
+	t.Helper()
+	vs, _, _ := newStringViews()
+	p := component.NewPanel("Files", 2, vs, testTheme())
+	p.SetSize(40, 8)
+
+	border := []rune(ansi.Strip(strings.SplitN(p.View(), "\n", 2)[0]))
+	for i := range border {
+		if strings.HasPrefix(string(border[i:]), name) {
+			return p, vs, i
+		}
+	}
+	t.Fatalf("the border should name every view, got %q", string(border))
+	return nil, nil, 0
+}
+
+func TestPanelClickTabSelectsTheViewUnderIt(t *testing.T) {
+	p, vs, col := tabbedPanel(t, "Staged")
+
+	cmd, ok := p.ClickTab(col, 0)
+	if !ok {
+		t.Fatal("a click on a view name should be taken as one")
+	}
+	got := mustCmd(t, cmd)
+	sel, isView := got.(msg.ViewSelectedMsg)
+	if !isView {
+		t.Fatalf("expected ViewSelectedMsg, got %T", got)
+	}
+	if sel.Index != 1 || sel.Name != "Staged" {
+		t.Errorf("got %+v, want the clicked view", sel)
+	}
+	if vs.ActiveIndex() != 1 {
+		t.Errorf("active view = %d, want 1", vs.ActiveIndex())
+	}
+
+	// The far end of the name is the name too; the cell before it is border.
+	if _, ok := p.ClickTab(col+len("Staged")-1, 0); !ok {
+		t.Error("the last cell of a view name should be taken as one")
+	}
+	if _, ok := p.ClickTab(col-1, 0); ok {
+		t.Error("the border between two view names should be left alone")
+	}
+}
+
+func TestPanelClickTabIgnoresTheBodyAndDrilledPanels(t *testing.T) {
+	p, vs, col := tabbedPanel(t, "Staged")
+
+	// The strip is the top border row alone; the rows below it are the view.
+	if _, ok := p.ClickTab(col, 1); ok {
+		t.Error("a click in the body should not be taken as a tab")
+	}
+
+	sub := component.NewList[string]("detail", func(s string) string { return s }, testTheme(), testKeys())
+	vs.Push(sub)
+	if _, ok := p.ClickTab(col, 0); ok {
+		t.Error("switching is locked while drilled in, as it is for [ and ]")
+	}
+	if vs.ActiveIndex() != 0 {
+		t.Errorf("active view changed while drilled: %d", vs.ActiveIndex())
+	}
+}
+
 func TestPromptEmitsSubmitAndDismiss(t *testing.T) {
 	p := component.NewPrompt("changelist", "Changelist name", "e.g. feature-x", testTheme(), testKeys())
 	p.Focus()

@@ -266,6 +266,29 @@ func tabTopBorder(number int, tabs []string, active, depth int, crumb string, in
 	return bs.Render(borderTopLeft+borderHorizontal) + middle + bs.Render(borderTopRight)
 }
 
+// tabColumns returns the column each tab label starts at in the top border laid
+// out by tabTopBorder, measured from the box's left edge. Truncation is not
+// accounted for, so a caller hit-testing a click must clip to the box width.
+// TestTabColumnsMatchTheRenderedBorder holds the two in step.
+func tabColumns(number int, tabs []string) []int {
+	cols := make([]int, len(tabs))
+	// The corner, the dash before the middle, and the middle's leading space.
+	used := 3
+	if number >= 0 {
+		used += ansi.StringWidth("[" + strconv.Itoa(number) + "]")
+	}
+	for i, tab := range tabs {
+		dashes := 3
+		if i == 0 {
+			dashes = 1
+		}
+		used += 1 + dashes + 1
+		cols[i] = used
+		used += ansi.StringWidth(tab)
+	}
+	return cols
+}
+
 // numberedTitleBorder renders a top edge carrying just the panel number and a
 // single title (e.g. the changelist a drilled-in panel is showing), fit to
 // innerW-1 cells. It is used in place of the tab strip while drilled in.
