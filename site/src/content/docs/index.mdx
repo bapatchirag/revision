@@ -8,6 +8,11 @@ head:
   # Without this the page title and the site title collide as "revision | revision".
   - tag: title
     content: revision — a lazygit-style TUI for Subversion (SVN)
+  # Starlight derives og:title from the page title, which here is the bare word "revision".
+  - tag: meta
+    attrs:
+      property: og:title
+      content: revision — lazygit for SVN
 hero:
   tagline: A lazygit-style terminal UI for Subversion
   # Frontmatter is not Markdown, so these carry the base themselves.
