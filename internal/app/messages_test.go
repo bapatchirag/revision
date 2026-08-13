@@ -137,7 +137,7 @@ func TestProbeSourceCmd(t *testing.T) {
 <wc-info><wcroot-abspath>/wc</wcroot-abspath></wc-info>
 </entry></info>`
 
-	got := msgOf[sourceChangedMsg](t, probeSourceCmd(cmdClient(t, infoXML, 0)))
+	got := msgOf[sourceChangedMsg](t, probeSourceCmd(cmdClient(t, infoXML, 0), fromSourcePath))
 	if got.err != nil {
 		t.Fatalf("probe: %v", got.err)
 	}
@@ -145,9 +145,12 @@ func TestProbeSourceCmd(t *testing.T) {
 		t.Errorf("info = %+v, want the parsed entry", got.info)
 	}
 
-	bad := msgOf[sourceChangedMsg](t, probeSourceCmd(cmdClient(t, "", 1)))
+	bad := msgOf[sourceChangedMsg](t, probeSourceCmd(cmdClient(t, "", 1), fromRepoSwitch))
 	if bad.err == nil {
 		t.Error("a directory svn cannot read must be reported as an error")
+	}
+	if bad.from != fromRepoSwitch {
+		t.Error("the reply must carry the prompt the probe was asked for")
 	}
 }
 

@@ -133,20 +133,26 @@ func (m *Model) submitSourcePath(value string) tea.Cmd {
 	next.Dir = dir
 	m.loading = true
 	m.refreshChrome()
-	return probeSourceCmd(&next)
+	return probeSourceCmd(&next, fromSourcePath)
 }
 
 // applySourceChange re-roots the session on a probed source directory: it adopts
 // the client and info read from there, drops every view derived from the old
-// tree, and reloads status, history and the saved diffs. A directory that is not
-// a working copy changes nothing and reopens the prompt on the attempted path.
+// tree, and reloads status, history and the saved diffs. It serves both the
+// source-path prompt and the repository switch, which differ only in how far the
+// new directory may be from the old one. A directory that is not a working copy
+// changes nothing and reopens the prompt it was typed into on the attempted path.
 func (m *Model) applySourceChange(msg sourceChangedMsg) tea.Cmd {
 	if msg.err != nil {
 		m.loading = false
 		m.refreshChrome()
 		m.showToast(failureText("read "+msg.client.Dir, msg.err), component.LevelError)
 		if !m.overlayActive() {
-			m.openSourcePathAt(msg.client.Dir)
+			if msg.from == fromRepoSwitch {
+				m.openRepoSwitchAt(msg.client.Dir)
+			} else {
+				m.openSourcePathAt(msg.client.Dir)
+			}
 		}
 		return nil
 	}
@@ -157,7 +163,7 @@ func (m *Model) applySourceChange(msg sourceChangedMsg) tea.Cmd {
 	m.launchDir = msg.client.Dir
 	m.retargetDisplay(m.cfg.DisplayFrom)
 	m.resetForSource()
-	m.showToast("source path: "+m.client.Dir, component.LevelSuccess)
+	m.showToast(msg.from.label()+": "+m.client.Dir, component.LevelSuccess)
 	return tea.Batch(m.beginInitialLoad(), m.reloadSavedDiffsIfShown(), m.reloadRejectsIfShown())
 }
 

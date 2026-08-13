@@ -32,6 +32,7 @@ func (m *Model) previewTheme(name string) {
 	m.nameEditor.SetTheme(th)
 	m.diffEditor.SetTheme(th)
 	m.pathEditor.SetTheme(th)
+	m.repoEditor.SetTheme(th)
 	m.modal.SetTheme(th)
 	m.menu.SetTheme(th)
 	m.updateMenu.SetTheme(th)

@@ -50,12 +50,13 @@ type KeyMap struct {
 
 	OpenEditor key.Binding
 
-	Filter    key.Binding
-	Refresh   key.Binding
-	Settings  key.Binding
-	ChangeDir key.Binding
-	Help      key.Binding
-	Quit      key.Binding
+	Filter     key.Binding
+	Refresh    key.Binding
+	Settings   key.Binding
+	ChangeDir  key.Binding
+	SwitchRepo key.Binding
+	Help       key.Binding
+	Quit       key.Binding
 }
 
 // Default returns the standard, lazygit-flavored bindings.
@@ -99,6 +100,7 @@ func Default() KeyMap {
 		Refresh:           key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh")),
 		Settings:          key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "settings")),
 		ChangeDir:         key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "change source path")),
+		SwitchRepo:        key.NewBinding(key.WithKeys("W"), key.WithHelp("W", "switch repository")),
 		Help:              key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:              key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	}
@@ -183,6 +185,10 @@ func HelpSections() []Section {
 			{
 				Action: "Change source path", Keys: []string{"P"}, Context: "Global",
 				Description: "Re-scope revision to another directory inside the working copy, browsing to it from a prompt that opens on the directory it is reading now. The working copy's root is fixed, and the new source lasts for the session only — it is never saved.",
+			},
+			{
+				Action: "Switch repository", Keys: []string{"W"}, Context: "Global",
+				Description: "Move revision to another working copy altogether. The prompt opens at once and the checkouts it finds fill in behind it, so a slow filesystem never holds up the keystroke; typing narrows the list. It looks in the directory revision was started in, in the checkout it is reading, and in that checkout's parents a few levels up, so a sibling of the current tree is offered as readily as something inside it — nearest first. The search stops at each checkout it finds, since everything under one belongs to it, and gives up after a few seconds rather than walking a large tree to the end; anything it did not reach is opened by typing its path in full. A path that is not an SVN working copy is refused and nothing changes. The switch lasts for the session only.",
 			},
 			{
 				Action: "Refresh / settings", Keys: []string{"R", "S"}, Context: "Global",

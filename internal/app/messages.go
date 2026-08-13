@@ -74,12 +74,13 @@ type loadGens struct {
 	rev    loadGen
 	saved  loadGen
 	reject loadGen
+	repos  loadGen
 }
 
 // stopAll abandons every load in flight, releasing the context each holds. A
 // generation added above is abandoned at shutdown by listing it here.
 func (g *loadGens) stopAll() {
-	for _, l := range []*loadGen{&g.diff, &g.status, &g.log, &g.rev, &g.saved, &g.reject} {
+	for _, l := range []*loadGen{&g.diff, &g.status, &g.log, &g.rev, &g.saved, &g.reject, &g.repos} {
 		l.stop()
 	}
 }
@@ -322,23 +323,56 @@ type sshCheckedMsg struct {
 // sshAddedMsg carries the result of adding the SSH key to the agent.
 type sshAddedMsg struct{ err error }
 
+// sourceOrigin records which prompt asked for a source probe, so the reply can
+// name what it changed and hand a rejected directory back to the prompt it was
+// typed into.
+type sourceOrigin int
+
+const (
+	fromSourcePath sourceOrigin = iota
+	fromRepoSwitch
+)
+
+// label names what the probed directory becomes, for the toast confirming it.
+func (o sourceOrigin) label() string {
+	if o == fromRepoSwitch {
+		return "repository"
+	}
+	return "source path"
+}
+
 // sourceChangedMsg carries the result of probing a candidate source directory:
 // the client rooted at it and the working-copy info read from there, or the
 // error that rules the directory out.
 type sourceChangedMsg struct {
 	client *svn.Client
 	info   *svn.Info
+	from   sourceOrigin
 	err    error
 }
 
 // probeSourceCmd asks svn, off the UI goroutine, whether client's directory is a
 // working copy, so the session is only re-rooted on a directory known to be one.
-func probeSourceCmd(client *svn.Client) tea.Cmd {
+func probeSourceCmd(client *svn.Client, from sourceOrigin) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		info, err := client.Info(ctx)
-		return sourceChangedMsg{client: client, info: info, err: err}
+		return sourceChangedMsg{client: client, info: info, from: from, err: err}
+	}
+}
+
+// reposFoundMsg carries the working copies a scan turned up.
+type reposFoundMsg struct {
+	repos []string
+	gen   uint64
+}
+
+// scanReposCmd walks roots off the UI goroutine, so the switch-repository prompt
+// opens at once and fills in when the scan lands.
+func scanReposCmd(ctx context.Context, roots []string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		return reposFoundMsg{repos: discoverRepos(ctx, roots), gen: gen}
 	}
 }
 

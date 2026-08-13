@@ -33,6 +33,8 @@ func (m *Model) View() string {
 		view = m.overlayCenter(view, m.diffEditor.View())
 	case m.retargeting:
 		view = m.overlayCenter(view, m.pathEditor.View())
+	case m.switchingRepo:
+		view = m.overlayCenter(view, m.repoEditor.View())
 	case m.splitting:
 		// The side-by-side view all but fills the screen and is read rather than
 		// acted on, so the layout behind it recedes to a single dim color.

@@ -43,7 +43,7 @@ func (m *Model) closeHelp() {
 // screen, so a background event (like the update check completing) knows not to
 // steal focus.
 func (m *Model) overlayActive() bool {
-	return m.aborting || m.unlocking || m.editing || m.naming || m.savingDiff || m.retargeting || m.splitting || m.merging || m.confirming || m.helping || m.updating || m.configuring
+	return m.aborting || m.unlocking || m.editing || m.naming || m.savingDiff || m.retargeting || m.switchingRepo || m.splitting || m.merging || m.confirming || m.helping || m.updating || m.configuring
 }
 
 // updateHeld reports whether now is the wrong moment to interrupt with the

@@ -48,7 +48,7 @@ Six rows, any of which is omitted when it has no value:
 
 | Row | Meaning |
 |---|---|
-| `Root` | The working copy's root directory. |
+| `Root` | The working copy's root directory. <KeyCap key="W" /> [moves to another one](#switching-repositories) for the session. |
 | `Source` | The directory the views are scoped to — the same as `Root` when [`displayFrom`](/reference/configuration/#displayfrom) is `root`. <KeyCap key="P" /> [moves it](#changing-the-source-path) for the session. |
 | `CWD` | The directory `revision` was started in. |
 | `Branch` | Derived from the repository URL: `trunk`, `branches/<name>` or `tags/<name>`. Blank when the repository does not follow that layout. |
@@ -79,6 +79,34 @@ Everything is re-read for the new source — the trees, the history and the cach
 dropped and fetched again — so the panels show that subtree and nothing else. The change is
 never written to the config file; the next launch uses [`--path`](/reference/cli/#--path)
 again.
+
+### Switching repositories
+
+<KeyCap key="P" /> stays inside `Root`; <KeyCap key="W" /> leaves it. The prompt lists the
+working copies it can find in the directory `revision` was started in, in the checkout it
+is reading, and in that checkout's parents a few levels up — so a sibling of your tree is
+offered as readily as something inside it. They arrive nearest first, typing narrows the
+list, and <KeyCap key="tab" /> steps into it and back.
+
+Any checkout the search did not reach is opened by typing its path in full. `~` expands,
+and a relative path is taken from the current source. The path is checked before anything
+moves: if it is not a directory, or if `svn` does not recognise it as a working copy, the
+switch is refused, the reason is shown, and the prompt reopens on what you typed so it can
+be corrected.
+
+A switch re-reads everything, exactly as changing the source path does, and it too lasts
+for the session only.
+
+:::note
+The search runs in the background: the prompt opens immediately and the list fills in
+behind it, so a slow or network filesystem delays the suggestions rather than the
+keystroke. Each place it looks is covered in full before the next is started, nearest
+first, so a slow directory above your checkout cannot crowd out the one you are standing
+in. It stops at each checkout it finds, since everything under a working copy belongs to
+it, and gives up after a few seconds rather than walking a large tree to the end. A working
+copy served over `svn+ssh` needs its key already unlocked; if it is not, the check that
+guards the switch fails as an authentication error and nothing changes.
+:::
 
 ## Files
 
