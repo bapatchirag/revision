@@ -1,0 +1,113 @@
+---
+/**
+ * The release history, rendered from `src/data/releases.json` — the committed
+ * output of `scripts/make-changelog.mjs`.
+ *
+ * Every entry is plain text, printed as text: release notes are built from
+ * contributors' commit subjects, so nothing here is treated as markup.
+ */
+import releases from '../data/releases.json';
+
+interface Release {
+	tag: string;
+	name: string;
+	date: string;
+	url: string;
+	prerelease: boolean;
+	entries: string[];
+}
+
+const all: Release[] = releases;
+
+const on = (date: string) =>
+	new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+---
+
+<div class="rv-log not-content">
+	{
+		all.map((release, i) => (
+			<section class="rv-log__release" aria-labelledby={`release-${release.tag}`}>
+				<h2 class="rv-log__head" id={`release-${release.tag}`}>
+					<a class="rv-log__tag" href={release.url}>
+						{release.name}
+					</a>
+					<time class="rv-log__date" datetime={release.date}>
+						{on(release.date)}
+					</time>
+					{i === 0 && !release.prerelease && <span class="rv-log__badge">latest</span>}
+					{release.prerelease && <span class="rv-log__badge">pre-release</span>}
+				</h2>
+
+				{release.entries.length > 0 ? (
+					<ul class="rv-log__entries">
+						{release.entries.map((entry) => (
+							<li>{entry}</li>
+						))}
+					</ul>
+				) : (
+					<p class="rv-log__empty">
+						No notes were published with this release. <a href={release.url}>See it on GitHub</a>.
+					</p>
+				)}
+			</section>
+		))
+	}
+</div>
+
+<style>
+	.rv-log__release + .rv-log__release {
+		border-top: 1px solid var(--rv-border);
+		margin-top: 2rem;
+		padding-top: 2rem;
+	}
+
+	.rv-log__head {
+		align-items: baseline;
+		display: flex;
+		flex-wrap: wrap;
+		font-size: var(--sl-text-xl);
+		gap: 0.75rem;
+		margin: 0;
+	}
+
+	.rv-log__tag {
+		color: var(--rv-accent);
+		font-family: var(--rv-font-chrome);
+		text-decoration: none;
+	}
+
+	.rv-log__tag:hover,
+	.rv-log__tag:focus-visible {
+		text-decoration: underline;
+	}
+
+	.rv-log__date {
+		color: var(--rv-dim);
+		font-size: var(--sl-text-sm);
+	}
+
+	.rv-log__badge {
+		border: 1px solid var(--rv-border);
+		border-radius: 4px;
+		color: var(--rv-text-secondary);
+		font-family: var(--rv-font-chrome);
+		font-size: var(--sl-text-xs);
+		line-height: 1;
+		padding: 0.25rem 0.4rem;
+	}
+
+	.rv-log__entries {
+		color: var(--rv-text-secondary);
+		margin: 1rem 0 0;
+		padding-left: 1.25rem;
+	}
+
+	.rv-log__entries li + li {
+		margin-top: 0.4rem;
+	}
+
+	.rv-log__empty {
+		color: var(--rv-dim);
+		margin: 1rem 0 0;
+	}
+</style>

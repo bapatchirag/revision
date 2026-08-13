@@ -53,6 +53,7 @@ type Model struct {
 	nameEditor *component.Prompt
 	diffEditor *component.Prompt
 	pathEditor *component.Prompt
+	repoEditor *component.Prompt
 	passEditor *component.Prompt
 	modal      *component.Modal
 	progress   *component.Modal
@@ -175,6 +176,12 @@ type Model struct {
 	// retargeting is true while the prompt that re-points revision at another
 	// source directory is open.
 	retargeting bool
+	// switchingRepo is true while the prompt that re-points revision at another
+	// working copy is open, with repos the checkouts its list was built from.
+	// scanningRepos is true while the walk that finds them is still running.
+	switchingRepo bool
+	scanningRepos bool
+	repos         []string
 	// splitting is true while the side-by-side view of the on-screen diff is
 	// floated over the layout.
 	splitting bool
@@ -218,6 +225,9 @@ type Model struct {
 	updateRel    selfupdate.Release
 	updateMethod selfupdate.Method
 	updateChosen bool
+	// deferredUpdate holds a release the prompt could not be shown for yet. The
+	// check runs once per session, so a dropped one would never come back.
+	deferredUpdate *selfupdate.Release
 
 	width   int
 	height  int
@@ -291,6 +301,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		nameEditor:      component.NewPrompt(changelistEditorID, "Changelist name", "e.g. feature-x", th, keys),
 		diffEditor:      component.NewPrompt(diffNameEditorID, "Save diff as", "e.g. changes.diff", th, keys),
 		pathEditor:      component.NewPrompt(sourcePathID, "Change source path", "e.g. /path/to/working-copy", th, keys),
+		repoEditor:      component.NewPrompt(repoSwitchID, "Switch repository", "e.g. /path/to/working-copy", th, keys),
 		passEditor:      component.NewPrompt(passphraseEditorID, "SSH key passphrase", "passphrase for "+cfg.SSHKeyPath, th, keys),
 		modal:           component.NewModal(confirmModalID, "", "", th, keys),
 		progress:        component.NewModal("update-progress", "", "", th, keys),
@@ -416,10 +427,11 @@ func (m *Model) Close() {
 	m.cmdLog.clear()
 }
 
-// PendingUpdate reports the update method the user chose before quitting, if
-// any. The command layer runs it once the program has exited.
-func (m *Model) PendingUpdate() (selfupdate.Method, bool) {
-	return m.updateMethod, m.updateChosen
+// PendingUpdate reports the update method the user chose before quitting and
+// the release it was chosen for, if any. The command layer runs it once the
+// program has exited.
+func (m *Model) PendingUpdate() (selfupdate.Method, selfupdate.Release, bool) {
+	return m.updateMethod, m.updateRel, m.updateChosen
 }
 
 // SetStartupNotice schedules text to appear as a transient notice as soon as the

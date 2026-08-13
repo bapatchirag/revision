@@ -21,8 +21,9 @@ make build      # compiles ./bin/revision
 make test
 ```
 
-`make build` produces a development build: it reports its version as `dev` and never
-[self-updates](/operations/updating-revision/).
+`make build` produces a development build: it reports the version `git describe` gives
+and never [self-updates](/operations/updating-revision/), because the release channel is
+stamped in by the release pipeline alone.
 
 ## Make targets
 

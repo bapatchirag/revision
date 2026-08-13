@@ -12,6 +12,7 @@
     "check:tokens": "node scripts/check-tokens.mjs",
     "og": "node scripts/make-og.mjs",
     "demo": "node scripts/make-demo.mjs",
+    "changelog": "node scripts/make-changelog.mjs",
     "astro": "astro"
   },
   "dependencies": {

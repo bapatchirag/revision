@@ -74,6 +74,10 @@ func (p *Prompt) SetOptions(head string, options []string) {
 	p.listFocused = false
 }
 
+// SetTitle replaces the title in the box's border, so a prompt can say what it
+// is doing — waiting on a scan that fills its option list, say.
+func (p *Prompt) SetTitle(title string) { p.title = title }
+
 // Value returns the current input text.
 func (p *Prompt) Value() string { return string(p.value) }
 

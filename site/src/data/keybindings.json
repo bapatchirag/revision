@@ -101,6 +101,15 @@
   },
   {
     "section": "Working copy",
+    "action": "Switch repository",
+    "keys": [
+      "W"
+    ],
+    "context": "Global",
+    "description": "Move revision to another working copy altogether. The prompt opens at once and the checkouts it finds fill in behind it, so a slow filesystem never holds up the keystroke; typing narrows the list. It looks in the directory revision was started in, in the checkout it is reading, and in that checkout's parents a few levels up, so a sibling of the current tree is offered as readily as something inside it — nearest first. The search stops at each checkout it finds, since everything under one belongs to it, and gives up after a few seconds rather than walking a large tree to the end; anything it did not reach is opened by typing its path in full. A path that is not an SVN working copy is refused and nothing changes. The switch lasts for the session only."
+  },
+  {
+    "section": "Working copy",
     "action": "Refresh / settings",
     "keys": [
       "R",

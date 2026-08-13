@@ -33,6 +33,7 @@ func probeMsgs() []tea.Msg {
 		sshAddedMsg{err: err},
 		// probeSourceCmd is the only producer and always sets client, error or not.
 		sourceChangedMsg{client: &svn.Client{}, err: err},
+		reposFoundMsg{},
 
 		// loadEvent
 		statusLoadedMsg{},

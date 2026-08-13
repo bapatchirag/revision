@@ -33,8 +33,18 @@ latest release, and installs it without `sudo`.
 :::caution[Read before you pipe]
 Piping a remote script into a shell runs whatever that URL serves. Fetch
 [`install.sh`](https://github.com/bapatchirag/revision/blob/main/install.sh) and read it
-first if that matters to you — it is about 80 lines.
+first if that matters to you — it is about 150 lines.
 :::
+
+### What it checks
+
+Every release publishes a `checksums.txt`. The script downloads it alongside the binary
+and refuses to install anything whose SHA-256 does not match, using whichever of
+`sha256sum`, `shasum` or `openssl` your machine has. There is no flag to skip this: a
+binary that cannot be checked is not one to install over the copy you already have.
+
+The download is staged inside the install directory, so putting it in place is a single
+atomic rename rather than a copy over a file that may be running.
 
 ### Where it installs
 
@@ -65,9 +75,10 @@ REVISION_INSTALL_DIR="$HOME/bin" REVISION_VERSION=v1.4.0 \
 go install github.com/bapatchirag/revision/cmd/revision@latest
 ```
 
-This is the fallback for any platform without a prebuilt binary. Builds produced this way
-are development builds: they never check for or apply
-[self-updates](/operations/updating-revision/).
+This is the fallback for any platform without a prebuilt binary. Installing at a
+published tag produces a release build, which does check for
+[self-updates](/operations/updating-revision/); installing at an untagged commit does
+not, and neither does a local `go build`.
 
 ## Prebuilt binaries
 

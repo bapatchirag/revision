@@ -66,6 +66,8 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 			return m.submitDiffName(msg.Value), true
 		case sourcePathID:
 			return m.submitSourcePath(msg.Value), true
+		case repoSwitchID:
+			return m.submitRepoPath(msg.Value), true
 		case settingsFormID:
 			return m.submitSettings(), true
 		case passphraseEditorID:
@@ -112,6 +114,8 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 			m.closeDiffName()
 		case sourcePathID:
 			m.closeSourcePath()
+		case repoSwitchID:
+			m.closeRepoSwitch()
 		case splitDiffID:
 			m.closeSplitDiff()
 		case mergeViewID:

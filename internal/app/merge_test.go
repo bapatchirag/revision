@@ -94,9 +94,11 @@ func TestResolveOpensOnAConflictedFile(t *testing.T) {
 		t.Fatal("m should open the resolution overlay on a conflicted file")
 	}
 	view := stripANSI(m.View())
-	// The panes are headed by the markers' own labels and the key that takes each.
+	// The panes are headed by the markers' own labels and what the key does to
+	// each; the two choices heading no pane are spelled out in the footer.
 	for _, want := range []string{
-		"Resolve conflict — src/a.go · 1 of 1 undecided", "1   mine", "2   r42",
+		"Resolve conflict — src/a.go · 1 of 1 undecided", "1   take mine", "2   take r42",
+		"3 take both", "0 undo",
 		`greet("world")`, `hello("world")`, "line 5", "esc close",
 	} {
 		if !strings.Contains(view, want) {
@@ -141,7 +143,7 @@ func TestResolvePickingASideMarksIt(t *testing.T) {
 	next, _ := m.Update(keyRunes("2"))
 	m = next.(*Model)
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "2 ✓ r42") || strings.Contains(view, "1 ✓ mine") {
+	if !strings.Contains(view, "2 ✓ take r42") || strings.Contains(view, "1 ✓ take mine") {
 		t.Errorf("2 should tick the right pane only\n---\n%s", view)
 	}
 	// With nothing left undecided the footer offers the key that writes it out.
@@ -155,7 +157,7 @@ func TestResolvePickingASideMarksIt(t *testing.T) {
 	// 3 takes both, 0 puts the decision back.
 	next, _ = m.Update(keyRunes("3"))
 	m = next.(*Model)
-	if view := stripANSI(m.View()); !strings.Contains(view, "1 ✓ mine") || !strings.Contains(view, "2 ✓ r42") {
+	if view := stripANSI(m.View()); !strings.Contains(view, "1 ✓ take mine") || !strings.Contains(view, "2 ✓ take r42") {
 		t.Errorf("3 should tick both panes\n---\n%s", view)
 	}
 	next, _ = m.Update(keyRunes("0"))
@@ -291,7 +293,7 @@ func TestResolveRejectAppliesItsHunkAndClearsIt(t *testing.T) {
 	}
 	view := stripANSI(m.View())
 	// It is the target file that is being resolved, not the reject itself.
-	for _, want := range []string{"Resolve rejects — src/a.go", "1   working copy", "2   rejected hunk", "run(ctx)"} {
+	for _, want := range []string{"Resolve rejects — src/a.go", "1   take working copy", "2   take rejected hunk", "run(ctx)"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("overlay missing %q\n---\n%s", want, view)
 		}

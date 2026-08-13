@@ -67,7 +67,7 @@ SVN's command line is powerful but verbose for day-to-day work. `revision` wraps
 curl -fsSL https://raw.githubusercontent.com/bapatchirag/revision/main/install.sh | sh
 ```
 
-The script detects your OS and architecture, downloads the matching binary from the latest release, and installs it without `sudo` (falling back to `~/.local/bin`). Prebuilt binaries cover macOS on Apple silicon and Intel, and Linux on x86-64 and 64-bit ARM.
+The script detects your OS and architecture, downloads the matching binary from the latest release, and installs it without `sudo` (falling back to `~/.local/bin`). The download is checked against the SHA-256 the release publishes and is abandoned if it does not match. Prebuilt binaries cover macOS on Apple silicon and Intel, and Linux on x86-64 and 64-bit ARM.
 
 ### With Go
 
@@ -75,13 +75,15 @@ The script detects your OS and architecture, downloads the matching binary from 
 go install github.com/bapatchirag/revision/cmd/revision@latest
 ```
 
+Installed at a published tag this is a release build, and self-updates like any other. It compiles from source, so it needs a Go toolchain and rather longer than downloading a binary.
+
 ### Prebuilt binaries
 
 Download the binary for your platform from the [Releases](https://github.com/bapatchirag/revision/releases) page and put it on your `PATH`. Each release publishes `revision-darwin-arm64`, `revision-darwin-amd64`, `revision-linux-amd64` and `revision-linux-arm64`.
 
 ### Updating
 
-Release builds check for a newer version on startup and offer to upgrade themselves; `revision --update` does the same from the command line. See [Updating revision](https://bapatchirag.github.io/revision/operations/updating-revision/).
+Release builds check for a newer version on startup — at most once a day, remembered between launches — and offer to upgrade themselves; `revision --update` checks on demand from the command line. Either way the update is pinned to the release it announced, installed over the binary you are running, and verified afterwards. See [Updating revision](https://bapatchirag.github.io/revision/operations/updating-revision/).
 
 ## Quick start
 

@@ -39,16 +39,18 @@ side by side; a few unchanged lines above and below give you the context to judg
 | <KeyCap key="1" /> | Take the left side |
 | <KeyCap key="2" /> | Take the right side |
 | <KeyCap key="3" /> | Take both, left first |
-| <KeyCap key="0" /> | Clear the decision |
+| <KeyCap key="0" /> | Undo the decision |
 | <KeyCap key="[" /> <KeyCap key="]" /> | Previous / next block |
 | <KeyCap key="w" /> | Write the result out |
 | <KeyCap key="e" /> | Merge it by hand instead |
 | <KeyCap key="esc" /> | Close without writing |
 
-The panes are headed by the key that takes each and by the name of what it holds — for a
-conflict, the labels SVN wrote into the markers (`mine` and `r42`); for a reject, `working
-copy` and `rejected hunk`. A tick marks the side you have taken, and the side you passed
-over recedes into grey. The title bar counts what is still undecided.
+You are not expected to remember any of that. Each pane is headed by what its key does to
+it — `1 take mine` over the left, `2 take r42` over the right, or `1 take working copy`
+and `2 take rejected hunk` for a reject — and the two choices that head no pane are
+spelled out in the footer as `3 take both · 0 undo`. A tick marks the side you have taken,
+and the side you passed over recedes into grey. The title bar counts what is still
+undecided.
 
 Arrow keys, <KeyCap key="PgUp" /> / <KeyCap key="PgDn" />, <KeyCap key="g" /> /
 <KeyCap key="G" /> and <KeyCap key="home" /> / <KeyCap key="end" /> scroll both panes

@@ -25,6 +25,23 @@ func stubPath(t *testing.T, scripts map[string]string) {
 	t.Setenv("PATH", dir)
 }
 
+// stubInstalled puts a stand-in for the installed binary next to the test
+// binary. That directory is where the update lands and where selfupdate re-runs
+// it to confirm the new version is really in place.
+func stubInstalled(t *testing.T, version string) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Skipf("cannot locate the test binary: %v", err)
+	}
+	path := filepath.Join(filepath.Dir(exe), "revision")
+	body := "#!/bin/sh\necho 'revision " + version + "'\n"
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Skipf("cannot write next to the test binary: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+}
+
 // withStdin replaces os.Stdin with a pipe carrying input for the duration of fn.
 func withStdin(t *testing.T, input string, fn func()) {
 	t.Helper()
@@ -63,6 +80,36 @@ func captureOutput(t *testing.T, fn func()) string {
 		t.Fatalf("read captured output: %v", err)
 	}
 	return string(b)
+}
+
+func TestCheckFlags(t *testing.T) {
+	cases := []struct {
+		name       string
+		doUpdate   bool
+		updateWith string
+		wantErr    bool
+	}{
+		{"no flags", false, "", false},
+		{"update alone", true, "", false},
+		{"update with a method", true, "curl", false},
+		// Without --update the method was read by nobody and the TUI launched
+		// as if it had not been asked for.
+		{"method without update", false, "go", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkFlags(tc.doUpdate, tc.updateWith)
+			if tc.wantErr && err == nil {
+				t.Fatal("expected the combination to be rejected")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("checkFlags: %v", err)
+			}
+			if tc.wantErr && !strings.Contains(err.Error(), "--update --update-with "+tc.updateWith) {
+				t.Errorf("err = %v, want the working command spelled out", err)
+			}
+		})
+	}
 }
 
 func TestUsageNamesTheFlags(t *testing.T) {
@@ -206,18 +253,24 @@ func TestPromptMethod(t *testing.T) {
 }
 
 func TestApplyUpdate(t *testing.T) {
+	rel := selfupdate.Release{Tag: "v1.4.0", Version: "1.4.0"}
+
+	stubInstalled(t, rel.Version)
 	stubPath(t, map[string]string{"go": "exit 0\n"})
 	var err error
-	out := captureOutput(t, func() { err = applyUpdate(selfupdate.MethodGo) })
+	out := captureOutput(t, func() { err = applyUpdate(selfupdate.MethodGo, rel) })
 	if err != nil {
 		t.Fatalf("applyUpdate: %v", err)
+	}
+	if !strings.Contains(out, rel.Tag) {
+		t.Errorf("output = %q, want the release being installed named", out)
 	}
 	if !strings.Contains(out, "Update complete") {
 		t.Errorf("output = %q, want the restart hint", out)
 	}
 
 	stubPath(t, nil)
-	captureOutput(t, func() { err = applyUpdate(selfupdate.MethodGo) })
+	captureOutput(t, func() { err = applyUpdate(selfupdate.MethodGo, rel) })
 	if err == nil || !strings.Contains(err.Error(), "update failed") {
 		t.Errorf("err = %v, want the missing tool reported as a failed update", err)
 	}

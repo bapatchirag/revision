@@ -14,9 +14,9 @@
 │       │  Update to rev (Log)    space  View                          │       │
 ╰───────│  Open file in editor        e    Switch file view       [ / ]│       │
 ╭─ [3] L│  Change source path         P    Side-by-side / save    s / w│       │
-│  Rev A│  Refresh / settings     R / S    Dir diff / untracked   D / U│───────╯
-│       │  Toggle live refresh        L    Toggle command log         x│───────╮
-│       │                                General                       │       │
+│  Rev A│  Switch repository          W    Dir diff / untracked   D / U│───────╯
+│       │  Refresh / settings     R / S    Toggle command log         x│───────╮
+│       │  Toggle live refresh        L  General                       │       │
 │       │                                  Toggle help                ?│       │
 │       │                                  Quit                       q│       │
 │       ╰──────────────────────────────────────────────────────────────╯       │
