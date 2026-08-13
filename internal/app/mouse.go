@@ -5,10 +5,11 @@ import (
 )
 
 // routeMouse gives a left click the effect of the clicked panel's number key:
-// it moves focus there. A click on one of the view names a panel inlays into its
-// border selects that view too, as [ and ] do. Nothing else is read from the
-// mouse — no mouse event ever reaches a panel — so a drag or a wheel cannot move
-// a selection or a scroll position out from under the keyboard.
+// it moves focus there. Inside the panel the click lands on something: one of
+// the view names inlaid in its border selects that view, as [ and ] do, and a
+// row moves the selection to it, as the arrow keys do. Nothing else is read from
+// the mouse — no mouse event ever reaches a panel — so a drag or a wheel cannot
+// move a selection or a scroll position out from under the keyboard.
 func (m *Model) routeMouse(msg tea.MouseMsg) tea.Cmd {
 	// An overlay, the update progress modal or the filter bar owns the screen or
 	// the keyboard; the panels below are not what is being pointed at.
@@ -22,17 +23,19 @@ func (m *Model) routeMouse(msg tea.MouseMsg) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	view, onTab := m.panels[idx].ClickTab(msg.X-r.x, msg.Y-r.y)
+	x, y := msg.X-r.x, msg.Y-r.y
+	view, onTab := m.panels[idx].ClickTab(x, y)
+	row := m.panels[idx].ClickRow(x, y)
 	focusing := idx != m.focus.Index()
-	if !focusing && !onTab {
+	if !focusing && !onTab && row == nil {
 		return nil
 	}
 	m.dismissToast()
-	if !focusing {
-		return view
+	if focusing {
+		m.focus.Focus(idx)
+		return tea.Batch(m.afterFocusChange(), view, row)
 	}
-	m.focus.Focus(idx)
-	return tea.Batch(m.afterFocusChange(), view)
+	return tea.Batch(view, row)
 }
 
 // panelAt reports which panel covers a screen cell, and where that panel sits so

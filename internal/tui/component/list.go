@@ -99,6 +99,22 @@ func (l *List[T]) Focused() bool { return l.focused }
 // SetTheme implements tui.Themeable.
 func (l *List[T]) SetTheme(th theme.Theme) { l.theme = th }
 
+// ClickRow moves the cursor to the item drawn on row of the list's own area (0
+// is its first row) and emits SelectedMsg, exactly as the arrow keys do. A row
+// holding no item — past the last one, or the horizontal scrollbar's — selects
+// nothing.
+func (l *List[T]) ClickRow(row int) tea.Cmd {
+	_, innerH, _, _ := scrollLayout(len(l.items), l.contentWidth, l.width, l.height, 0)
+	i := l.offset + row
+	if row < 0 || row >= innerH || i >= len(l.items) || i == l.cursor {
+		return nil
+	}
+	l.cursor = i
+	l.clampOffset()
+	id, idx := l.id, l.cursor
+	return func() tea.Msg { return msg.SelectedMsg{ID: id, Index: idx} }
+}
+
 // SetRender replaces the row-rendering function and re-measures content width.
 // The app uses this to rebuild theme-capturing render closures when the palette
 // changes at runtime, so row glyph colors follow a live theme switch.

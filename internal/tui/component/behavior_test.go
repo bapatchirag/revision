@@ -261,6 +261,94 @@ func newStringTable() *component.Table[[]string] {
 	}, func(r []string) []string { return r }, testTheme(), testKeys())
 }
 
+func TestListClickRowSelectsIt(t *testing.T) {
+	l := component.NewList[string]("files", func(s string) string { return s }, testTheme(), testKeys())
+	l.SetItems([]string{"a", "b", "c"})
+	l.SetSize(10, 3)
+	l.Focus()
+
+	got := mustCmd(t, l.ClickRow(2))
+	sel, ok := got.(msg.SelectedMsg)
+	if !ok {
+		t.Fatalf("expected SelectedMsg, got %T", got)
+	}
+	if sel.ID != "files" || sel.Index != 2 {
+		t.Errorf("got %+v, want {files 2}", sel)
+	}
+	if l.Index() != 2 {
+		t.Errorf("cursor = %d, want the clicked row", l.Index())
+	}
+	if cmd := l.ClickRow(2); cmd != nil {
+		t.Error("the row already under the cursor has nothing to report")
+	}
+	if cmd := l.ClickRow(9); cmd != nil {
+		t.Error("a row holding no item should select nothing")
+	}
+}
+
+// TestListClickRowFollowsTheScroll pins the row-to-item mapping to the scrolled
+// window rather than the items: the top row is whatever is drawn there.
+func TestListClickRowFollowsTheScroll(t *testing.T) {
+	l := component.NewList[string]("files", func(s string) string { return s }, testTheme(), testKeys())
+	l.SetItems([]string{"a", "b", "c", "d", "e"})
+	l.SetSize(10, 2)
+	l.Focus()
+	l.SetIndex(4)
+
+	got := mustCmd(t, l.ClickRow(0))
+	sel, ok := got.(msg.SelectedMsg)
+	if !ok {
+		t.Fatalf("expected SelectedMsg, got %T", got)
+	}
+	if sel.Index != 3 {
+		t.Errorf("got %+v, want the item scrolled to the top row", sel)
+	}
+}
+
+func TestTableClickRowSkipsTheHeader(t *testing.T) {
+	tb := newStringTable()
+	tb.SetItems([][]string{{"r3", "a"}, {"r2", "b"}, {"r1", "c"}})
+	tb.SetSize(20, 4)
+	tb.Focus()
+
+	if cmd := tb.ClickRow(0); cmd != nil {
+		t.Error("the header names the columns; it selects nothing")
+	}
+	got := mustCmd(t, tb.ClickRow(2))
+	sel, ok := got.(msg.SelectedMsg)
+	if !ok {
+		t.Fatalf("expected SelectedMsg, got %T", got)
+	}
+	if sel.ID != "log" || sel.Index != 1 {
+		t.Errorf("got %+v, want the second row under the header", sel)
+	}
+	if tb.Index() != 1 {
+		t.Errorf("cursor = %d, want the clicked row", tb.Index())
+	}
+}
+
+func TestPanelClickRowIsTakenFromInsideTheBorder(t *testing.T) {
+	l := component.NewList[string]("files", func(s string) string { return s }, testTheme(), testKeys())
+	l.SetItems([]string{"a", "b", "c"})
+	p := component.NewPanel("Files", 2, l, testTheme())
+	p.SetSize(12, 5)
+
+	for _, c := range []struct{ x, y int }{{0, 0}, {1, 0}, {0, 2}, {11, 2}, {1, 4}} {
+		if cmd := p.ClickRow(c.x, c.y); cmd != nil {
+			t.Errorf("(%d,%d) is border, want no selection there", c.x, c.y)
+		}
+	}
+
+	got := mustCmd(t, p.ClickRow(1, 2))
+	sel, ok := got.(msg.SelectedMsg)
+	if !ok {
+		t.Fatalf("expected SelectedMsg, got %T", got)
+	}
+	if sel.Index != 1 {
+		t.Errorf("got %+v, want the panel's second row", sel)
+	}
+}
+
 func TestTableEmitsSelected(t *testing.T) {
 	tb := newStringTable()
 	tb.SetItems([][]string{{"r3", "a"}, {"r2", "b"}, {"r1", "c"}})

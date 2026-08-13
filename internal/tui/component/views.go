@@ -249,6 +249,15 @@ func (v *Views) Activate(i int) tea.Cmd {
 	return v.switchView(i)
 }
 
+// ClickRow passes a row click to the component on top, when it has a selection
+// to move.
+func (v *Views) ClickRow(row int) tea.Cmd {
+	if rs, ok := v.top().(rowSelectable); ok {
+		return rs.ClickRow(row)
+	}
+	return nil
+}
+
 // switchView moves the active view to i (wrapping), preserving each view's own
 // drill stack, and emits ViewSelectedMsg. A lone view has nothing to switch to.
 func (v *Views) switchView(i int) tea.Cmd {

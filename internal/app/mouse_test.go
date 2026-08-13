@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/bapatchirag/revision/internal/svn"
+	uimsg "github.com/bapatchirag/revision/internal/tui/msg"
 )
 
 // click is a left button press at a screen cell.
@@ -123,8 +126,36 @@ func TestClickingAViewNameSelectsItAndItsPanel(t *testing.T) {
 }
 
 // filesTop is the screen row of the Files panel's top border, where it inlays
-// its view names.
+// its view names. Its rows are the lines below it.
 const filesTop = 8
+
+// TestClickingARowSelectsIt is the pointer's half of "navigate to a row": the
+// same SelectedMsg the arrow keys emit, which is what loads the diff for it.
+func TestClickingARowSelectsIt(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "alpha.go", State: svn.StateModified},
+		{Path: "beta.go", State: svn.StateModified},
+		{Path: "gamma.go", State: svn.StateModified},
+	})
+	if m.focus.Index() != panelFiles {
+		t.Fatal("the Files panel starts focused")
+	}
+
+	// The tree's first row is the working-copy root, so the three files follow it.
+	next, cmd := m.Update(click(4, filesTop+4))
+	m = next.(*Model)
+	n, ok := m.files.Selected()
+	if !ok || n.Path != "gamma.go" {
+		t.Errorf("selection = %+v (ok=%v), want the clicked row", n, ok)
+	}
+	sel, ok := cmd().(uimsg.SelectedMsg)
+	if !ok {
+		t.Fatalf("expected the click to report a selection, got %T", cmd())
+	}
+	if sel.ID != "files" || sel.Index != 3 {
+		t.Errorf("got %+v, want {files 3}", sel)
+	}
+}
 
 // tabColumn returns the column that border row starts name at. Every rune in it
 // is one cell wide, so a rune offset is a column.

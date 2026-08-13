@@ -36,6 +36,12 @@ type tabbed interface {
 	Activate(i int) tea.Cmd
 }
 
+// rowSelectable is implemented by a Panel child that has a selection the pointer
+// can move. row counts from the first row inside the panel's border.
+type rowSelectable interface {
+	ClickRow(row int) tea.Cmd
+}
+
 var (
 	_ tui.Component = (*Panel)(nil)
 	_ tui.Sizeable  = (*Panel)(nil)
@@ -114,6 +120,18 @@ func (p *Panel) ClickTab(x, y int) (tea.Cmd, bool) {
 		}
 	}
 	return nil, false
+}
+
+// ClickRow moves the child's selection to the row covering a cell, given in
+// coordinates relative to the panel's top-left corner, and returns what the
+// child emits for it — the same message navigating to that row with the keys
+// would. The border, and a child with no selection, yield nothing.
+func (p *Panel) ClickRow(x, y int) tea.Cmd {
+	rs, ok := p.child.(rowSelectable)
+	if !ok || x < 1 || x >= p.width-1 || y < 1 || y >= p.height-1 {
+		return nil
+	}
+	return rs.ClickRow(y - 1)
 }
 
 // SetTitle replaces the panel's heading so a single panel can be reused with a
