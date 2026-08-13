@@ -46,6 +46,17 @@ func (m *Model) routeKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		}
 		return cmd, true
 	}
+	if m.switchingRepo {
+		// Every edit narrows the discovered working copies to those matching what
+		// has been typed. Scrolling the list writes the value too, so its own picks
+		// are left alone.
+		before := m.repoEditor.Value()
+		cmd := m.repoEditor.Update(msg)
+		if m.repoEditor.Value() != before && !m.repoEditor.ListFocused() {
+			m.refreshRepoOptions()
+		}
+		return cmd, true
+	}
 	if m.splitting {
 		// The side-by-side view owns the keyboard while open: it scrolls, esc
 		// closes it (as a DismissMsg), and the key that opened it closes it too.
@@ -136,6 +147,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return m.openSettings(), true
 	case key.Matches(k, m.keys.ChangeDir):
 		return m.openSourcePath(), true
+	case key.Matches(k, m.keys.SwitchRepo):
+		return m.openRepoSwitch(), true
 	case key.Matches(k, m.keys.Filter):
 		return m.openFilter(), true
 	case key.Matches(k, m.keys.ToggleCmdLog):

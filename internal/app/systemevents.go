@@ -31,6 +31,9 @@ func (m *Model) systemEvent(msg tea.Msg) (tea.Cmd, bool) {
 		if m.retargeting {
 			m.sizeSourcePath()
 		}
+		if m.switchingRepo {
+			m.sizeRepoSwitch()
+		}
 		if m.splitting {
 			m.sizeSplitDiff()
 		}
@@ -117,6 +120,9 @@ func (m *Model) systemEvent(msg tea.Msg) (tea.Cmd, bool) {
 
 	case sourceChangedMsg:
 		return m.applySourceChange(msg), true
+
+	case reposFoundMsg:
+		return m.applyRepos(msg), true
 	}
 	return nil, false
 }

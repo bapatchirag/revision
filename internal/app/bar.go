@@ -46,8 +46,8 @@ func (m *Model) panelHints(p int) []string {
 	switch p {
 	case panelStatus:
 		// The Status panel is where the source path is shown, so it is also where
-		// the key that changes it is worth advertising.
-		return []string{"/ search", "P source path"}
+		// the keys that move it are worth advertising.
+		return []string{"/ search", "P source path", "W repository"}
 	case panelMain:
 		return []string{"/ search"}
 	case panelFiles:
