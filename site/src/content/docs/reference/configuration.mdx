@@ -143,16 +143,27 @@ costs more than it is worth — see
 
 ### allowMouse
 
-With `allowMouse` on, clicking a panel focuses it, clicking a view name in a panel's border
-selects that view, and clicking a row moves the selection to it — the same as walking there
-with the keyboard. Double-clicking a row runs what it is for: a file opens in your editor,
-a directory folds, a changelist opens, a revision asks to update the working copy to it,
-and a diff line opens the editor at that line. The wheel scrolls whatever the pointer rests
-on, sideways with <KeyCap key="shift" /> held, and never moves focus.
+With `allowMouse` on the panels answer the pointer, and every gesture is a key as well:
+
+| Gesture | Same as |
+|---|---|
+| Click a panel | Its number key |
+| Click a view name in the border | <KeyCap key="[" /> / <KeyCap key="]" /> |
+| Click a row | Walking to it with <KeyCap key="↑" /> / <KeyCap key="↓" /> |
+| Double-click a file | <KeyCap key="e" /> — [open it in your editor](/workflows/editor/) |
+| Double-click a directory | <KeyCap key="enter" /> — fold or unfold it |
+| Double-click a changelist | <KeyCap key="enter" /> — [drill into it](/workflows/changelists/#drilling-into-a-list) |
+| Double-click a revision | <KeyCap key="space" /> — [update the working copy to it](/workflows/updating/#to-a-specific-revision) |
+| Double-click a diff line | <KeyCap key="e" /> — open the file at that line |
+| Wheel | The scroll keys, on the panel under the pointer |
+
+The wheel scrolls sideways with <KeyCap key="shift" /> held and never moves focus. The
+overlays — the side-by-side view, the resolution window, every prompt — stay on the
+keyboard.
 
 It is off by default because reporting the pointer takes it from the terminal: while it is
-on, selecting text with the mouse needs <KeyCap key="shift" /> held. Nothing else changes —
-every action still has a key.
+on, selecting text on screen needs <KeyCap key="shift" /> held. Nothing is mouse-only, so
+leaving it off costs nothing but the pointer.
 
 ## Example
 
