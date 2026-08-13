@@ -35,10 +35,7 @@ double-clicking a line of the diff, which marks it and opens there in one go.
 
 **Directory rows** work the same way through their combined diff: which file a hunk
 belongs to is written in the diff itself, so reading down a directory's changes and
-pressing <KeyCap key="e" /> opens whichever file you have reached. From the Files panel a
-directory opens the first file changed under it. A directory with
-[no diff on display](/workflows/diffs/) has nothing to place, so <KeyCap key="e" /> says
-so.
+pressing <KeyCap key="e" /> opens whichever file you have reached.
 
 The position is passed the way each editor expects it — `+42` for the vi family, `nano`
 and `emacs`, `--goto file:42` for VS Code, `file:42` for Sublime Text and Helix. The

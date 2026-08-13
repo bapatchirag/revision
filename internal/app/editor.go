@@ -31,8 +31,8 @@ type editorLaunch struct {
 // at the line editTarget picks out. A terminal editor suspends the TUI and takes
 // over the screen until it exits, after which the working copy is re-read so any
 // edit shows up; every other editor opens the file elsewhere and leaves the TUI
-// on screen. A selection that is not a single file — a directory row with no
-// diff to place, or the Changelists overview — has nothing to open.
+// on screen. A selection that is not a single file — a directory row, or the
+// Changelists overview — has nothing to open.
 func (m *Model) openInEditor() tea.Cmd {
 	path, name, line, ok := m.editTarget()
 	if !ok {
@@ -100,19 +100,22 @@ func (m *Model) editTarget() (path, name string, line int, ok bool) {
 // Driven from the Files panel that is the first hunk of the diff, so an edit
 // starts on the work in progress rather than on line one; with the diff itself
 // focused it is the line under its cursor, so the editor picks up where the eye
-// left off. A directory row's combined diff only names a file this way — which
-// one a hunk belongs to is in the diff and nowhere else — so it is what makes a
-// directory row openable at all. It reports no path when Main is showing
-// something other than a working copy diff.
+// left off. A directory row is the exception: its combined diff covers every
+// file beneath it, so from the Files panel it names no file the reader chose and
+// reports none — only the focused diff's cursor, resting on a hunk, picks one
+// out. It also reports no path when Main is showing something other than a
+// working copy diff.
 func (m *Model) diffTarget() (rel string, line int) {
 	if m.source != sourceFiles || m.filesViewIsStore() || m.diffErr || !m.filesShowDiff() {
 		return "", 0
 	}
-	row := 0
-	if m.focus.Index() == panelMain {
-		row = m.mainDiffRow()
+	if m.focus.Index() != panelMain {
+		if _, _, isDir := m.selectedDirectory(); isDir {
+			return "", 0
+		}
+		return diffTargetAt(m.diffText, 0)
 	}
-	return diffTargetAt(m.diffText, row)
+	return diffTargetAt(m.diffText, m.mainDiffRow())
 }
 
 // splitTarget is the file and line the side-by-side overlay is reading: its open
