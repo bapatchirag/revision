@@ -86,8 +86,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/site/revision"
           cp -R site/dist/. "$RUNNER_TEMP/site/revision/"
 
-      # --remap resolves the README's documentation links against this build rather
-      # than the deployed site, so a new page's link is checkable before it ships.
+      # The first --remap resolves the README's documentation links against this
+      # build rather than the deployed site, so a new page's link is checkable
+      # before it ships. The second does the same for links to files in this
+      # repository: checked against the tree, a file added by the same pull
+      # request resolves, where blob/main only would once the branch had merged.
       - name: Check links
         uses: lycheeverse/lychee-action@v2
         with:
@@ -95,6 +98,7 @@ jobs:
           args: >-
             --root-dir ${{ runner.temp }}/site
             --remap 'https://bapatchirag\.github\.io/revision/(.*) file://${{ runner.temp }}/site/revision/$1'
+            --remap 'https://github\.com/bapatchirag/revision/blob/main/(.*) file://${{ github.workspace }}/$1'
             --index-files index.html
             --fallback-extensions html
             --include-fragments
