@@ -29,3 +29,8 @@ updates:
           - "astro"
           - "@astrojs/*"
           - "satteri*"
+    ignore:
+      # @astrojs/check peer-requires typescript ^5 || ^6, so TS 7 fails npm ci.
+      # Drop this once it widens the range.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
