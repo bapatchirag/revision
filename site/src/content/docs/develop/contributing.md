@@ -9,6 +9,11 @@ fixes all help.
 - [Issue tracker](https://github.com/bapatchirag/revision/issues)
 - [Pull requests](https://github.com/bapatchirag/revision/pulls)
 
+By taking part you agree to the
+[Code of Conduct](https://github.com/bapatchirag/revision/blob/main/CODE_OF_CONDUCT.md).
+Found a vulnerability? Do not open an issue — follow the
+[security policy](https://github.com/bapatchirag/revision/security/policy) instead.
+
 ## Before you start
 
 Open an issue first for anything larger than a bug fix. It is much cheaper to agree on an
