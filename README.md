@@ -110,8 +110,11 @@ notes.
 ## Contributing
 
 Issues and pull requests are welcome — bug reports, feature ideas, and documentation fixes all help.
-See [Contributing](https://bapatchirag.github.io/revision/develop/contributing/) for the layout of
-the tree and what to run before opening a PR.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for the layout of the tree and what to run before opening a
+PR, and the [Code of Conduct](CODE_OF_CONDUCT.md) for what is expected of everyone taking part.
+
+Stuck rather than filing a bug? [SUPPORT.md](SUPPORT.md) points at the right page. Found a
+vulnerability? Report it privately — see [SECURITY.md](SECURITY.md).
 
 ## License
 

@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Troubleshooting
+    url: https://bapatchirag.github.io/revision/operations/troubleshooting/
+    about: Common failures, what causes them, and how to fix them.
+  - name: Documentation and FAQ
+    url: https://bapatchirag.github.io/revision/faq/
+    about: What revision touches, where it runs, and how to configure it.
+  - name: Report a security vulnerability
+    url: https://github.com/bapatchirag/revision/security/advisories/new
+    about: Report it privately here — never in a public issue.

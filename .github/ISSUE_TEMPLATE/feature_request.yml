@@ -1,0 +1,64 @@
+name: Feature request
+description: Suggest a capability or a change to how revision works.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        `revision` aims to make common SVN work a keystroke away without becoming a second
+        SVN client. Proposals that fit the existing layout and keymap are the easiest ones
+        to land.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do today, and where does revision get in the way?
+      placeholder: >-
+        Reviewing a large commit means opening each file in turn; there is no way to read
+        the whole revision as one diff.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+      description: Describe the behaviour, and the keys or panel it would live in.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you have considered
+      description: Other ways to solve this, including doing it on the `svn` command line.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Files panel / staging
+        - Diff view
+        - Log and history
+        - Commit and changelists
+        - Update, merge and conflicts
+        - Filter and search
+        - Configuration, themes and keybindings
+        - Install and self-update
+        - Documentation
+        - Something else
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and did not find this request.
+          required: true
+        - label: >-
+            I have checked the keybindings reference and revision cannot already do this.
+          required: true
