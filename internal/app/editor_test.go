@@ -435,22 +435,38 @@ func TestOpenEditorPicksAFileOutOfADirectoryDiff(t *testing.T) {
 	next, _ := m.Update(diffLoadedMsg{path: "src", diff: combined, dir: true})
 	m = next.(*Model)
 
-	// From the Files panel a directory opens at the first change under it.
-	path, name, line, ok := m.editTarget()
-	if !ok {
-		t.Fatal("a directory row showing a diff should be openable")
-	}
-	if want := filepath.Join(m.client.Dir, "src/a.go"); path != want || name != "src/a.go" || line != 1 {
-		t.Errorf("editTarget() = %q (%q) at %d, want %q (src/a.go) at 1", path, name, line, want)
+	// From the Files panel the directory names no file the reader picked, so
+	// there is nothing to open.
+	if _, _, _, ok := m.editTarget(); ok {
+		t.Error("a directory row should not open the first file of its combined diff")
 	}
 
-	// Reading down into the second file's hunk opens that file instead.
+	// Reading down into the second file's hunk opens that file.
 	m.focus.Focus(panelMain)
 	m.afterFocusChange()
 	m = pressDown(t, m, 22)
-	_, name, line, ok = m.editTarget()
+	path, name, line, ok := m.editTarget()
 	if !ok || name != "src/b.go" || line != 7 {
-		t.Errorf("editTarget() = %q at %d, want src/b.go at 7", name, line)
+		t.Fatalf("editTarget() = %q at %d, want src/b.go at 7", name, line)
+	}
+	if want := filepath.Join(m.client.Dir, "src/b.go"); path != want {
+		t.Errorf("path = %q, want %q", path, want)
+	}
+}
+
+func TestOpenEditorWarnsOnDirectoryRowShowingADiff(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "src/a.go", State: svn.StateModified},
+	})
+	m.files.SetIndex(1) // the "src" directory row
+	next, _ := m.Update(diffLoadedMsg{path: "src", diff: fileDiff, dir: true})
+	m = next.(*Model)
+
+	if cmd := m.openInEditor(); cmd != nil {
+		t.Error("nothing should be launched for a directory row")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "no file to open here") {
+		t.Errorf("expected a warning toast, got:\n%s", view)
 	}
 }
 

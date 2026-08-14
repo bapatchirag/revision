@@ -1,11 +1,26 @@
 package app
 
-// layout sizes the panels and bar for the current terminal dimensions.
-func (m *Model) layout() {
+// barHeight is the single row the status bar — or the filter bar in its place —
+// takes below the panels.
+const barHeight = 1
+
+// rect is where a panel sits on screen, in terminal cells: (x, y) is its
+// top-left corner, border included.
+type rect struct{ x, y, w, h int }
+
+func (r rect) contains(x, y int) bool {
+	return r.w > 0 && r.h > 0 && x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h
+}
+
+// panelRects places every panel for the current terminal dimensions. baseView
+// joins them without padding and the alternate screen starts at the origin, so
+// these are screen coordinates too, which is what panelAt hit-tests a click
+// against. The command log's rectangle stays empty while it is hidden.
+func (m *Model) panelRects() [panelCount]rect {
+	var r [panelCount]rect
 	if m.width <= 0 || m.height <= 0 {
-		return
+		return r
 	}
-	const barHeight = 1
 	bodyHeight := max(m.height-barHeight, 3)
 
 	leftWidth := clamp(m.width*2/5, 24, m.width-20)
@@ -17,9 +32,9 @@ func (m *Model) layout() {
 	filesHeight := rest / 2
 	logHeight := rest - filesHeight
 
-	m.panels[panelStatus].SetSize(leftWidth, statusHeight)
-	m.panels[panelFiles].SetSize(leftWidth, filesHeight)
-	m.panels[panelLog].SetSize(leftWidth, logHeight)
+	r[panelStatus] = rect{0, 0, leftWidth, statusHeight}
+	r[panelFiles] = rect{0, statusHeight, leftWidth, filesHeight}
+	r[panelLog] = rect{0, statusHeight + filesHeight, leftWidth, logHeight}
 
 	// The right column is Main alone, or Main above the command log when it is
 	// shown; the split keeps the two columns the same overall height.
@@ -30,9 +45,22 @@ func (m *Model) layout() {
 			cmdLogHeight = max(bodyHeight-3, 0)
 		}
 		mainHeight = bodyHeight - cmdLogHeight
-		m.panels[panelCmdLog].SetSize(rightWidth, cmdLogHeight)
+		r[panelCmdLog] = rect{leftWidth, mainHeight, rightWidth, cmdLogHeight}
 	}
-	m.panels[panelMain].SetSize(rightWidth, mainHeight)
+	r[panelMain] = rect{leftWidth, 0, rightWidth, mainHeight}
+	return r
+}
+
+// layout sizes the panels and bar for the current terminal dimensions.
+func (m *Model) layout() {
+	if m.width <= 0 || m.height <= 0 {
+		return
+	}
+	for i, r := range m.panelRects() {
+		if r.w > 0 && r.h > 0 {
+			m.panels[i].SetSize(r.w, r.h)
+		}
+	}
 	m.bar.SetSize(m.width, barHeight)
 	m.searchBar.SetSize(m.width, barHeight)
 	m.sizeToast()

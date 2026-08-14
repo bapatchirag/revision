@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/bapatchirag/revision/internal/tui"
 	"github.com/bapatchirag/revision/internal/tui/theme"
@@ -32,6 +33,19 @@ type tabbed interface {
 	ActiveIndex() int
 	Depth() int
 	CrumbTitle() string
+	Activate(i int) tea.Cmd
+}
+
+// rowSelectable is implemented by a Panel child that has a selection the pointer
+// can move. row counts from the first row inside the panel's border.
+type rowSelectable interface {
+	ClickRow(row int) tea.Cmd
+}
+
+// scrollable is implemented by a Panel child the pointer can scroll: dy steps
+// down the content, dx across it.
+type scrollable interface {
+	Scroll(dx, dy int) tea.Cmd
 }
 
 var (
@@ -87,6 +101,59 @@ func (p *Panel) titleText() string {
 		return fmt.Sprintf("[%d] %s", p.number, p.title)
 	}
 	return p.title
+}
+
+// ClickTab selects the view whose name in the top border covers a cell, given in
+// coordinates relative to the panel's top-left corner, and reports whether the
+// cell was a view name at all. It answers false for a panel that draws no tab
+// strip: one without several views, or one drilled into a sub-view, where
+// switching is locked just as it is for the keys.
+func (p *Panel) ClickTab(x, y int) (tea.Cmd, bool) {
+	tb, ok := p.child.(tabbed)
+	if !ok || y != 0 || tb.Depth() > 0 {
+		return nil, false
+	}
+	tabs := tb.Tabs()
+	if len(tabs) <= 1 {
+		return nil, false
+	}
+	for i, col := range tabColumns(p.number, tabs) {
+		// The strip is cut off at the right corner, so only what is on screen can
+		// be clicked.
+		end := min(col+ansi.StringWidth(tabs[i]), p.width-1)
+		if x >= col && x < end {
+			return tb.Activate(i), true
+		}
+	}
+	return nil, false
+}
+
+// InBody reports whether a cell, in coordinates relative to the panel's top-left
+// corner, falls inside the border rather than on it.
+func (p *Panel) InBody(x, y int) bool {
+	return x >= 1 && x < p.width-1 && y >= 1 && y < p.height-1
+}
+
+// ClickRow moves the child's selection to the row covering a cell, given in
+// coordinates relative to the panel's top-left corner, and returns what the
+// child emits for it — the same message navigating to that row with the keys
+// would. The border, and a child with no selection, yield nothing.
+func (p *Panel) ClickRow(x, y int) tea.Cmd {
+	rs, ok := p.child.(rowSelectable)
+	if !ok || !p.InBody(x, y) {
+		return nil
+	}
+	return rs.ClickRow(y - 1)
+}
+
+// Scroll steps the child dy rows down its content and dx columns across it, and
+// returns what it emits for the move. A child that does not scroll ignores it.
+func (p *Panel) Scroll(dx, dy int) tea.Cmd {
+	s, ok := p.child.(scrollable)
+	if !ok {
+		return nil
+	}
+	return s.Scroll(dx, dy)
 }
 
 // SetTitle replaces the panel's heading so a single panel can be reused with a

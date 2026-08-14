@@ -5,9 +5,9 @@ import (
 )
 
 // Update offers each message to the handlers in turn — system, load, mutation,
-// UI — then to whatever owns the keyboard, and finally to the focused panel.
-// Exactly one handler claims each message type; TestEveryMessageIsClaimedOnce
-// holds that line.
+// UI — then to whatever owns the keyboard or the pointer, and finally to the
+// focused panel. Exactly one handler claims each message type;
+// TestEveryMessageIsClaimedOnce holds that line.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd := m.dispatch(msg)
 	// Whatever the message did may have freed the screen, which is the moment a
@@ -37,6 +37,10 @@ func (m *Model) dispatch(msg tea.Msg) tea.Cmd {
 		if cmd, handled := m.routeKey(k); handled {
 			return cmd
 		}
+	}
+	if mouse, ok := msg.(tea.MouseMsg); ok {
+		// The mouse stops here: it only ever moves focus.
+		return m.routeMouse(mouse)
 	}
 	return m.panels[m.focus.Index()].Update(msg)
 }

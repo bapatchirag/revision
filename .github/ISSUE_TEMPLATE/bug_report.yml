@@ -1,0 +1,121 @@
+name: Bug report
+description: Something in revision does not work the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a report.
+
+        Before you start, check
+        [Troubleshooting](https://bapatchirag.github.io/revision/operations/troubleshooting/)
+        — it covers the common failures and their fixes.
+
+        **Do not report a security vulnerability here.** Follow the
+        [security policy](https://github.com/bapatchirag/revision/security/policy) instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, and what did revision do instead of what you expected?
+      placeholder: |
+        I pressed `space` on a directory in the Files panel to stage everything under it,
+        and only the first file was added to the changelist.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest sequence of keys or commands that shows the problem.
+      placeholder: |
+        1. Run `revision` in a working copy with a modified subdirectory.
+        2. Move to the directory row in the Files panel.
+        3. Press `space`.
+        4. Press `2` to open the changelist view — only one file is listed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: command-log
+    attributes:
+      label: Command log
+      description: >-
+        The relevant lines from the command log panel at the bottom of the app, which
+        shows every `svn` command revision runs and its result. Paste any error text too.
+      render: shell
+
+  - type: input
+    id: revision-version
+    attributes:
+      label: revision version
+      description: Output of `revision --version`.
+      placeholder: revision v0.4.1
+    validations:
+      required: true
+
+  - type: input
+    id: svn-version
+    attributes:
+      label: svn version
+      description: First line of `svn --version`.
+      placeholder: svn, version 1.14.5 (r1922182)
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15.5 (arm64) / Ubuntu 24.04 (amd64)
+    validations:
+      required: true
+
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal and TERM
+      description: The terminal emulator, multiplexer if any, and the value of `$TERM`.
+      placeholder: Ghostty 1.1, tmux 3.5, TERM=xterm-256color
+    validations:
+      required: true
+
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: Repository URL scheme
+      options:
+        - "https://"
+        - "http://"
+        - "svn+ssh://"
+        - "file://"
+        - Other or not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: >-
+        Your `~/.config/revision/config.json`, if you have changed it from the defaults.
+      render: json
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I am on the latest release, or the problem is present on it.
+          required: true
+        - label: I searched the existing issues and did not find this one.
+          required: true

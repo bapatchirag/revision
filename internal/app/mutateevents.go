@@ -174,7 +174,12 @@ func (m *Model) mutationEvent(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		// A terminal editor has exited, so the file may have changed: re-read the
 		// working copy (which reloads the diff on screen) and the local file stores.
-		return tea.Batch(m.reloadStatus(), m.reloadSavedDiffsIfShown(), m.reloadRejectsIfShown()), true
+		// Suspending for it turned mouse reporting off, so it is asked for again.
+		var mouse tea.Cmd
+		if m.cfg.AllowMouse {
+			mouse = mouseReporting(true)
+		}
+		return tea.Batch(mouse, m.reloadStatus(), m.reloadSavedDiffsIfShown(), m.reloadRejectsIfShown()), true
 	}
 	return nil, false
 }

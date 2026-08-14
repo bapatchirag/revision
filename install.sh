@@ -81,6 +81,8 @@ verify() {
     expected ${expected}
     got      ${actual}
     The download was corrupted or tampered with; nothing was installed."
+
+	rm -f "$sums"
 }
 
 # install_dir prints where the binary belongs.
@@ -129,7 +131,10 @@ main() {
 	# different mounts, which can tear or hit ETXTBSY against a running binary.
 	tmp=$(mktemp -d "${dir}/.${BINARY}-install.XXXXXX") ||
 		err "cannot write to ${dir}; set REVISION_INSTALL_DIR to a writable directory"
-	trap 'rm -rf "$tmp"' EXIT
+	# Cleanup is best-effort: on NFS an unlinked file that still has a reference is
+	# silly-renamed to .nfsXXXX in place, so the rmdir can fail with ENOTEMPTY long
+	# after the install itself has succeeded.
+	trap 'rm -rf "$tmp" 2>/dev/null || :' EXIT
 
 	echo "Downloading ${asset} ..."
 	download "$url" "$tmp/${BINARY}" || download_failed

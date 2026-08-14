@@ -261,6 +261,170 @@ func newStringTable() *component.Table[[]string] {
 	}, func(r []string) []string { return r }, testTheme(), testKeys())
 }
 
+func TestViewportScrollMovesTheWindowThenTheCursor(t *testing.T) {
+	v := component.NewViewport(testTheme(), testKeys())
+	v.SetContent("a\nb\nc\nd\ne\nf")
+	v.SetSize(10, 3)
+
+	v.Scroll(0, 1)
+	if v.Offset() != 1 {
+		t.Errorf("offset = %d, want the window itself moved when there is no cursor", v.Offset())
+	}
+
+	v.SetCursorLine(true)
+	v.Scroll(0, 1)
+	if v.Cursor() != 1 {
+		t.Errorf("cursor = %d, want the cursor moved once there is one", v.Cursor())
+	}
+	if v.Offset() != 1 {
+		t.Errorf("offset = %d, want the window left alone while the cursor is in it", v.Offset())
+	}
+}
+
+func TestViewportClickRowMovesTheLineCursor(t *testing.T) {
+	v := component.NewViewport(testTheme(), testKeys())
+	v.SetContent("a\nb\nc\nd")
+	v.SetSize(10, 4)
+
+	v.ClickRow(2)
+	if v.Cursor() != -1 {
+		t.Errorf("cursor = %d, want none until the viewport carries one", v.Cursor())
+	}
+
+	v.SetCursorLine(true)
+	v.ClickRow(2)
+	if v.Cursor() != 2 {
+		t.Errorf("cursor = %d, want the clicked line", v.Cursor())
+	}
+	v.ClickRow(9)
+	if v.Cursor() != 2 {
+		t.Errorf("cursor = %d, want a row past the content to leave it alone", v.Cursor())
+	}
+}
+
+// TestListScrollMovesTheSelection covers the wheel's half of navigation: a list
+// scrolls by its selection, since its window only ever follows the cursor.
+func TestListScrollMovesTheSelection(t *testing.T) {
+	l := component.NewList[string]("files", func(s string) string { return s }, testTheme(), testKeys())
+	l.SetItems([]string{"aaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbb", "cc"})
+	l.SetSize(10, 4)
+	l.Focus()
+
+	got := mustCmd(t, l.Scroll(0, 1))
+	sel, ok := got.(msg.SelectedMsg)
+	if !ok {
+		t.Fatalf("expected SelectedMsg, got %T", got)
+	}
+	if sel.Index != 1 || l.Index() != 1 {
+		t.Errorf("got %+v (cursor %d), want the row below", sel, l.Index())
+	}
+	mustCmd(t, l.Scroll(0, -5))
+	if l.Index() != 0 {
+		t.Errorf("cursor = %d, want scrolling past the top to stop at it", l.Index())
+	}
+	if cmd := l.Scroll(0, -1); cmd != nil {
+		t.Error("the top does not wrap, so there is nothing to report")
+	}
+
+	top := l.View()
+	l.Scroll(1, 0)
+	if l.View() == top {
+		t.Error("scrolling across should shift the window")
+	}
+	l.Scroll(-1, 0)
+	if l.View() != top {
+		t.Error("scrolling back to the left edge should restore the view")
+	}
+}
+
+func TestListClickRowSelectsIt(t *testing.T) {
+	l := component.NewList[string]("files", func(s string) string { return s }, testTheme(), testKeys())
+	l.SetItems([]string{"a", "b", "c"})
+	l.SetSize(10, 3)
+	l.Focus()
+
+	got := mustCmd(t, l.ClickRow(2))
+	sel, ok := got.(msg.SelectedMsg)
+	if !ok {
+		t.Fatalf("expected SelectedMsg, got %T", got)
+	}
+	if sel.ID != "files" || sel.Index != 2 {
+		t.Errorf("got %+v, want {files 2}", sel)
+	}
+	if l.Index() != 2 {
+		t.Errorf("cursor = %d, want the clicked row", l.Index())
+	}
+	if cmd := l.ClickRow(2); cmd != nil {
+		t.Error("the row already under the cursor has nothing to report")
+	}
+	if cmd := l.ClickRow(9); cmd != nil {
+		t.Error("a row holding no item should select nothing")
+	}
+}
+
+// TestListClickRowFollowsTheScroll pins the row-to-item mapping to the scrolled
+// window rather than the items: the top row is whatever is drawn there.
+func TestListClickRowFollowsTheScroll(t *testing.T) {
+	l := component.NewList[string]("files", func(s string) string { return s }, testTheme(), testKeys())
+	l.SetItems([]string{"a", "b", "c", "d", "e"})
+	l.SetSize(10, 2)
+	l.Focus()
+	l.SetIndex(4)
+
+	got := mustCmd(t, l.ClickRow(0))
+	sel, ok := got.(msg.SelectedMsg)
+	if !ok {
+		t.Fatalf("expected SelectedMsg, got %T", got)
+	}
+	if sel.Index != 3 {
+		t.Errorf("got %+v, want the item scrolled to the top row", sel)
+	}
+}
+
+func TestTableClickRowSkipsTheHeader(t *testing.T) {
+	tb := newStringTable()
+	tb.SetItems([][]string{{"r3", "a"}, {"r2", "b"}, {"r1", "c"}})
+	tb.SetSize(20, 4)
+	tb.Focus()
+
+	if cmd := tb.ClickRow(0); cmd != nil {
+		t.Error("the header names the columns; it selects nothing")
+	}
+	got := mustCmd(t, tb.ClickRow(2))
+	sel, ok := got.(msg.SelectedMsg)
+	if !ok {
+		t.Fatalf("expected SelectedMsg, got %T", got)
+	}
+	if sel.ID != "log" || sel.Index != 1 {
+		t.Errorf("got %+v, want the second row under the header", sel)
+	}
+	if tb.Index() != 1 {
+		t.Errorf("cursor = %d, want the clicked row", tb.Index())
+	}
+}
+
+func TestPanelClickRowIsTakenFromInsideTheBorder(t *testing.T) {
+	l := component.NewList[string]("files", func(s string) string { return s }, testTheme(), testKeys())
+	l.SetItems([]string{"a", "b", "c"})
+	p := component.NewPanel("Files", 2, l, testTheme())
+	p.SetSize(12, 5)
+
+	for _, c := range []struct{ x, y int }{{0, 0}, {1, 0}, {0, 2}, {11, 2}, {1, 4}} {
+		if cmd := p.ClickRow(c.x, c.y); cmd != nil {
+			t.Errorf("(%d,%d) is border, want no selection there", c.x, c.y)
+		}
+	}
+
+	got := mustCmd(t, p.ClickRow(1, 2))
+	sel, ok := got.(msg.SelectedMsg)
+	if !ok {
+		t.Fatalf("expected SelectedMsg, got %T", got)
+	}
+	if sel.Index != 1 {
+		t.Errorf("got %+v, want the panel's second row", sel)
+	}
+}
+
 func TestTableEmitsSelected(t *testing.T) {
 	tb := newStringTable()
 	tb.SetItems([][]string{{"r3", "a"}, {"r2", "b"}, {"r1", "c"}})
@@ -699,6 +863,71 @@ func TestViewsCrumbTitle(t *testing.T) {
 	mustCmd(t, vs.Update(keyEsc()))
 	if vs.CrumbTitle() != "" {
 		t.Errorf("crumb title should clear after popping, got %q", vs.CrumbTitle())
+	}
+}
+
+// tabbedPanel is a Views inside a Panel, plus the column its border row starts
+// name at. Every rune in the border is one cell wide, so a rune offset into it
+// is a column — which is what ClickTab is given.
+func tabbedPanel(t *testing.T, name string) (*component.Panel, *component.Views, int) {
+	t.Helper()
+	vs, _, _ := newStringViews()
+	p := component.NewPanel("Files", 2, vs, testTheme())
+	p.SetSize(40, 8)
+
+	border := []rune(ansi.Strip(strings.SplitN(p.View(), "\n", 2)[0]))
+	for i := range border {
+		if strings.HasPrefix(string(border[i:]), name) {
+			return p, vs, i
+		}
+	}
+	t.Fatalf("the border should name every view, got %q", string(border))
+	return nil, nil, 0
+}
+
+func TestPanelClickTabSelectsTheViewUnderIt(t *testing.T) {
+	p, vs, col := tabbedPanel(t, "Staged")
+
+	cmd, ok := p.ClickTab(col, 0)
+	if !ok {
+		t.Fatal("a click on a view name should be taken as one")
+	}
+	got := mustCmd(t, cmd)
+	sel, isView := got.(msg.ViewSelectedMsg)
+	if !isView {
+		t.Fatalf("expected ViewSelectedMsg, got %T", got)
+	}
+	if sel.Index != 1 || sel.Name != "Staged" {
+		t.Errorf("got %+v, want the clicked view", sel)
+	}
+	if vs.ActiveIndex() != 1 {
+		t.Errorf("active view = %d, want 1", vs.ActiveIndex())
+	}
+
+	// The far end of the name is the name too; the cell before it is border.
+	if _, ok := p.ClickTab(col+len("Staged")-1, 0); !ok {
+		t.Error("the last cell of a view name should be taken as one")
+	}
+	if _, ok := p.ClickTab(col-1, 0); ok {
+		t.Error("the border between two view names should be left alone")
+	}
+}
+
+func TestPanelClickTabIgnoresTheBodyAndDrilledPanels(t *testing.T) {
+	p, vs, col := tabbedPanel(t, "Staged")
+
+	// The strip is the top border row alone; the rows below it are the view.
+	if _, ok := p.ClickTab(col, 1); ok {
+		t.Error("a click in the body should not be taken as a tab")
+	}
+
+	sub := component.NewList[string]("detail", func(s string) string { return s }, testTheme(), testKeys())
+	vs.Push(sub)
+	if _, ok := p.ClickTab(col, 0); ok {
+		t.Error("switching is locked while drilled in, as it is for [ and ]")
+	}
+	if vs.ActiveIndex() != 0 {
+		t.Errorf("active view changed while drilled: %d", vs.ActiveIndex())
 	}
 }
 
