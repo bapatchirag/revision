@@ -1,5 +1,28 @@
 [
   {
+    "tag": "v1.6.1",
+    "name": "v1.6.1",
+    "date": "2026-08-14T07:30:37Z",
+    "url": "https://github.com/bapatchirag/revision/releases/tag/v1.6.1",
+    "prerelease": false,
+    "entries": [
+      "Updated changelog for v1.6.0 (@bapatchirag)",
+      "Stop install.sh ending on an rm error (@bapatchirag)",
+      "Click a panel to focus it (@bapatchirag)",
+      "Click a view name to select it (@bapatchirag)",
+      "Click a row to select it (@bapatchirag)",
+      "Double click a row to run it (@bapatchirag)",
+      "Scroll a panel with the wheel (@bapatchirag)",
+      "Bump fast-uri in /site in the npm_and_yarn group across 1 directory (@dependabot[bot])",
+      "Make the mouse opt-in (@bapatchirag)",
+      "Update documentation about mouse operation support (@bapatchirag)",
+      "Stop e opening an arbitrary file from a directory row (@bapatchirag)",
+      "security: Update js-yaml and nanoid (@bapatchirag)",
+      "Add the community health files GitHub looks for (@bapatchirag)",
+      "Check links to repository files against the tree (@bapatchirag)"
+    ]
+  },
+  {
     "tag": "v1.6.0",
     "name": "v1.6.0",
     "date": "2026-08-13T06:23:33Z",
