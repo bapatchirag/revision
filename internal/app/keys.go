@@ -93,6 +93,11 @@ func (m *Model) routeKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		return cmd, true
 	}
 	if m.configuring {
+		if m.editingRules {
+			// The rules editor sits over the settings editor and owns the keyboard
+			// while open; esc closes it alone (as a DismissMsg), leaving the form up.
+			return m.rulesEditor.Update(msg), true
+		}
 		// The settings editor live-previews the palette while its Theme field
 		// changes, so scrolling that field re-themes the UI immediately. The
 		// choice is only persisted on ctrl+s; esc reverts it via closeSettings.

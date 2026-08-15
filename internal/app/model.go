@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -47,24 +48,25 @@ type Model struct {
 	cmdLog     *commandLog
 	cmdLogSeen int64
 
-	panels     []*component.Panel
-	bar        *component.StatusBar
-	editor     *component.TextArea
-	nameEditor *component.Prompt
-	diffEditor *component.Prompt
-	pathEditor *component.Prompt
-	repoEditor *component.Prompt
-	passEditor *component.Prompt
-	modal      *component.Modal
-	progress   *component.Modal
-	menu       *component.Menu
-	updateMenu *component.Menu
-	form       *component.Form
-	toast      *component.Toast
-	searchBar  *component.SearchBar
-	splitDiff  *component.SplitView
-	mergeView  *component.SplitView
-	focus      *focus.Manager
+	panels      []*component.Panel
+	bar         *component.StatusBar
+	editor      *component.TextArea
+	nameEditor  *component.Prompt
+	diffEditor  *component.Prompt
+	pathEditor  *component.Prompt
+	repoEditor  *component.Prompt
+	passEditor  *component.Prompt
+	modal       *component.Modal
+	progress    *component.Modal
+	menu        *component.Menu
+	updateMenu  *component.Menu
+	form        *component.Form
+	rulesEditor *component.EditList
+	toast       *component.Toast
+	searchBar   *component.SearchBar
+	splitDiff   *component.SplitView
+	mergeView   *component.SplitView
+	focus       *focus.Manager
 
 	fileItems        []svn.StatusItem
 	collapsedDirs    map[string]bool
@@ -147,6 +149,9 @@ type Model struct {
 	diffSrc       diffSource
 	dirDiff       bool
 	hideUntracked bool
+	// hideMatchers are the configured hide rules that are in force, compiled. They
+	// narrow the Changes tree alone.
+	hideMatchers []*regexp.Regexp
 	// liveRefresh is whether the working copy is being watched in the background.
 	// It is seeded from the configuration and toggled at runtime, kept apart from
 	// cfg so a session-only toggle is never persisted.
@@ -187,18 +192,23 @@ type Model struct {
 	splitting bool
 	// merging is true while the resolution overlay is up, with mergeDoc the file
 	// it is deciding: a conflicted file, or a reject against its target.
-	merging      bool
-	mergeDoc     *mergeDoc
-	filtering    bool
-	filterPanel  int
-	filters      map[int]string
-	nameTargets  []changelistTarget
-	drilledCL    string
-	commitCL     string
-	themeBefore  string
-	confirming   bool
-	helping      bool
-	configuring  bool
+	merging     bool
+	mergeDoc    *mergeDoc
+	filtering   bool
+	filterPanel int
+	filters     map[int]string
+	nameTargets []changelistTarget
+	drilledCL   string
+	commitCL    string
+	themeBefore string
+	confirming  bool
+	helping     bool
+	configuring bool
+	// editingRules is true while the hide-rules editor is open over the settings
+	// editor, with rulesDraft the rules it is editing. The draft only reaches the
+	// configuration when the settings editor is saved.
+	editingRules bool
+	rulesDraft   []config.HideRule
 	needsSSHKey  bool
 	unlocking    bool
 	adding       bool
@@ -311,6 +321,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		menu:            component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
 		updateMenu:      component.NewMenu(updateMenuID, "Update available", updateMenuItems(), th, keys),
 		form:            component.NewForm(settingsFormID, "Settings", settingsFields(cfg, cfg.DirectoryDiff), th, keys),
+		rulesEditor:     component.NewEditList(hideRulesEditorID, "Hide rules", "No rules yet — press a to add one.", th, keys),
 		toast:           component.NewToast(th),
 		searchBar:       component.NewSearchBar(searchBarID, th, keys),
 		splitDiff:       component.NewSplitView(splitDiffID, "Side-by-side diff", th, keys),
@@ -335,6 +346,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	m.passEditor.SetSecret(true)
 	m.progress.SetHint("")
 	m.menu.SetReadOnly(true)
+	m.compileHideRules()
 	if client != nil {
 		m.launchDir = client.Dir
 	}

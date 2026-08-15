@@ -229,3 +229,13 @@ func (m *Model) sizeUpdateMenu() {
 func (m *Model) sizeForm() {
 	m.form.SetSize(clamp(m.width*3/5, 40, max(m.width-4, 40)), 0)
 }
+
+// sizeHideRules sizes the rules editor over the settings editor. It is wider
+// than the form beneath it — patterns are long and the row keys need spelling
+// out — with a height that scrolls a long rule set rather than growing past the
+// screen.
+func (m *Model) sizeHideRules() {
+	w := clamp(m.width*4/5, 44, max(m.width-4, 44))
+	h := clamp(m.height/2, 8, max(m.height-4, 8))
+	m.rulesEditor.SetSize(w, h)
+}

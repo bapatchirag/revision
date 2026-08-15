@@ -186,3 +186,19 @@ func TestTeatestPromptTypesAndPicks(t *testing.T) {
 	tm.Send(runes("docs"))
 	assertContains(t, finalOutput(t, tm), "Changelist name", "Existing changelists:", "feature-x", "docs")
 }
+
+func TestTeatestEditListAddsAndTogglesARule(t *testing.T) {
+	el := component.NewEditList("rules", "Hide rules", "none yet", testTheme(), testKeys())
+	el.SetEntries([]component.EditEntry{{Text: "^build/", Enabled: true}})
+	el.SetSize(44, 8)
+	el.Focus()
+
+	tm := teatest.NewTestModel(t, asModel(el), teatest.WithInitialTermSize(60, 12))
+	tm.Send(runes("a"))
+	tm.Send(runes("^out/"))
+	tm.Send(keyEnter())
+	tm.Send(keySpace())
+	// The added row carries the typed pattern and the space turned it off, while
+	// the rule that was there is untouched.
+	assertContains(t, finalOutput(t, tm), "Hide rules", "[x] ^build/", "[ ] ^out/")
+}

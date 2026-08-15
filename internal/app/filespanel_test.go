@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/bapatchirag/revision/internal/config"
 	"github.com/bapatchirag/revision/internal/svn"
 	uimsg "github.com/bapatchirag/revision/internal/tui/msg"
 )
@@ -77,6 +78,96 @@ func TestFilesFooterReportsHiddenCount(t *testing.T) {
 	}
 	if view := stripANSI(m.View()); !strings.Contains(view, got) {
 		t.Errorf("Files panel border missing footer %q\n%s", got, view)
+	}
+}
+
+// ruleModel is a model whose Changes view hides anything under build/.
+func ruleModel(t *testing.T, items []svn.StatusItem) *Model {
+	t.Helper()
+	cfg := config.Default()
+	cfg.HideRules = []config.HideRule{{Pattern: "^build/", Enabled: true}}
+	return loadItems(t, sizedModelCfg(t, cfg), items)
+}
+
+func TestHideRulesKeepMatchesOutOfTheChangesTree(t *testing.T) {
+	m := ruleModel(t, []svn.StatusItem{
+		{Path: "build/gen.go", State: svn.StateModified},
+		{Path: "src/a.go", State: svn.StateModified},
+	})
+
+	if fileTreeHasPath(m, "build/gen.go") {
+		t.Error("a file a rule matches should not be in the Changes tree")
+	}
+	if !fileTreeHasPath(m, "src/a.go") {
+		t.Error("a file no rule matches should still be in the Changes tree")
+	}
+	// The directory row goes with its only file rather than lingering empty.
+	for _, n := range m.files.Items() {
+		if n.Name == "build" {
+			t.Error("the directory of a hidden file should not be left behind")
+		}
+	}
+}
+
+func TestHideRulesLeaveTheRestOfTheAppAlone(t *testing.T) {
+	m := ruleModel(t, []svn.StatusItem{
+		{Path: "build/gen.go", State: svn.StateModified, Changelist: "feature"},
+		{Path: "src/a.go", State: svn.StateModified, Changelist: "feature"},
+	})
+
+	// svn's own view of the working copy is untouched, so a hidden file is still
+	// committed, staged and reverted with everything else.
+	if len(m.fileItems) != 2 {
+		t.Errorf("fileItems = %d, want both files (rules only narrow the view)", len(m.fileItems))
+	}
+	if got := len(m.changelistItems("feature")); got != 2 {
+		t.Errorf("changelist drill holds %d files, want both", got)
+	}
+	groups := groupChangelists(m.filteredStatusItems(m.fileItems))
+	if len(groups) != 1 || len(groups[0].Items) != 2 {
+		t.Errorf("changelists view = %+v, want one group of both files", groups)
+	}
+}
+
+func TestDisabledHideRuleHidesNothing(t *testing.T) {
+	cfg := config.Default()
+	cfg.HideRules = []config.HideRule{{Pattern: "^build/", Enabled: false}}
+	m := loadItems(t, sizedModelCfg(t, cfg), []svn.StatusItem{
+		{Path: "build/gen.go", State: svn.StateModified},
+	})
+
+	if !fileTreeHasPath(m, "build/gen.go") {
+		t.Error("a rule that is turned off should hide nothing")
+	}
+	if m.hideRulesActive() {
+		t.Error("hideRulesActive should be false with every rule off")
+	}
+}
+
+func TestHideRulesMatchAnywhereInThePath(t *testing.T) {
+	cfg := config.Default()
+	cfg.HideRules = []config.HideRule{{Pattern: `\.class$`, Enabled: true}}
+	m := loadItems(t, sizedModelCfg(t, cfg), []svn.StatusItem{
+		{Path: "src/deep/Main.class", State: svn.StateUnversioned},
+		{Path: "src/deep/Main.java", State: svn.StateModified},
+	})
+
+	if fileTreeHasPath(m, "src/deep/Main.class") {
+		t.Error("an unanchored pattern should match anywhere in the path")
+	}
+	if !fileTreeHasPath(m, "src/deep/Main.java") {
+		t.Error("the sibling that does not match should stay")
+	}
+}
+
+func TestFilesFooterCountsFilesHiddenByRule(t *testing.T) {
+	m := ruleModel(t, []svn.StatusItem{
+		{Path: "build/gen.go", State: svn.StateModified},
+		{Path: "src/a.go", State: svn.StateModified},
+	})
+
+	if got, want := m.filesFooter(), "1 of 1 (2)"; got != want {
+		t.Errorf("footer = %q, want %q", got, want)
 	}
 }
 
