@@ -133,6 +133,14 @@ func newModel() model {
 	search.SetValue("rev:128 diff viewport")
 	search.Focus()
 
+	rules := component.NewEditList("gallery-rules", "Hide rules", "No rules yet — press a to add one.", th, keys)
+	rules.SetEntries([]component.EditEntry{
+		{Text: "^build/", Enabled: true},
+		{Text: `\.class$`, Enabled: true},
+		{Text: "^vendor/", Enabled: false},
+	})
+	rules.Focus()
+
 	return model{
 		keys: keys,
 		demos: []demo{
@@ -149,6 +157,7 @@ func newModel() model {
 			{"Prompt (pick)", prompt},
 			{"Form (settings)", form},
 			{"SearchBar (filter)", search},
+			{"EditList (rules)", rules},
 		},
 	}
 }
