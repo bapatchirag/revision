@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -113,6 +114,7 @@ func (m *Model) submitSettings() tea.Cmd {
 
 	themeChanged := cfg.Theme != m.cfg.Theme
 	untrackedChanged := cfg.HideUntracked != m.hideUntracked
+	rulesChanged := !slices.Equal(cfg.HideRules, m.cfg.HideRules)
 	liveChanged := cfg.LiveRefresh != m.liveRefresh
 	mouseChanged := cfg.AllowMouse != m.cfg.AllowMouse
 	displayChanged := cfg.DisplayFrom != m.cfg.DisplayFrom
@@ -127,6 +129,11 @@ func (m *Model) submitSettings() tea.Cmd {
 	}
 	if untrackedChanged {
 		m.rebuildFilesViews()
+	}
+	// Hide rules narrow the Changes tree alone, so only it is rebuilt.
+	if rulesChanged {
+		m.compileHideRules()
+		m.rebuildFileTree()
 	}
 	// A new display scope re-roots every svn command, so the status and history
 	// on screen no longer describe the tree being shown; load them afresh.

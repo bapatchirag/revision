@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -148,6 +149,9 @@ type Model struct {
 	diffSrc       diffSource
 	dirDiff       bool
 	hideUntracked bool
+	// hideMatchers are the configured hide rules that are in force, compiled. They
+	// narrow the Changes tree alone.
+	hideMatchers []*regexp.Regexp
 	// liveRefresh is whether the working copy is being watched in the background.
 	// It is seeded from the configuration and toggled at runtime, kept apart from
 	// cfg so a session-only toggle is never persisted.
@@ -342,6 +346,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	m.passEditor.SetSecret(true)
 	m.progress.SetHint("")
 	m.menu.SetReadOnly(true)
+	m.compileHideRules()
 	if client != nil {
 		m.launchDir = client.Dir
 	}

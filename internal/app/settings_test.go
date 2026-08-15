@@ -433,6 +433,29 @@ func TestHideRulesEditorSavesRules(t *testing.T) {
 	}
 }
 
+func TestHideRulesApplyWhenSettingsAreSaved(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "build/gen.go", State: svn.StateModified},
+		{Path: "src/a.go", State: svn.StateModified},
+	})
+
+	m = openRulesEditor(t, m)
+	m = addRule(t, m, "^build/")
+	m = stepKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlS}) // keep the rules
+	if !fileTreeHasPath(m, "build/gen.go") {
+		t.Fatal("nothing should be hidden before the settings are saved")
+	}
+
+	m = stepKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlS}) // save the settings
+	if fileTreeHasPath(m, "build/gen.go") {
+		t.Error("saving should hide the matching file without a status reload")
+	}
+	if !fileTreeHasPath(m, "src/a.go") {
+		t.Error("the file no rule matches should still be there")
+	}
+}
+
 func TestHideRulesEditorRejectsAnInvalidPattern(t *testing.T) {
 	m := openRulesEditor(t, sizedModel(t))
 
