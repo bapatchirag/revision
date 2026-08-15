@@ -28,6 +28,11 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 			return m.toggleRejectCollapse(), true
 		case updateMenuID:
 			return m.chooseUpdate(msg.Index), true
+		case settingsFormID:
+			// The only activatable row in the settings editor opens the rules editor.
+			if msg.Index == hideRulesFieldIndex {
+				return m.openHideRules(), true
+			}
 		}
 		return nil, true
 
@@ -70,6 +75,8 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 			return m.submitRepoPath(msg.Value), true
 		case settingsFormID:
 			return m.submitSettings(), true
+		case hideRulesEditorID:
+			return m.submitHideRules(), true
 		case passphraseEditorID:
 			return m.submitUnlock(msg.Value), true
 		case searchBarID:
@@ -135,6 +142,8 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 			m.closeUpdate()
 		case settingsFormID:
 			m.closeSettings()
+		case hideRulesEditorID:
+			m.closeHideRules()
 		case searchBarID:
 			return m.clearFilter(), true
 		}

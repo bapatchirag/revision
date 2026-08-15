@@ -71,6 +71,10 @@ const updateMenuID = "update"
 // settingsFormID identifies the settings editor on emitted messages.
 const settingsFormID = "settings"
 
+// hideRulesEditorID identifies the hide-rules editor, opened from the settings
+// editor, on emitted messages.
+const hideRulesEditorID = "hide-rules"
+
 // searchBarID identifies the panel filter input on emitted messages.
 const searchBarID = "search"
 

@@ -105,12 +105,9 @@ type Config struct {
 	// Changes view. Each pattern is matched, unanchored, against a file's path
 	// relative to the displayed root, so "^build/" hides a directory and
 	// "\.class$" an extension. A pattern that does not compile is dropped when the
-	// configuration is loaded.
+	// configuration is loaded, and a rule that is turned off is kept but not
+	// applied — with every rule off, nothing is hidden.
 	HideRules []HideRule `json:"hideRules"`
-	// ApplyHideRules is the switch over the whole rule set: when false every rule
-	// is ignored and nothing is hidden, so the rules can be turned off without
-	// being deleted.
-	ApplyHideRules bool `json:"applyHideRules"`
 	// SSHKeyPath is the SSH private key used to authenticate against a remote
 	// repository over svn+ssh. A blank value is normalized to the default key
 	// location, ~/.ssh/id_rsa, so the setting always names a concrete key. A
@@ -152,7 +149,6 @@ func Default() Config {
 		DirectoryDiff:     true,
 		HideUntracked:     false,
 		HideRules:         []HideRule{},
-		ApplyHideRules:    true,
 		SSHKeyPath:        "~/.ssh/id_rsa",
 		DisplayFrom:       DisplayFromCWD,
 		DiffOutputDir:     "",

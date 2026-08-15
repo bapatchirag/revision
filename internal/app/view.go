@@ -48,6 +48,10 @@ func (m *Model) View() string {
 		view = m.overlayCenter(view, m.updateMenu.View())
 	case m.helping:
 		view = m.overlayCenter(view, m.menu.View())
+	case m.editingRules:
+		// The rules editor is opened from the settings editor, which stays on
+		// screen beneath it.
+		view = m.overlayCenter(m.overlayCenter(view, m.form.View()), m.rulesEditor.View())
 	case m.configuring:
 		view = m.overlayCenter(view, m.form.View())
 	}

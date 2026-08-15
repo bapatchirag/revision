@@ -14,10 +14,10 @@
 │               │  Optimistic updates on                       │               │
 ╰───────────────│  Live refresh       on                       │               │
 ╭─ [3] Log ─────│  Allow mouse        off                      │               │
-│  Rev Author Me│                                              │───────────────╯
-│               │ctrl+s save · ↑↓ move · esc cancel            │───────────────╮
+│  Rev Author Me│  Hide rules         none                     │───────────────╯
+│               │                                              │───────────────╮
+│               │ctrl+s save · ↑↓ move · esc cancel            │               │
 │               ╰──────────────────────────────────────────────╯               │
-│                              ││                                              │
 │                              ││                                              │
 │                              ││                                              │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯

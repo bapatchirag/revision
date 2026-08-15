@@ -1,6 +1,7 @@
 package app
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -193,7 +194,7 @@ func TestSettingsOpensAndCancels(t *testing.T) {
 		t.Fatal("pressing S did not open the settings editor")
 	}
 	view := stripANSI(m.View())
-	for _, want := range []string{"Settings", "Log limit", "Editor", "Theme", "Directory diff", "Hide untracked", "SSH key", "Display from", "Diff output"} {
+	for _, want := range []string{"Settings", "Log limit", "Editor", "Theme", "Directory diff", "Hide untracked", "SSH key", "Display from", "Diff output", "Hide rules"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("settings view missing %q\n---\n%s", want, view)
 		}
@@ -333,4 +334,140 @@ func TestSettingsFormGolden(t *testing.T) {
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
 	m = next.(*Model)
 	golden.RequireEqual(t, []byte(m.View()))
+}
+
+// stepKey applies a key and delivers the one follow-up message the focused
+// overlay's command produces — activate, submit or dismiss — as the runtime
+// would, so its effect lands within the step.
+func stepKey(t *testing.T, m *Model, k tea.KeyMsg) *Model {
+	t.Helper()
+	next, cmd := m.Update(k)
+	m = next.(*Model)
+	if cmd != nil {
+		if out := cmd(); out != nil {
+			next, _ = m.Update(out)
+			m = next.(*Model)
+		}
+	}
+	return m
+}
+
+// openRulesEditor opens the settings editor and activates its Hide rules row.
+func openRulesEditor(t *testing.T, m *Model) *Model {
+	t.Helper()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	m = pressDown(t, next.(*Model), hideRulesFieldIndex)
+	return stepKey(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+}
+
+// addRule types a pattern into a new row of the open rules editor and keeps it.
+func addRule(t *testing.T, m *Model, pattern string) *Model {
+	t.Helper()
+	m = stepKey(t, m, keyRunes("a"))
+	m = stepKey(t, m, keyRunes(pattern))
+	return stepKey(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+}
+
+func TestHideRulesEditorOpensOverSettings(t *testing.T) {
+	m := openRulesEditor(t, sizedModel(t))
+
+	if !m.editingRules {
+		t.Fatal("activating the Hide rules row did not open the editor")
+	}
+	if !m.configuring {
+		t.Error("the settings editor should stay open beneath the rules editor")
+	}
+	view := stripANSI(m.View())
+	for _, want := range []string{"Hide rules", "a add", "Settings"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view missing %q\n---\n%s", want, view)
+		}
+	}
+}
+
+func TestHideRulesEditorEscReturnsToSettings(t *testing.T) {
+	m := openRulesEditor(t, sizedModel(t))
+	m = stepKey(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	if m.editingRules {
+		t.Error("esc should close the rules editor")
+	}
+	if !m.configuring {
+		t.Error("esc in the rules editor should leave the settings editor open")
+	}
+	// The form has the keyboard back, so its own esc closes it.
+	m = stepKey(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.configuring {
+		t.Error("esc should then close the settings editor")
+	}
+}
+
+func TestHideRulesEditorSavesRules(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := openRulesEditor(t, sizedModel(t))
+
+	m = addRule(t, m, "^build/")
+	m = stepKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	if m.editingRules {
+		t.Fatal("ctrl+s should close the rules editor")
+	}
+	if got, want := m.form.Value(hideRulesFieldIndex), "1 rule · 1 on"; got != want {
+		t.Errorf("summary = %q, want %q", got, want)
+	}
+	// The rules are only written when the settings editor itself is saved.
+	if len(m.cfg.HideRules) != 0 {
+		t.Fatalf("cfg.HideRules = %+v, want none until the form is saved", m.cfg.HideRules)
+	}
+
+	m = stepKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	want := []config.HideRule{{Pattern: "^build/", Enabled: true}}
+	if !reflect.DeepEqual(m.cfg.HideRules, want) {
+		t.Errorf("cfg.HideRules = %+v, want %+v", m.cfg.HideRules, want)
+	}
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if !reflect.DeepEqual(got.HideRules, want) {
+		t.Errorf("persisted HideRules = %+v, want %+v", got.HideRules, want)
+	}
+}
+
+func TestHideRulesEditorRejectsAnInvalidPattern(t *testing.T) {
+	m := openRulesEditor(t, sizedModel(t))
+
+	m = addRule(t, m, "[unclosed")
+	m = stepKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlS})
+
+	if !m.editingRules {
+		t.Error("the editor should stay open on a pattern that cannot compile")
+	}
+	if len(m.rulesDraft) != 0 {
+		t.Errorf("rulesDraft = %+v, want none (the rule was rejected)", m.rulesDraft)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "invalid pattern: [unclosed") {
+		t.Errorf("view missing the rejection notice\n---\n%s", view)
+	}
+}
+
+func TestHideRulesDiscardedWhenSettingsCancelled(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := config.Default()
+	cfg.HideRules = []config.HideRule{{Pattern: "^build/", Enabled: true}}
+	m := openRulesEditor(t, sizedModelCfg(t, cfg))
+
+	// Delete the existing rule, keep the edit, then abandon the settings editor.
+	m = stepKey(t, m, keyRunes("d"))
+	m = stepKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = stepKey(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	if m.configuring {
+		t.Fatal("esc should close the settings editor")
+	}
+	if !reflect.DeepEqual(m.cfg.HideRules, cfg.HideRules) {
+		t.Errorf("cfg.HideRules = %+v, want %+v (cancelling discards the edit)", m.cfg.HideRules, cfg.HideRules)
+	}
+	if m.rulesDraft != nil {
+		t.Errorf("rulesDraft = %+v, want it dropped with the editor", m.rulesDraft)
+	}
 }

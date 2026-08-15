@@ -24,9 +24,6 @@ func TestDefault(t *testing.T) {
 	if def.HideUntracked {
 		t.Error("Default().HideUntracked = true, want false")
 	}
-	if !def.ApplyHideRules {
-		t.Error("Default().ApplyHideRules = false, want true")
-	}
 	if len(def.HideRules) != 0 {
 		t.Errorf("Default().HideRules = %+v, want none", def.HideRules)
 	}
@@ -214,7 +211,7 @@ func TestLoadDisablesLiveRefresh(t *testing.T) {
 
 func TestLoadHideRules(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	const onDisk = `{"applyHideRules":false,"hideRules":[{"pattern":"^build/","enabled":true},{"pattern":"\\.class$","enabled":false}]}`
+	const onDisk = `{"hideRules":[{"pattern":"^build/","enabled":true},{"pattern":"\\.class$","enabled":false}]}`
 	if err := os.WriteFile(path, []byte(onDisk), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -226,9 +223,6 @@ func TestLoadHideRules(t *testing.T) {
 	want := []HideRule{{Pattern: "^build/", Enabled: true}, {Pattern: `\.class$`}}
 	if !reflect.DeepEqual(got.HideRules, want) {
 		t.Errorf("HideRules = %+v, want %+v", got.HideRules, want)
-	}
-	if got.ApplyHideRules {
-		t.Error("ApplyHideRules = true, want false (disabled on disk)")
 	}
 }
 
