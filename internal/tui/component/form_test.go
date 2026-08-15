@@ -20,7 +20,15 @@ func testForm() *component.Form {
 		{Label: "Editor", Kind: component.FieldText, Value: "vim"},
 		{Label: "Theme", Kind: component.FieldChoice, Value: "auto", Options: []string{"auto", "nord", "dracula"}},
 		{Label: "Directory diff", Kind: component.FieldBool, Value: "true"},
+		{Label: "Hide rules", Kind: component.FieldAction, Value: "3 rules · 2 on"},
 	}, testTheme(), testKeys())
+}
+
+// onActionField parks the cursor on the action row, the last field.
+func onActionField(f *component.Form) {
+	for i := 0; i < 5; i++ {
+		f.Update(keyDown())
+	}
 }
 
 func TestFormEmitsSubmitAndDismiss(t *testing.T) {
@@ -132,14 +140,67 @@ func TestFormTypesNavLettersLiterally(t *testing.T) {
 	}
 }
 
+func TestFormActionFieldEmitsActivated(t *testing.T) {
+	f := testForm()
+	f.Focus()
+	onActionField(f)
+
+	for _, k := range []tea.KeyMsg{keyEnter(), keySpace()} {
+		activated := mustCmd(t, f.Update(k))
+		act, ok := activated.(msg.ActivatedMsg)
+		if !ok {
+			t.Fatalf("expected ActivatedMsg, got %T", activated)
+		}
+		if act.ID != "settings" || act.Index != 5 {
+			t.Errorf("got %+v, want {settings 5}", act)
+		}
+	}
+}
+
+func TestFormActionFieldIsNotEdited(t *testing.T) {
+	f := testForm()
+	f.Focus()
+	onActionField(f)
+
+	f.Update(runes("typed"))
+	f.Update(keyBackspace())
+	if got, want := f.Value(5), "3 rules · 2 on"; got != want {
+		t.Errorf("action field = %q, want %q (it is a read-only summary)", got, want)
+	}
+}
+
+func TestFormSetValueReplacesASummary(t *testing.T) {
+	f := testForm()
+
+	f.SetValue(5, "4 rules · 4 on")
+	if got, want := f.Value(5), "4 rules · 4 on"; got != want {
+		t.Errorf("action field = %q, want %q", got, want)
+	}
+	// An index no field occupies is ignored rather than panicking.
+	f.SetValue(-1, "x")
+	f.SetValue(99, "x")
+	if got := len(f.Values()); got != 6 {
+		t.Errorf("Values() len = %d, want 6", got)
+	}
+
+	// Replacing the active field's value leaves the edit column at its end, so
+	// typing continues after the new text rather than inside it.
+	f.Focus()
+	f.SetValue(0, "~/code")
+	f.Update(runes("!"))
+	if got, want := f.Value(0), "~/code!"; got != want {
+		t.Errorf("field 0 = %q, want %q", got, want)
+	}
+}
+
 func TestFormValuesReflectEdits(t *testing.T) {
 	f := testForm()
 	f.Focus()
 
 	f.Update(runes("/tmp"))
 	vals := f.Values()
-	if len(vals) != 5 {
-		t.Fatalf("Values() len = %d, want 5", len(vals))
+	if len(vals) != 6 {
+		t.Fatalf("Values() len = %d, want 6", len(vals))
 	}
 	if vals[0] != "/tmp" {
 		t.Errorf("Values()[0] = %q, want /tmp", vals[0])
@@ -178,6 +239,10 @@ func TestFormHintMatchesActiveField(t *testing.T) {
 	if v := f.View(); !strings.Contains(v, "toggle") {
 		t.Errorf("bool-field hint missing:\n%s", v)
 	}
+	f.Update(keyDown()) // Hide rules (action)
+	if v := f.View(); !strings.Contains(v, "enter open") {
+		t.Errorf("action-field hint missing:\n%s", v)
+	}
 }
 
 func TestFormViewShowsFieldsAndValues(t *testing.T) {
@@ -186,7 +251,7 @@ func TestFormViewShowsFieldsAndValues(t *testing.T) {
 	f.Focus()
 
 	view := f.View()
-	for _, want := range []string{"Settings", "Default path", "Log limit", "Editor", "Theme", "Directory diff", "vim", "100"} {
+	for _, want := range []string{"Settings", "Default path", "Log limit", "Editor", "Theme", "Directory diff", "vim", "100", "Hide rules", "3 rules · 2 on"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q\n---\n%s", want, view)
 		}

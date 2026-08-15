@@ -125,6 +125,7 @@ func newModel() model {
 		{Label: "Editor", Kind: component.FieldText, Value: "vim"},
 		{Label: "Theme", Kind: component.FieldChoice, Value: "cipher", Options: theme.Names()},
 		{Label: "Directory diff", Kind: component.FieldBool, Value: "true"},
+		{Label: "Hide rules", Kind: component.FieldAction, Value: "3 rules · 2 on"},
 	}, th, keys)
 	form.Focus()
 
