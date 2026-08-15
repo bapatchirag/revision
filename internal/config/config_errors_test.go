@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -31,7 +32,7 @@ func TestLoadFallsBackToDefaultsWhenThePathIsUnknown(t *testing.T) {
 	if err == nil {
 		t.Error("Load() should report that it could not locate the config file")
 	}
-	if cfg != Default() {
+	if !reflect.DeepEqual(cfg, Default()) {
 		t.Error("Load() should still return usable defaults so the app can start")
 	}
 }
@@ -45,7 +46,7 @@ func TestSaveAndReconcileFailWhenThePathIsUnknown(t *testing.T) {
 	if err == nil {
 		t.Error("Reconcile() should report that it could not locate the config file")
 	}
-	if cfg != Default() || rec.Created || rec.Updated || len(rec.Conflicts) != 0 {
+	if !reflect.DeepEqual(cfg, Default()) || rec.Created || rec.Updated || len(rec.Conflicts) != 0 {
 		t.Error("Reconcile() should still return usable defaults so the app can start")
 	}
 }
