@@ -1,0 +1,24 @@
+╭─ [1] Status ─────────────────╮╭─ [0] Diff ───────────────────────────────────╮
+│Root      /home/alice/work/wc ││Loading diff…                                 │
+│Source    /home/alice/work/wc ││                                              │
+│CWD       /home/alice/work/wc ││                                              │
+│Branch    trunk╭─ Settings ───────────────────────────────────╮               │
+│Revision  r42  │  Log limit          100                      │               │
+│       ╭─ Hide rules ─────────────────────────────────────────────────╮       │
+╰───────│> [x] ^build/                                                 │       │
+╭─ [2] ─│  [x] \.class$                                                │       │
+│  ▾ /  │  [ ] ^vendor/                                                │       │
+│>     M│                                                              │       │
+│       │                                                              │       │
+│       │                                                              │       │
+│       │                                                              │       │
+╰───────│                                                              │       │
+╭─ [3] L│                                                              │       │
+│  Rev A│a add · e edit · d delete · space on/off · ctrl+s save · esc c│───────╯
+│       ╰──────────────────────────────────────────────────────────────╯───────╮
+│               │enter open · ↑↓ move · ctrl+s save · esc cance│               │
+│               ╰──────────────────────────────────────────────╯               │
+│                              ││                                              │
+│                              ││                                              │
+╰──────────────────────────────╯╰──────────────────────────────────────────────╯
+space stage · n changelist · c commit · r revert · d delete · [ ] view · ? help 

@@ -78,6 +78,10 @@ so switching views with <KeyCap key="[" /> / <KeyCap key="]" /> keeps the same q
 the Diffs view only the free text applies, matched against the patch file name, and in the
 Rejects view likewise, matched against the reject's path below the root.
 
+A filter lasts as long as you keep it. To keep build output and generated files out of the
+Changes view for good, use a [hide rule](/reference/configuration/#hiderules) instead — it
+is remembered between sessions and leaves the filter free for looking things up.
+
 ### Log
 
 ```text

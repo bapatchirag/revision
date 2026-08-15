@@ -494,3 +494,16 @@ func TestHideRulesDiscardedWhenSettingsCancelled(t *testing.T) {
 		t.Errorf("rulesDraft = %+v, want it dropped with the editor", m.rulesDraft)
 	}
 }
+
+func TestHideRulesEditorGolden(t *testing.T) {
+	cfg := config.Default()
+	cfg.HideRules = []config.HideRule{
+		{Pattern: "^build/", Enabled: true},
+		{Pattern: `\.class$`, Enabled: true},
+		{Pattern: "^vendor/", Enabled: false},
+	}
+	m := loadItems(t, sizedModelCfg(t, cfg), []svn.StatusItem{
+		{Path: "modified.go", State: svn.StateModified},
+	})
+	golden.RequireEqual(t, []byte(openRulesEditor(t, m).View()))
+}
