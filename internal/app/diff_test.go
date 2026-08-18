@@ -472,3 +472,116 @@ func BenchmarkColorizeDiff(b *testing.B) {
 		}
 	})
 }
+
+// rangePatch is `svn diff -r 2:4` verbatim over a repository where r2 added
+// b.txt, r3 modified a.txt and r4 deleted b.txt.
+const rangePatch = `Index: b.txt
+===================================================================
+--- b.txt	(revision 2)
++++ b.txt	(nonexistent)
+@@ -1 +0,0 @@
+-b1
+Index: a.txt
+===================================================================
+--- a.txt	(revision 2)
++++ a.txt	(revision 4)
+@@ -1 +1,2 @@
+ a1
++a2
+`
+
+func TestSplitPatchByFile(t *testing.T) {
+	files := splitPatchByFile(rangePatch)
+	if len(files) != 2 {
+		t.Fatalf("split %d sections, want one per file: %+v", len(files), files)
+	}
+
+	// svn's order is kept: the tree decides how to arrange them, not this.
+	if files[0].Path != "b.txt" || files[1].Path != "a.txt" {
+		t.Errorf("paths = %q, %q, want b.txt then a.txt", files[0].Path, files[1].Path)
+	}
+	if files[0].State != svn.StateDeleted {
+		t.Errorf("b.txt state = %s, want deleted", files[0].State)
+	}
+	if files[1].State != svn.StateModified {
+		t.Errorf("a.txt state = %s, want modified", files[1].State)
+	}
+
+	// Each section must carry its own "Index:" line and stop before the next.
+	if !strings.HasPrefix(files[0].Text, "Index: b.txt\n") || strings.Contains(files[0].Text, "a.txt") {
+		t.Errorf("b.txt section leaked into the next file:\n%s", files[0].Text)
+	}
+
+	// Nothing may be lost or duplicated: the sections must tile the patch.
+	var texts []string
+	for _, f := range files {
+		texts = append(texts, f.Text)
+	}
+	if got := strings.Join(texts, "\n"); got != strings.TrimRight(rangePatch, "\n") {
+		t.Errorf("sections do not reassemble into the patch:\n%s", got)
+	}
+}
+
+func TestSplitPatchByFileReadsAnAddition(t *testing.T) {
+	const added = `Index: b.txt
+===================================================================
+--- b.txt	(nonexistent)
++++ b.txt	(revision 2)
+@@ -0,0 +1 @@
++b1
+`
+	files := splitPatchByFile(added)
+	if len(files) != 1 || files[0].State != svn.StateAdded {
+		t.Errorf("split = %+v, want a single added file", files)
+	}
+}
+
+// A removed line can begin "---" and end in the same marker svn writes on a file
+// header, so the markers are only trusted before a section's first hunk.
+func TestSplitPatchByFileIgnoresMarkersInsideHunks(t *testing.T) {
+	const tricky = `Index: notes.txt
+===================================================================
+--- notes.txt	(revision 1)
++++ notes.txt	(revision 2)
+@@ -1,2 +1,2 @@
+---- old.txt	(nonexistent)
+++++ new.txt	(nonexistent)
+`
+	files := splitPatchByFile(tricky)
+	if len(files) != 1 {
+		t.Fatalf("split %d sections, want 1: %+v", len(files), files)
+	}
+	if files[0].State != svn.StateModified {
+		t.Errorf("state = %s, want modified: a hunk's own lines are not file headers", files[0].State)
+	}
+}
+
+func TestSplitPatchByFileEdgeCases(t *testing.T) {
+	const binary = `Index: logo.png
+===================================================================
+Cannot display: file marked as a binary type.
+svn:mime-type = application/octet-stream
+`
+	t.Run("binary still yields a row", func(t *testing.T) {
+		files := splitPatchByFile(binary)
+		if len(files) != 1 || files[0].Path != "logo.png" {
+			t.Fatalf("split = %+v, want the binary file listed", files)
+		}
+		if !strings.Contains(files[0].Text, "Cannot display") {
+			t.Errorf("svn's notice should be kept as the section body:\n%s", files[0].Text)
+		}
+	})
+
+	for name, diff := range map[string]string{
+		"empty":       "",
+		"whitespace":  "  \n\n",
+		"no Index":    "@@ -1 +1 @@\n-old\n+new",
+		"only a hunk": "--- a.txt\t(nonexistent)\n@@ -0,0 +1 @@\n+a1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if files := splitPatchByFile(diff); files != nil {
+				t.Errorf("split = %+v, want nothing: no section to attach the text to", files)
+			}
+		})
+	}
+}

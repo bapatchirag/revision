@@ -220,6 +220,66 @@ func diffTargetAt(diff string, idx int) (path string, line int) {
 	return lastFile, last
 }
 
+// patchFile is one file's section of a unified diff: the path its "Index:" line
+// names, the change that section records, and the raw text of the section
+// itself.
+type patchFile struct {
+	Path  string
+	State svn.FileState
+	Text  string
+}
+
+// splitPatchByFile cuts a unified diff into its per-file sections, in the order
+// svn emitted them. It joins colorizeDiff, splitDiffPages and diffTargetAt as a
+// reader of unified-diff structure, this one for the file boundaries: a diff
+// between two revisions is the only description of itself there is, so the tree
+// browsing it has to be built out of the patch rather than alongside it.
+//
+// A section's state comes from the "(nonexistent)" marker svn writes on
+// whichever side the file is missing from — the left for an addition, the right
+// for a deletion. The markers are only read before the section's first hunk,
+// since inside one a removed line can begin "---" and be mistaken for a header.
+// A replacement is indistinguishable from a modification here and reads as one.
+//
+// Anything ahead of the first "Index:" line belongs to no file and is dropped.
+func splitPatchByFile(diff string) []patchFile {
+	if strings.TrimSpace(diff) == "" {
+		return nil
+	}
+	var (
+		files  []patchFile
+		cur    *patchFile
+		body   []string
+		inHunk bool
+	)
+	flush := func() {
+		if cur != nil {
+			cur.Text = strings.Join(body, "\n")
+			files = append(files, *cur)
+		}
+		body = nil
+	}
+	for _, ln := range strings.Split(strings.TrimRight(diff, "\n"), "\n") {
+		switch {
+		case strings.HasPrefix(ln, "Index:"):
+			flush()
+			cur = &patchFile{Path: strings.TrimSpace(ln[len("Index:"):]), State: svn.StateModified}
+			inHunk = false
+		case cur == nil:
+			continue
+		case strings.HasPrefix(ln, "@@"):
+			inHunk = true
+		case !inHunk && strings.HasPrefix(ln, "--- ") && strings.HasSuffix(ln, "(nonexistent)"):
+			cur.State = svn.StateAdded
+		case !inHunk && strings.HasPrefix(ln, "+++ ") && strings.HasSuffix(ln, "(nonexistent)"):
+			cur.State = svn.StateDeleted
+		}
+		body = append(body, ln)
+	}
+	flush()
+	return files
+}
+
 // colorize is colorizeDiff memoized over the session. Main is rebuilt on every
 // filter keystroke, focus change and reload, and re-styling a large patch line
 // by line dominates that work; the theme is part of the key, so a switch of
