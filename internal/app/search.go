@@ -18,7 +18,7 @@ func (m *Model) openFilter() tea.Cmd {
 	p := m.focus.Index()
 	m.filtering = true
 	m.filterPanel = p
-	m.searchBar.SetPrefix(filterPrefix(p))
+	m.searchBar.SetPrefix(m.filterPrefix(p))
 	m.searchBar.SetValue(m.filters[p])
 	m.searchBar.SetSize(m.width, 1)
 	m.searchBar.Focus()
@@ -105,7 +105,13 @@ func (m *Model) setFilter(p int, q string) {
 	case panelFiles:
 		m.rebuildFilesViews()
 	case panelLog:
-		m.applyLogFilter()
+		// The Log panel shows the revisions or, drilled in, the files a range of
+		// them touched; the filter narrows whichever of the two is on screen.
+		if m.inRevDrill() {
+			m.rebuildRevFiles()
+		} else {
+			m.applyLogFilter()
+		}
 	case panelStatus:
 		m.status.SetSearch(m.filters[panelStatus])
 	case panelMain:
@@ -146,11 +152,16 @@ func (m *Model) jumpMatch(p, dir int) {
 
 // filterPrefix is the muted label shown in the filter input for panel p, naming
 // the panel, its behavior (filter vs. search) and its available parameters.
-func filterPrefix(p int) string {
+// Drilled into a range's files the Log panel is filtered as a file tree, so it
+// offers what those rows carry rather than what a revision does.
+func (m *Model) filterPrefix(p int) string {
 	switch p {
 	case panelFiles:
 		return "filter files (state: cl:)"
 	case panelLog:
+		if m.inRevDrill() {
+			return "filter files (state:)"
+		}
 		return "filter log (rev: user: path: date:)"
 	case panelStatus:
 		return "search status"

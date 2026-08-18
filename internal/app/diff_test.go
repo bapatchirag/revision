@@ -364,6 +364,116 @@ func TestChangelistDiffName(t *testing.T) {
 	}
 }
 
+// drilledSaveModel drills into a range whose diff is diff, with saved patches
+// going to dir.
+func drilledSaveModel(t *testing.T, dir, diff string) *Model {
+	t.Helper()
+	cfg := config.Default()
+	cfg.DiffOutputDir = dir
+	m := loadItems(t, sizedModelCfg(t, cfg), nil)
+	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{{Revision: "50"}, {Revision: "49"}}})
+	m = next.(*Model)
+	m, _ = pressRune(t, m, '3')
+	return drillInto(t, m, diff)
+}
+
+func TestSaveDiffWritesTheRangeOnScreen(t *testing.T) {
+	dir := t.TempDir()
+	m := drilledSaveModel(t, dir, treePatch)
+
+	m, msg := saveDiffKey(t, m, "")
+	saved, ok := msg.(diffSavedMsg)
+	if !ok {
+		t.Fatalf("expected a diffSavedMsg, got %T", msg)
+	}
+	if saved.err != nil {
+		t.Fatalf("save failed: %v", saved.err)
+	}
+	if want := filepath.Join(dir, "r49-r50.diff"); saved.path != want {
+		t.Errorf("saved to %q, want %q", saved.path, want)
+	}
+	body, err := os.ReadFile(saved.path)
+	if err != nil {
+		t.Fatalf("read saved diff: %v", err)
+	}
+	if string(body) != treePatch {
+		t.Errorf("saved diff = %q, want the whole range verbatim", body)
+	}
+
+	// Nothing was asked of svn: the patch was already in hand, and a range can be
+	// expensive enough that reproducing it purely to save it is not worth it.
+	if logged := m.cmdLog.snapshot(); len(logged) != 0 {
+		t.Errorf("saving a range should run no svn command, got %+v", logged)
+	}
+}
+
+func TestSaveDiffWritesOnePartOfTheRange(t *testing.T) {
+	dir := t.TempDir()
+	m := drilledSaveModel(t, dir, treePatch)
+	m.revFiles.SetIndex(indexOfNodePath(t, m, "src/a.go"))
+	m.updateMain()
+
+	_, msg := saveDiffKey(t, m, "")
+	saved := msg.(diffSavedMsg)
+	if saved.err != nil {
+		t.Fatalf("save failed: %v", saved.err)
+	}
+	// The default name carries the range and the path within it, separators
+	// folded so nested targets stay distinct in one flat directory.
+	if want := filepath.Join(dir, "r49-r50-src-a.go.diff"); saved.path != want {
+		t.Errorf("saved to %q, want %q", saved.path, want)
+	}
+	body, err := os.ReadFile(saved.path)
+	if err != nil {
+		t.Fatalf("read saved diff: %v", err)
+	}
+	if got := string(body); !strings.Contains(got, "+alpha") || strings.Contains(got, "+new") {
+		t.Errorf("saved diff = %q, want only the selected file's section", got)
+	}
+	if !strings.HasSuffix(string(body), "\n") {
+		t.Error("a saved patch should end with a newline")
+	}
+}
+
+func TestSaveDiffRefusesAFailedRange(t *testing.T) {
+	m := drilledModel(t, treePatch)
+	// Replace the cached patch with a failure, as a refused range would leave.
+	m.session.PutRevDiff(m.revDiff, revDiffEntry{text: "Unable to load diff: E160013", failed: true})
+
+	m, msg := saveDiffKey(t, m, "")
+	if msg != nil {
+		t.Fatalf("a failure notice is not a patch to write, got %v", msg)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "no diff to save") {
+		t.Errorf("expected a refusal, got:\n%s", view)
+	}
+}
+
+// A range names files as they were, which the working copy need no longer hold,
+// so there is nothing here for the editor to open. The Files panel is left
+// holding a real file, which is exactly what e falls through to when the
+// revision tree does not stop it.
+func TestEditorIsInertInTheRevisionTree(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{{Path: "live.go", State: svn.StateModified}})
+	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{{Revision: "50"}, {Revision: "49"}}})
+	m = next.(*Model)
+	m, _ = pressRune(t, m, '3')
+	m = drillInto(t, m, treePatch)
+	m.revFiles.SetIndex(indexOfNodePath(t, m, "src/a.go"))
+	m.updateMain()
+
+	if path, _, _, ok := m.editTarget(); ok {
+		t.Errorf("the revision tree named %q to edit, want nothing", path)
+	}
+	m, cmd := pressRune(t, m, 'e')
+	if cmd != nil {
+		t.Error("e should not launch an editor from the revision tree")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "no file to open here") {
+		t.Errorf("expected e to say there is nothing to open, got:\n%s", view)
+	}
+}
+
 func TestColorizeDiff(t *testing.T) {
 	// Emit ANSI so the styling is observable, then restore the Ascii profile the
 	// rest of the suite relies on.

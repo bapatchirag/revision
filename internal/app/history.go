@@ -139,7 +139,7 @@ func (m *Model) prevLogPage() tea.Cmd {
 func (m *Model) logFooter() string {
 	if m.inRevDrill() {
 		index, shown := fileLeafStats(m.revFiles.Items(), m.revFiles.Index())
-		return countLabel(index, shown, shown)
+		return countLabel(index, shown, len(m.revPatch))
 	}
 	label := countLabel(m.log.Index()+1, len(m.log.Items()), len(m.logEntries))
 	if label == "" {
@@ -234,6 +234,10 @@ func (m *Model) showPickedDiff() tea.Cmd {
 	m.revDiff = r
 	m.revPatch = nil
 	m.revCollapsed = map[string]bool{}
+	// Cleared before the push, so the revisions underneath come back unfiltered
+	// and the tree opens on everything the range touched.
+	m.logFilterHeld = m.filters[panelLog]
+	m.setFilter(panelLog, "")
 	m.rebuildRevFiles()
 	push := m.logViews.PushTitled(r.label(), m.revFiles)
 	m.syncMainTitle()
@@ -247,6 +251,12 @@ func (m *Model) showPickedDiff() tea.Cmd {
 // the keys that act on them do nothing.
 func (m *Model) inRevDrill() bool { return m.logViews.Depth() > 0 }
 
+// showingRevDiff reports whether the screen is given over to a range of history:
+// the Log panel drilled into one, with Main following it. It is what the keys
+// that act on the working copy test, since neither the rows nor the patch on
+// screen describe the state they would change.
+func (m *Model) showingRevDiff() bool { return m.source == sourceLog && m.inRevDrill() }
+
 // closeRevDiff drops everything the drill produced. The container pops the view
 // itself and reports it, so this is the reply to that rather than the way out.
 func (m *Model) closeRevDiff() {
@@ -254,18 +264,46 @@ func (m *Model) closeRevDiff() {
 	m.revPatch = nil
 	m.revCollapsed = map[string]bool{}
 	m.revFiles.SetItems(nil)
+	// The container has already popped, so this lands on the revisions again.
+	m.setFilter(panelLog, m.logFilterHeld)
+	m.logFilterHeld = ""
 	m.syncMainTitle()
 	m.updateBar()
 	m.updateMain()
 }
 
 // rebuildRevFiles re-flattens the range's patch into the drilled-in tree,
-// honoring its own per-directory fold state and keeping the cursor on the same
-// path across the rebuild.
+// narrowed by the Log-panel filter, honoring its own per-directory fold state
+// and keeping the cursor on the same path across the rebuild.
 func (m *Model) rebuildRevFiles() {
 	path := selectedNodePath(m.revFiles)
-	m.revFiles.SetItems(buildPathTree(m.revPatch, revFilePath, m.revCollapsed))
+	m.revFiles.SetItems(buildPathTree(m.filteredRevPatch(), revFilePath, m.revCollapsed))
 	selectNodePath(m.revFiles, path)
+}
+
+// filteredRevPatch returns the sections of the range's patch the tree should
+// show: those matching the Log-panel filter, or all of them when none is set.
+func (m *Model) filteredRevPatch() []patchFile {
+	q := parseFilter(m.filters[panelLog], revFileFilterKeys)
+	if q.empty() {
+		return m.revPatch
+	}
+	out := make([]patchFile, 0, len(m.revPatch))
+	for _, f := range m.revPatch {
+		if matchPatchFile(f, q) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// matchPatchFile reports whether one file of a range's patch satisfies the
+// filter: its state where one was asked for, and its path against the free text.
+func matchPatchFile(f patchFile, q filterQuery) bool {
+	if v, ok := q.params["state"]; ok && !stateMatches(f.State, v) {
+		return false
+	}
+	return q.text == "" || containsFold(f.Path, q.text)
 }
 
 // applyRevPatch cuts a loaded range diff into per-file sections and fills the

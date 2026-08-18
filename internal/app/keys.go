@@ -273,6 +273,11 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		}
 		return nil, false
 	case "u":
+		// Nothing on screen describes the working copy while a range of history is
+		// being read, so there is no update to be asked for from here.
+		if m.showingRevDiff() {
+			return nil, false
+		}
 		return m.requestUpdate(), true
 	case "D":
 		return m.toggleDirDiff(), true

@@ -236,7 +236,7 @@
       "w"
     ],
     "context": "Main",
-    "description": "Open the diff on screen side by side in an overlay, or save it to a file in `diffOutputDir`."
+    "description": "Open the diff on screen side by side in an overlay, or save it to a file in `diffOutputDir`. `w` saves a range of history too, down to the single file the drilled-in tree points at; that patch has already been read, so it is written as it stands rather than asked of svn a second time."
   },
   {
     "section": "View",

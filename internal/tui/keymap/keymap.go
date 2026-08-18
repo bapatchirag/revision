@@ -244,7 +244,7 @@ func HelpSections() []Section {
 			},
 			{
 				Action: "Side-by-side / save", Keys: []string{"s", "w"}, Context: "Main",
-				Description: "Open the diff on screen side by side in an overlay, or save it to a file in `diffOutputDir`.",
+				Description: "Open the diff on screen side by side in an overlay, or save it to a file in `diffOutputDir`. `w` saves a range of history too, down to the single file the drilled-in tree points at; that patch has already been read, so it is written as it stands rather than asked of svn a second time.",
 			},
 			{
 				Action: "Pick revisions", Keys: []string{"v"}, Context: "Log",

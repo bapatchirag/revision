@@ -500,6 +500,13 @@ func saveDiffCmd(client *svn.Client, paths []string, dir, name string) tea.Cmd {
 	}
 }
 
+// writeDiffCmd writes a patch already in hand into dir as name, off the UI
+// goroutine. Unlike saveDiffCmd it runs no svn command, so nothing about it
+// reaches the command log — there is no invocation behind it to report.
+func writeDiffCmd(diff, dir, name string) tea.Cmd {
+	return func() tea.Msg { return writeDiff(dir, name, diff) }
+}
+
 // loadSavedDiffsCmd lists the patch files already saved in dir, off the UI
 // goroutine, for the Diffs view to browse.
 func loadSavedDiffsCmd(dir string, gen uint64) tea.Cmd {

@@ -454,7 +454,13 @@ func pressEsc(t *testing.T, m *Model) *Model {
 // Log panel is showing the tree of files the range touched.
 func drilledModel(t *testing.T, diff string) *Model {
 	t.Helper()
-	m := logPagedModel(t)
+	return drillInto(t, logPagedModel(t), diff)
+}
+
+// drillInto picks r50 and r49 on a model whose Log panel is loaded and focused,
+// then lands diff as their comparison.
+func drillInto(t *testing.T, m *Model, diff string) *Model {
+	t.Helper()
 	m.logPicks = []string{"50", "49"}
 	m, _ = pressEnter(t, m)
 	next, _ := m.Update(revDiffLoadedMsg{rng: m.revDiff, diff: diff, gen: m.gens.revDiff.gen})
@@ -662,6 +668,34 @@ func TestRangeDiffIsDroppedWithTheSource(t *testing.T) {
 	}
 }
 
+// The tree lists files as a range of history left them, not as the working copy
+// holds them now, so nothing that would act on a working-copy file may fire from
+// it. w is the exception and is covered in the save tests.
+func TestMutatingKeysAreInertInTheRevisionTree(t *testing.T) {
+	m := drilledModel(t, treePatch)
+	m.revFiles.SetIndex(indexOfNodePath(t, m, "src/a.go"))
+
+	for _, k := range []rune{'c', 'r', 'd', 'm', 'n', 's', 'e', 'u', ' '} {
+		m, _ = pressRune(t, m, k)
+		switch {
+		case m.editing:
+			t.Fatalf("%q opened the commit editor", k)
+		case m.naming:
+			t.Fatalf("%q opened the changelist prompt", k)
+		case m.savingDiff:
+			t.Fatalf("%q opened the save prompt", k)
+		case m.pending != nil:
+			t.Fatalf("%q queued an action on the working copy", k)
+		case m.splitting:
+			t.Fatalf("%q opened the side-by-side overlay", k)
+		case m.merging:
+			t.Fatalf("%q opened the resolution overlay", k)
+		case !m.inRevDrill():
+			t.Fatalf("%q left the drill", k)
+		}
+	}
+}
+
 // treePatch touches two directories and the top level, so the tree has something
 // to fold and a directory row has more than one file beneath it.
 const treePatch = `Index: readme.md
@@ -764,6 +798,69 @@ func hasNodePath(m *Model, path string) bool {
 		}
 	}
 	return false
+}
+
+// The panel shows the range's files while drilled, so that is what the filter
+// has to narrow — not the revisions hidden behind them.
+func TestFilterNarrowsTheDrilledTree(t *testing.T) {
+	m := drilledModel(t, treePatch)
+
+	// The input names what it is about to filter, which is no longer revisions.
+	m, _ = pressRune(t, m, '/')
+	if got := stripANSI(m.searchBar.View()); !strings.Contains(got, "filter files") || strings.Contains(got, "user:") {
+		t.Errorf("filter input reads %q, want it offering what a file row carries", got)
+	}
+	m = pressEsc(t, m)
+
+	m.setFilter(panelLog, "a.go")
+	if !hasNodePath(m, "src/a.go") {
+		t.Errorf("the matching file should stay, got %+v", m.revFiles.Items())
+	}
+	if hasNodePath(m, "readme.md") || hasNodePath(m, "src/b.go") {
+		t.Errorf("everything else should be narrowed away, got %+v", m.revFiles.Items())
+	}
+	// The revisions behind the tree are left alone.
+	if len(m.log.Items()) != 2 {
+		t.Errorf("log rows = %d, want the revisions untouched by a filter meant for the tree", len(m.log.Items()))
+	}
+	// The footer counts what is shown against everything the range touched.
+	m.revFiles.SetIndex(indexOfNodePath(t, m, "src/a.go"))
+	if got := m.logFooter(); got != "1 of 1 (3)" {
+		t.Errorf("footer = %q, want the hidden files counted", got)
+	}
+
+	// The state the diff reported is filterable too. Spelled out rather than as
+	// "D", which stateMatches also reads as a substring of "added".
+	m.setFilter(panelLog, "state:deleted")
+	if !hasNodePath(m, "src/b.go") {
+		t.Errorf("the deleted file should stay, got %+v", m.revFiles.Items())
+	}
+	if hasNodePath(m, "src/a.go") || hasNodePath(m, "readme.md") {
+		t.Errorf("only the deleted file should stay, got %+v", m.revFiles.Items())
+	}
+}
+
+// The two filters are written in different terms — authors and dates against
+// paths and states — so neither may be left standing over the other.
+func TestDrillHandsTheFilterOverAndBack(t *testing.T) {
+	m := logPagedModel(t)
+	m.setFilter(panelLog, "user:alice")
+
+	m = drillInto(t, m, treePatch)
+	if got := m.filters[panelLog]; got != "" {
+		t.Errorf("filter = %q, want the revisions' own filter set aside on the way in", got)
+	}
+	if !hasNodePath(m, "readme.md") {
+		t.Error("the tree should open on everything the range touched")
+	}
+
+	m = pressEsc(t, m)
+	if got := m.filters[panelLog]; got != "user:alice" {
+		t.Errorf("filter = %q, want it given back to the revisions", got)
+	}
+	if items := m.log.Items(); len(items) != 1 || items[0].Revision != "50" {
+		t.Errorf("log rows = %+v, want the restored filter applied", items)
+	}
 }
 
 // indexOfNodePath finds the drilled tree row for a path, so a test can move the

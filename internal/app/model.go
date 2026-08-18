@@ -103,6 +103,11 @@ type Model struct {
 	// that tree's own per-directory fold state.
 	revPatch     []patchFile
 	revCollapsed map[string]bool
+	// logFilterHeld is the filter the revisions were under, set aside while the
+	// panel shows a range's files instead. The two are written in different terms
+	// — authors and dates against paths and states — so neither can be left
+	// standing over the other.
+	logFilterHeld string
 	// headRev is the repository's newest revision, read at startup and refreshed
 	// whenever the first page of history lands.
 	headRev    string

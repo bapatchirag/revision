@@ -54,7 +54,7 @@ func (m *Model) panelHints(p int) []string {
 		return m.filesHints()
 	case panelLog:
 		if m.inRevDrill() {
-			return []string{"diff " + m.revDiff.label(), "enter expand", "w save", "esc back"}
+			return []string{"diff " + m.revDiff.label(), "enter expand", "w save", "/ filter", "esc back"}
 		}
 		hints := []string{"v pick", "space update to rev", "n/p page", "/ filter"}
 		if len(m.logPicks) > 0 {
