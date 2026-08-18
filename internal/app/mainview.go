@@ -83,7 +83,8 @@ func (m *Model) mainSelectionKey() string {
 		return "status"
 	case sourceLog:
 		if m.revDiff.set() {
-			return "revdiff:" + m.revDiff.from + ":" + m.revDiff.to
+			n, _ := m.revFiles.Selected()
+			return "revdiff:" + m.revDiff.from + ":" + m.revDiff.to + ":" + n.Path
 		}
 		e, _ := m.log.Selected()
 		return "log:" + e.Revision
@@ -263,24 +264,51 @@ func (m *Model) fileDetail() string {
 // worth pointing at.
 func (m *Model) revDiffShowsDiff() bool {
 	e, ok := m.session.RevDiff(m.revDiff)
-	return ok && !e.failed && strings.TrimSpace(e.text) != ""
+	return ok && !e.failed && strings.TrimSpace(m.revPatchUnderCursor(e.text)) != ""
+}
+
+// revPatchUnderCursor is the part of the range's diff the drilled-in tree points
+// at: one file's section, every section beneath a directory, or — at the "/"
+// root — the whole patch, which is also what is shown before the tree has been
+// moved off it.
+func (m *Model) revPatchUnderCursor(whole string) string {
+	n, ok := m.revFiles.Selected()
+	if !ok || n.Path == fileTreeRoot {
+		return whole
+	}
+	if n.Item != nil {
+		return n.Item.Text
+	}
+	var parts []string
+	prefix := n.Path + "/"
+	for _, f := range m.revPatch {
+		if strings.HasPrefix(f.Path, prefix) {
+			parts = append(parts, f.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 // revDiffDetail renders the diff over a range of history, headed by the range it
-// covers so what is being compared stays on screen while the patch scrolls.
+// covers and the path being read within it, so what is being compared stays on
+// screen while the patch scrolls.
 func (m *Model) revDiffDetail() string {
-	head := []string{m.revDiff.label(), ""}
 	e, ok := m.session.RevDiff(m.revDiff)
 	switch {
 	case !ok:
-		return strings.Join(append(head, "Loading diff…"), "\n")
+		return strings.Join([]string{m.revDiff.label(), "", "Loading diff…"}, "\n")
 	case e.failed:
-		return strings.Join(append(head, e.text), "\n")
-	case strings.TrimSpace(e.text) == "":
-		return strings.Join(append(head, "(nothing changed between these revisions)"), "\n")
-	default:
-		return strings.Join(append(head, m.colorize(e.text)), "\n")
+		return strings.Join([]string{m.revDiff.label(), "", e.text}, "\n")
 	}
+	head := m.revDiff.label()
+	if n, sel := m.revFiles.Selected(); sel && n.Path != fileTreeRoot {
+		head += " · " + n.Path
+	}
+	text := m.revPatchUnderCursor(e.text)
+	if strings.TrimSpace(text) == "" {
+		return strings.Join([]string{head, "", "(nothing changed between these revisions)"}, "\n")
+	}
+	return strings.Join([]string{head, "", m.colorize(text)}, "\n")
 }
 
 // logDetail renders the metadata, message and changed paths of the selected

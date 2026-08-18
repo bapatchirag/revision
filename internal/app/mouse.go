@@ -130,6 +130,9 @@ func (m *Model) doubleClick(panel int) tea.Cmd {
 	case panelFiles:
 		return m.activateFilesRow()
 	case panelLog:
+		if m.inRevDrill() {
+			return nil
+		}
 		return m.requestUpdateToRevision()
 	case panelMain:
 		// Main carries a line cursor only while it holds a diff, which is the only

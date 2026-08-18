@@ -102,6 +102,9 @@ func (m *Model) loadEvent(msg tea.Msg) (tea.Cmd, bool) {
 			e.text, e.failed = "Unable to load diff: "+msg.err.Error(), true
 		}
 		m.session.PutRevDiff(msg.rng, e)
+		if !e.failed {
+			m.applyRevPatch(e.text)
+		}
 		if m.source == sourceLog {
 			m.updateMain()
 		}

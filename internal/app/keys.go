@@ -170,13 +170,14 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	case key.Matches(k, m.keys.OpenEditor):
 		return m.openInEditor(), true
 	case key.Matches(k, m.keys.Back):
-		// esc unwinds the Log panel a step at a time — the filter, then the diff on
-		// Main, then the revisions held for it — and is otherwise left for the panel
+		// esc unwinds the Log panel a step at a time: the filter, then the drill into
+		// a range's files — which the container pops itself, so it is left to do so —
+		// and then the revisions held for it. It is otherwise left for the panel
 		// (e.g. to pop a changelist drill).
 		if cmd, cleared := m.clearFocusedFilter(); cleared {
 			return cmd, true
 		}
-		if m.focus.Index() == panelLog && (m.closeRevDiff() || m.clearLogPicks()) {
+		if m.focus.Index() == panelLog && !m.inRevDrill() && m.clearLogPicks() {
 			return nil, true
 		}
 		return nil, false
@@ -202,6 +203,9 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		case panelFiles:
 			return m.stageSelected(), true
 		case panelLog:
+			if m.inRevDrill() {
+				return nil, false
+			}
 			return m.requestUpdateToRevision(), true
 		}
 		return nil, false
@@ -214,6 +218,9 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 			return m.assignChangelist(), true
 		}
 		if m.focus.Index() == panelLog {
+			if m.inRevDrill() {
+				return nil, false
+			}
 			return m.nextLogPage(), true
 		}
 		return nil, false
@@ -224,6 +231,9 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 			return m.requestApplyPatch(), true
 		}
 		if m.focus.Index() == panelLog {
+			if m.inRevDrill() {
+				return nil, false
+			}
 			return m.prevLogPage(), true
 		}
 		return nil, false
@@ -234,7 +244,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		}
 		return nil, false
 	case "v":
-		if m.focus.Index() == panelLog {
+		if m.focus.Index() == panelLog && !m.inRevDrill() {
 			return m.toggleLogPick(), true
 		}
 		return nil, false

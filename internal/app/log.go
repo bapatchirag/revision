@@ -59,3 +59,39 @@ func firstLine(s string) string {
 	}
 	return s
 }
+
+// revFileNode is one visible row in the tree of files a range of history
+// touched: a directory (Item == nil) or a file leaf carrying its section of the
+// diff.
+type revFileNode = pathRow[patchFile]
+
+// revFilePath is the key a patched file is placed in the tree by. The diff is
+// produced for the directory the display scope roots the views at, so the paths
+// svn reports are already relative to it and the tree hangs off the same "/" as
+// the working copy's.
+func revFilePath(f patchFile) string { return f.Path }
+
+// renderRevFileNode adapts a tree row for the reusable List, matching the
+// Changes tree row for row: directories show a chevron and the segment name,
+// leaves the same blank marker slot, a status code and the file name. The code
+// is read from the diff itself, so it says what the range did to the file rather
+// than what the working copy holds now.
+func renderRevFileNode(th theme.Theme) func(revFileNode) string {
+	return func(n revFileNode) string {
+		indent := strings.Repeat("  ", n.Depth)
+		if n.Item == nil {
+			chevron := "▾"
+			if n.Collapsed {
+				chevron = "▸"
+			}
+			marker := lipgloss.NewStyle().Foreground(th.Muted).Render(chevron)
+			name := lipgloss.NewStyle().Foreground(th.Info).Bold(true).Render(dirLabel(n))
+			return indent + marker + " " + name
+		}
+		code := lipgloss.NewStyle().
+			Foreground(stateColor(th, n.Item.State)).
+			Bold(true).
+			Render(n.Item.State.Code())
+		return indent + "  " + code + " " + n.Name
+	}
+}

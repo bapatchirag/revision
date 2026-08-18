@@ -133,8 +133,14 @@ func (m *Model) prevLogPage() tea.Cmd {
 }
 
 // logFooter is the Log panel's position indicator: where the cursor sits within
-// the page, how many revisions the page holds, and the page number.
+// the page, how many revisions the page holds, and the page number. Drilled into
+// a range's files it counts those instead, since the page behind them is not
+// what is being read.
 func (m *Model) logFooter() string {
+	if m.inRevDrill() {
+		index, shown := fileLeafStats(m.revFiles.Items(), m.revFiles.Index())
+		return countLabel(index, shown, shown)
+	}
 	label := countLabel(m.log.Index()+1, len(m.log.Items()), len(m.logEntries))
 	if label == "" {
 		return ""
@@ -148,9 +154,6 @@ const logPickMax = 2
 // toggleLogPick picks the highlighted revision to be diffed, or unpicks it when
 // it is already held. A third pick drops the one picked first, so a second end
 // can be moved around without unpicking it each time.
-//
-// Any diff on screen was computed from the picks as they stood, so it comes down
-// with the change: what Main shows always answers to what is held.
 func (m *Model) toggleLogPick() tea.Cmd {
 	e, ok := m.log.Selected()
 	if !ok || e.Revision == "" {
@@ -164,9 +167,7 @@ func (m *Model) toggleLogPick() tea.Cmd {
 			m.logPicks = m.logPicks[len(m.logPicks)-logPickMax:]
 		}
 	}
-	m.revDiff = revRange{}
 	m.updateBar()
-	m.updateMain()
 	return nil
 }
 
@@ -181,19 +182,6 @@ func (m *Model) clearLogPicks() bool {
 	}
 	m.logPicks = nil
 	m.updateBar()
-	return true
-}
-
-// closeRevDiff takes the range diff off Main, reporting whether one was up. esc
-// unwinds a step at a time, so the picks behind it stay held for another look.
-func (m *Model) closeRevDiff() bool {
-	if !m.revDiff.set() {
-		return false
-	}
-	m.revDiff = revRange{}
-	m.syncMainTitle()
-	m.updateBar()
-	m.updateMain()
 	return true
 }
 
@@ -231,9 +219,12 @@ func revLess(a, b string) bool {
 // ends are.
 const revDiffWarnSpan = 500
 
-// showPickedDiff puts the diff of the held revisions on Main. Nothing held is
-// not an error worth a modal — the key is simply early — so it says what to
-// press instead.
+// showPickedDiff drills the Log panel into the files the held revisions touched
+// and puts their diff on Main. Nothing held is not an error worth a modal — the
+// key is simply early — so it says what to press instead.
+//
+// The tree is empty until the diff lands, since the patch is the only account of
+// what the range touched; Main reports the wait meanwhile.
 func (m *Model) showPickedDiff() tea.Cmd {
 	r, ok := m.pickedRange()
 	if !ok {
@@ -241,17 +232,75 @@ func (m *Model) showPickedDiff() tea.Cmd {
 		return nil
 	}
 	m.revDiff = r
+	m.revPatch = nil
+	m.revCollapsed = map[string]bool{}
+	m.rebuildRevFiles()
+	push := m.logViews.PushTitled(r.label(), m.revFiles)
 	m.syncMainTitle()
 	m.updateBar()
 	m.updateMain()
-	return m.loadRevDiff(r)
+	return tea.Batch(push, m.loadRevDiff(r))
+}
+
+// inRevDrill reports whether the Log panel is drilled into the files a range of
+// history touched, in which case the revisions underneath are out of reach and
+// the keys that act on them do nothing.
+func (m *Model) inRevDrill() bool { return m.logViews.Depth() > 0 }
+
+// closeRevDiff drops everything the drill produced. The container pops the view
+// itself and reports it, so this is the reply to that rather than the way out.
+func (m *Model) closeRevDiff() {
+	m.revDiff = revRange{}
+	m.revPatch = nil
+	m.revCollapsed = map[string]bool{}
+	m.revFiles.SetItems(nil)
+	m.syncMainTitle()
+	m.updateBar()
+	m.updateMain()
+}
+
+// rebuildRevFiles re-flattens the range's patch into the drilled-in tree,
+// honoring its own per-directory fold state and keeping the cursor on the same
+// path across the rebuild.
+func (m *Model) rebuildRevFiles() {
+	path := selectedNodePath(m.revFiles)
+	m.revFiles.SetItems(buildPathTree(m.revPatch, revFilePath, m.revCollapsed))
+	selectNodePath(m.revFiles, path)
+}
+
+// applyRevPatch cuts a loaded range diff into per-file sections and fills the
+// tree from them, opening on the root so Main starts on the whole patch.
+func (m *Model) applyRevPatch(diff string) {
+	m.revPatch = splitPatchByFile(diff)
+	m.rebuildRevFiles()
+	m.revFiles.SetIndex(0)
+}
+
+// toggleRevCollapse expands or collapses the directory under the drilled-in
+// tree's cursor. It is inert on a file leaf.
+func (m *Model) toggleRevCollapse() tea.Cmd {
+	n, ok := m.revFiles.Selected()
+	if !ok || n.Item != nil {
+		return nil
+	}
+	if m.revCollapsed[n.Path] {
+		delete(m.revCollapsed, n.Path)
+	} else {
+		m.revCollapsed[n.Path] = true
+	}
+	m.rebuildRevFiles()
+	m.updateMain()
+	return nil
 }
 
 // loadRevDiff fetches a range's diff unless the session already holds it.
 // Revisions are immutable, so one read stays good and looking at a comparison
 // again costs no command.
 func (m *Model) loadRevDiff(r revRange) tea.Cmd {
-	if _, held := m.session.RevDiff(r); held {
+	if e, held := m.session.RevDiff(r); held {
+		if !e.failed {
+			m.applyRevPatch(e.text)
+		}
 		return nil
 	}
 	if span := revSpan(r); span > revDiffWarnSpan {

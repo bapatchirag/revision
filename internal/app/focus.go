@@ -41,6 +41,10 @@ func (m *Model) handleSelection(sel uimsg.SelectedMsg) tea.Cmd {
 			m.updateMain()
 			return m.revisionDetailForSelection()
 		}
+	case revFilesListID:
+		if m.source == sourceLog {
+			m.updateMain()
+		}
 	}
 	return nil
 }

@@ -254,7 +254,7 @@
       "enter"
     ],
     "context": "Log",
-    "description": "Diff whatever is picked. One revision on its own is compared with the one before it, so what that commit changed is what you see. Two are compared with each other as they stand: the diff runs from the older to the newer, which is the state at one against the state at the other rather than the sum of the commits between them — the older revision's own change is already on the left-hand side and is not part of it. The diff covers the directory `displayFrom` roots the views at, and stays up while you move around the log; `esc` closes it, leaving the picks held for another look."
+    "description": "Diff whatever is picked, and open the files it touched as a tree in place of the revisions. One revision on its own is compared with the one before it, so what that commit changed is what you see. Two are compared with each other as they stand: the diff runs from the older to the newer, which is the state at one against the state at the other rather than the sum of the commits between them — the older revision's own change is already on the left-hand side and is not part of it. The tree reads like the Changes view: a file shows its own patch, a directory everything beneath it, and `enter` folds a directory away. It covers the directory `displayFrom` roots the views at. `esc` comes back out to the revisions, leaving the picks held for another look."
   },
   {
     "section": "View",

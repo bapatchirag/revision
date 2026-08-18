@@ -437,6 +437,30 @@ func pressEnter(t *testing.T, m *Model) (*Model, tea.Cmd) {
 	return next.(*Model), cmd
 }
 
+// pressEsc unwinds a step. A drilled-in view is popped by the container, which
+// reports it as a message the model then acts on, so both steps are taken here.
+func pressEsc(t *testing.T, m *Model) *Model {
+	t.Helper()
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*Model)
+	if cmd == nil {
+		return m
+	}
+	next, _ = m.Update(cmd())
+	return next.(*Model)
+}
+
+// drilledModel picks two revisions, opens their diff and lands the patch, so the
+// Log panel is showing the tree of files the range touched.
+func drilledModel(t *testing.T, diff string) *Model {
+	t.Helper()
+	m := logPagedModel(t)
+	m.logPicks = []string{"50", "49"}
+	m, _ = pressEnter(t, m)
+	next, _ := m.Update(revDiffLoadedMsg{rng: m.revDiff, diff: diff, gen: m.gens.revDiff.gen})
+	return next.(*Model)
+}
+
 func TestPickedRangeIsOrderedLowestFirst(t *testing.T) {
 	m := logPagedModel(t)
 
@@ -524,49 +548,51 @@ func TestRangeDiffSurvivesTheCursorAndThePage(t *testing.T) {
 }
 
 func TestEscUnwindsTheDiffThenThePicks(t *testing.T) {
-	m := logPagedModel(t)
-	m.logPicks = []string{"50", "49"}
-	m, _ = pressEnter(t, m)
+	m := drilledModel(t, "Index: a.go\n@@ -1 +1 @@\n+new")
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m = next.(*Model)
-	if m.revDiff.set() {
-		t.Fatal("the first esc should take the diff off Main")
+	m = pressEsc(t, m)
+	if m.inRevDrill() || m.revDiff.set() {
+		t.Fatal("the first esc should come back out of the drill")
 	}
 	if len(m.logPicks) != 2 {
 		t.Fatalf("picks = %q, want them still held for another look", m.logPicks)
 	}
 
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m = next.(*Model)
+	m = pressEsc(t, m)
 	if len(m.logPicks) != 0 {
 		t.Errorf("picks = %q, want the second esc to let them go", m.logPicks)
 	}
 }
 
-// What Main shows must always answer to what is held, so changing the picks
-// takes a diff computed from the old ones down.
-func TestPickingAgainClosesTheDiff(t *testing.T) {
-	m := logPagedModel(t)
-	m.logPicks = []string{"50", "49"}
-	m, _ = pressEnter(t, m)
+// The revisions are out of reach behind the tree, so the keys that act on them
+// must do nothing rather than act on whichever row the hidden table left under
+// its cursor.
+func TestRevisionKeysAreInertWhileDrilled(t *testing.T) {
+	m := drilledModel(t, "Index: a.go\n@@ -1 +1 @@\n+new")
+	picks, page := len(m.logPicks), m.logPage
 
-	m, _ = pressRune(t, m, 'v')
-	if m.revDiff.set() {
-		t.Error("picking again should take the stale diff off Main")
+	for _, k := range []rune{'v', 'n', 'p', ' '} {
+		m, _ = pressRune(t, m, k)
+	}
+	if len(m.logPicks) != picks {
+		t.Errorf("picks = %q, want v inert while drilled", m.logPicks)
+	}
+	if m.logPage != page {
+		t.Errorf("page = %d, want n/p inert while drilled", m.logPage)
+	}
+	if m.pending != nil {
+		t.Error("space should not offer to update the working copy while drilled")
+	}
+	if !m.inRevDrill() {
+		t.Error("none of those keys should have left the drill")
 	}
 }
 
 func TestRangeDiffIsServedFromTheSession(t *testing.T) {
-	m := logPagedModel(t)
-	m.logPicks = []string{"50", "49"}
-	m, _ = pressEnter(t, m)
-	next, _ := m.Update(revDiffLoadedMsg{rng: m.revDiff, diff: "Index: a.go\n@@ -1 +1 @@\n+new", gen: m.gens.revDiff.gen})
-	m = next.(*Model)
+	m := drilledModel(t, "Index: a.go\n@@ -1 +1 @@\n+new")
 
 	// Revisions are immutable, so looking at the same comparison again is free.
-	m, _ = pressRune(t, m, 'v')
-	m.logPicks = []string{"50", "49"}
+	m = pressEsc(t, m)
 	m, cmd := pressEnter(t, m)
 	if cmd != nil {
 		t.Error("a comparison already read should cost no command")
@@ -583,7 +609,7 @@ func TestSupersededRangeDiffIsDropped(t *testing.T) {
 	stale := m.gens.revDiff.gen
 
 	// A second comparison supersedes the first, whose reply must not land.
-	m, _ = pressRune(t, m, 'v')
+	m = pressEsc(t, m)
 	m.logPicks = []string{"50"}
 	m, _ = pressEnter(t, m)
 
@@ -631,6 +657,126 @@ func TestRangeDiffIsDroppedWithTheSource(t *testing.T) {
 	if m.revDiff.set() {
 		t.Error("the range belongs to the tree being left")
 	}
+	if m.inRevDrill() {
+		t.Error("the drill belongs to the tree being left too")
+	}
+}
+
+// treePatch touches two directories and the top level, so the tree has something
+// to fold and a directory row has more than one file beneath it.
+const treePatch = `Index: readme.md
+===================================================================
+--- readme.md	(revision 49)
++++ readme.md	(revision 50)
+@@ -1 +1 @@
+-old
++new
+Index: src/a.go
+===================================================================
+--- src/a.go	(nonexistent)
++++ src/a.go	(revision 50)
+@@ -0,0 +1 @@
++alpha
+Index: src/b.go
+===================================================================
+--- src/b.go	(revision 49)
++++ src/b.go	(nonexistent)
+@@ -1 +0,0 @@
+-beta
+`
+
+func TestEnterDrillsIntoTheFilesTheRangeTouched(t *testing.T) {
+	m := drilledModel(t, treePatch)
+
+	if !m.inRevDrill() {
+		t.Fatal("enter should drill the Log panel into the range's files")
+	}
+	view := stripANSI(m.View())
+	for _, want := range []string{"r49 → r50", "readme.md", "src/", "a.go", "b.go"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the drill should show %q, got:\n%s", want, view)
+		}
+	}
+	// The codes come from the diff, so they say what the range did rather than
+	// what the working copy holds now.
+	if !strings.Contains(view, "A a.go") || !strings.Contains(view, "D b.go") {
+		t.Errorf("expected the add and the delete to be marked, got:\n%s", view)
+	}
+}
+
+func TestDrilledTreeDrivesMain(t *testing.T) {
+	m := drilledModel(t, treePatch)
+
+	// Asserted on Main's content rather than its view: a patch longer than the
+	// viewport is windowed on screen, and what is off the bottom still counts.
+	if main := stripANSI(m.mainText); !strings.Contains(main, "+alpha") || !strings.Contains(main, "+new") {
+		t.Errorf("the root row should show the whole range, got:\n%s", main)
+	}
+
+	// A file row shows its own section and nothing else.
+	m.revFiles.SetIndex(indexOfNodePath(t, m, "readme.md"))
+	m.updateMain()
+	main := stripANSI(m.mainText)
+	if !strings.Contains(main, "+new") || strings.Contains(main, "+alpha") {
+		t.Errorf("a file row should show only its own section, got:\n%s", main)
+	}
+	if !strings.Contains(main, "readme.md") {
+		t.Errorf("the heading should name the path being read, got:\n%s", main)
+	}
+
+	// A directory row concatenates everything beneath it.
+	m.revFiles.SetIndex(indexOfNodePath(t, m, "src"))
+	m.updateMain()
+	main = stripANSI(m.mainText)
+	if !strings.Contains(main, "+alpha") || !strings.Contains(main, "-beta") {
+		t.Errorf("a directory row should span its subtree, got:\n%s", main)
+	}
+	if strings.Contains(main, "+new") {
+		t.Errorf("a directory row should not reach outside itself, got:\n%s", main)
+	}
+}
+
+func TestDrilledTreeFolds(t *testing.T) {
+	m := drilledModel(t, treePatch)
+	m.revFiles.SetIndex(indexOfNodePath(t, m, "src"))
+
+	// Asserted on the rows rather than the screen: Main still shows the folded
+	// directory's patch, which names the very files the tree has put away.
+	m, _ = pressEnter(t, m)
+	if hasNodePath(m, "src/a.go") {
+		t.Errorf("enter on a directory should fold it away, got %+v", m.revFiles.Items())
+	}
+	if !hasNodePath(m, "readme.md") {
+		t.Error("folding one directory should leave the rest of the tree alone")
+	}
+
+	m, _ = pressEnter(t, m)
+	if !hasNodePath(m, "src/a.go") {
+		t.Errorf("enter again should unfold it, got %+v", m.revFiles.Items())
+	}
+}
+
+// hasNodePath reports whether the drilled tree currently shows a row for path.
+func hasNodePath(m *Model, path string) bool {
+	for _, n := range m.revFiles.Items() {
+		if n.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+// indexOfNodePath finds the drilled tree row for a path, so a test can move the
+// cursor by name rather than by a row number the tree shape decides.
+func indexOfNodePath(t *testing.T, m *Model, path string) int {
+	t.Helper()
+	for i, n := range m.revFiles.Items() {
+		if n.Path == path {
+			return i
+		}
+	}
+	t.Fatalf("no row for %q in %+v", path, m.revFiles.Items())
+	return 0
 }
 
 func TestLogPicksAreReportedInTheStatusBar(t *testing.T) {
