@@ -26,6 +26,8 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 			return m.toggleClCollapse(), true
 		case rejectsListID:
 			return m.toggleRejectCollapse(), true
+		case "log":
+			return m.showPickedDiff(), true
 		case updateMenuID:
 			return m.chooseUpdate(msg.Index), true
 		case settingsFormID:

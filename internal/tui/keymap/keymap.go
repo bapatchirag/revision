@@ -251,6 +251,10 @@ func HelpSections() []Section {
 				Description: "Pick the selected revision to be diffed, or unpick it. Two can be held at once, and picking a third drops whichever was picked first, so the far end of a comparison can be moved without unpicking it each time. `esc` lets them go. A pick is held by revision rather than by row, so it survives paging and filtering — the two ends need not be on the same page.",
 			},
 			{
+				Action: "Diff picked revisions", Keys: []string{"enter"}, Context: "Log",
+				Description: "Diff whatever is picked. One revision on its own is compared with the one before it, so what that commit changed is what you see. Two are compared with each other as they stand: the diff runs from the older to the newer, which is the state at one against the state at the other rather than the sum of the commits between them — the older revision's own change is already on the left-hand side and is not part of it. The diff covers the directory `displayFrom` roots the views at, and stays up while you move around the log; `esc` closes it, leaving the picks held for another look.",
+			},
+			{
 				Action: "Dir diff / untracked", Keys: []string{"D", "U"}, Context: "Files",
 				Description: "Toggle the directory-level diff for the highlighted directory, or toggle hiding untracked files.",
 			},

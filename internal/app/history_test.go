@@ -1,6 +1,8 @@
 package app
 
 import (
+	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -418,6 +420,216 @@ func TestCommitIsInertOnTheLogPanel(t *testing.T) {
 	}
 	if toast := stripANSI(m.toast.View()); strings.Contains(toast, "nothing staged") {
 		t.Errorf("c on the Log panel should say nothing at all, got: %s", toast)
+	}
+}
+
+// pressEnter activates the focused component. enter is not consumed by the model
+// itself: the component emits an ActivatedMsg which the model then acts on, so
+// both steps are taken here. The command returned is the one that reply produced.
+func pressEnter(t *testing.T, m *Model) (*Model, tea.Cmd) {
+	t.Helper()
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(*Model)
+	if cmd == nil {
+		return m, nil
+	}
+	next, cmd = m.Update(cmd())
+	return next.(*Model), cmd
+}
+
+func TestPickedRangeIsOrderedLowestFirst(t *testing.T) {
+	m := logPagedModel(t)
+
+	if _, ok := m.pickedRange(); ok {
+		t.Error("no picks should describe no range")
+	}
+
+	// One revision diffs against its own predecessor, which svn spells `-c`.
+	m.logPicks = []string{"50"}
+	if r, _ := m.pickedRange(); r.from != "" || r.to != "50" {
+		t.Errorf("range = %+v, want the single revision r50", r)
+	}
+
+	// Two are ordered by number, so the patch reads forwards either way round.
+	m.logPicks = []string{"50", "42"}
+	r, ok := m.pickedRange()
+	if !ok || r.from != "42" || r.to != "50" {
+		t.Errorf("range = %+v, want r42 to r50", r)
+	}
+	m.logPicks = []string{"42", "50"}
+	if same, _ := m.pickedRange(); same != r {
+		t.Errorf("range = %+v, want the same key whichever end was picked first", same)
+	}
+}
+
+func TestEnterShowsThePickedDiff(t *testing.T) {
+	m := logPagedModel(t)
+	m, _ = pressRune(t, m, 'v')
+	m, _ = pressRune(t, m, 'j')
+	m, _ = pressRune(t, m, 'v')
+
+	m, cmd := pressEnter(t, m)
+	if cmd == nil {
+		t.Fatal("enter should fetch the diff for the picked revisions")
+	}
+	if r := m.revDiff; r.from != "49" || r.to != "50" {
+		t.Fatalf("revDiff = %+v, want r49 to r50", r)
+	}
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "Loading diff") {
+		t.Errorf("Main should report the wait, got:\n%s", main)
+	}
+
+	next, _ := m.Update(revDiffLoadedMsg{rng: m.revDiff, diff: "Index: a.go\n@@ -1 +1 @@\n-old\n+new", gen: m.gens.revDiff.gen})
+	m = next.(*Model)
+	main := stripANSI(m.main.View())
+	if !strings.Contains(main, "r49 → r50") {
+		t.Errorf("Main should head the patch with the range, got:\n%s", main)
+	}
+	if !strings.Contains(main, "+new") {
+		t.Errorf("Main should show the patch, got:\n%s", main)
+	}
+}
+
+func TestEnterWithoutPicksSaysWhatToPress(t *testing.T) {
+	m := logPagedModel(t)
+	m, cmd := pressEnter(t, m)
+	if cmd != nil || m.revDiff.set() {
+		t.Error("enter with nothing picked should not fetch anything")
+	}
+	if toast := stripANSI(m.toast.View()); !strings.Contains(toast, "pick a revision") {
+		t.Errorf("expected a nudge towards v, got: %s", toast)
+	}
+}
+
+// The range is a mode, not a selection: walking the log or turning the page
+// leaves it up, or the second end could never be looked at.
+func TestRangeDiffSurvivesTheCursorAndThePage(t *testing.T) {
+	m := logPagedModel(t)
+	m.logPicks = []string{"50", "49"}
+	m, _ = pressEnter(t, m)
+	next, _ := m.Update(revDiffLoadedMsg{rng: m.revDiff, diff: "Index: a.go\n@@ -1 +1 @@\n+new", gen: m.gens.revDiff.gen})
+	m = next.(*Model)
+
+	m, _ = pressRune(t, m, 'j')
+	if !m.revDiff.set() || !strings.Contains(stripANSI(m.main.View()), "+new") {
+		t.Error("moving the cursor should leave the range diff up")
+	}
+
+	m, _ = pressRune(t, m, 'n')
+	next, _ = m.Update(logLoadedMsg{page: 2, entries: []svn.LogEntry{{Revision: "48"}}})
+	m = next.(*Model)
+	if !m.revDiff.set() || !strings.Contains(stripANSI(m.main.View()), "+new") {
+		t.Error("turning the page should leave the range diff up")
+	}
+}
+
+func TestEscUnwindsTheDiffThenThePicks(t *testing.T) {
+	m := logPagedModel(t)
+	m.logPicks = []string{"50", "49"}
+	m, _ = pressEnter(t, m)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*Model)
+	if m.revDiff.set() {
+		t.Fatal("the first esc should take the diff off Main")
+	}
+	if len(m.logPicks) != 2 {
+		t.Fatalf("picks = %q, want them still held for another look", m.logPicks)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*Model)
+	if len(m.logPicks) != 0 {
+		t.Errorf("picks = %q, want the second esc to let them go", m.logPicks)
+	}
+}
+
+// What Main shows must always answer to what is held, so changing the picks
+// takes a diff computed from the old ones down.
+func TestPickingAgainClosesTheDiff(t *testing.T) {
+	m := logPagedModel(t)
+	m.logPicks = []string{"50", "49"}
+	m, _ = pressEnter(t, m)
+
+	m, _ = pressRune(t, m, 'v')
+	if m.revDiff.set() {
+		t.Error("picking again should take the stale diff off Main")
+	}
+}
+
+func TestRangeDiffIsServedFromTheSession(t *testing.T) {
+	m := logPagedModel(t)
+	m.logPicks = []string{"50", "49"}
+	m, _ = pressEnter(t, m)
+	next, _ := m.Update(revDiffLoadedMsg{rng: m.revDiff, diff: "Index: a.go\n@@ -1 +1 @@\n+new", gen: m.gens.revDiff.gen})
+	m = next.(*Model)
+
+	// Revisions are immutable, so looking at the same comparison again is free.
+	m, _ = pressRune(t, m, 'v')
+	m.logPicks = []string{"50", "49"}
+	m, cmd := pressEnter(t, m)
+	if cmd != nil {
+		t.Error("a comparison already read should cost no command")
+	}
+	if !strings.Contains(stripANSI(m.main.View()), "+new") {
+		t.Error("the cached patch should be on screen at once")
+	}
+}
+
+func TestSupersededRangeDiffIsDropped(t *testing.T) {
+	m := logPagedModel(t)
+	m.logPicks = []string{"50", "49"}
+	m, _ = pressEnter(t, m)
+	stale := m.gens.revDiff.gen
+
+	// A second comparison supersedes the first, whose reply must not land.
+	m, _ = pressRune(t, m, 'v')
+	m.logPicks = []string{"50"}
+	m, _ = pressEnter(t, m)
+
+	next, _ := m.Update(revDiffLoadedMsg{rng: revRange{from: "49", to: "50"}, diff: "Index: stale.go\n+gone", gen: stale})
+	m = next.(*Model)
+	if strings.Contains(stripANSI(m.main.View()), "gone") {
+		t.Error("a superseded diff should never reach the screen")
+	}
+}
+
+func TestRangeDiffReportsAFailure(t *testing.T) {
+	m := logPagedModel(t)
+	m.logPicks = []string{"50"}
+	m, _ = pressEnter(t, m)
+
+	next, _ := m.Update(revDiffLoadedMsg{rng: m.revDiff, err: errors.New("E160013: not found"), gen: m.gens.revDiff.gen})
+	m = next.(*Model)
+	if main := stripANSI(m.main.View()); !strings.Contains(main, "E160013") {
+		t.Errorf("a range svn refused should say so, got:\n%s", main)
+	}
+	if m.revDiffShowsDiff() {
+		t.Error("a failure notice is not a patch to pin a gutter to")
+	}
+}
+
+func TestLargeRangeWarns(t *testing.T) {
+	m := logPagedModel(t)
+	m.logPicks = []string{"1", strconv.Itoa(revDiffWarnSpan + 2)}
+	m, _ = pressEnter(t, m)
+
+	if toast := stripANSI(m.toast.View()); !strings.Contains(toast, "this may take a while") {
+		t.Errorf("a range spanning %d revisions should warn, got: %s", revDiffWarnSpan+1, toast)
+	}
+	if !m.revDiff.set() {
+		t.Error("the warning must not stop the diff: it is a heads-up, not a refusal")
+	}
+}
+
+func TestRangeDiffIsDroppedWithTheSource(t *testing.T) {
+	m := logPagedModel(t)
+	m.logPicks = []string{"50"}
+	m, _ = pressEnter(t, m)
+
+	m.resetForSource()
+	if m.revDiff.set() {
+		t.Error("the range belongs to the tree being left")
 	}
 }
 

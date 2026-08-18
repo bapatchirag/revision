@@ -14,11 +14,11 @@
 │       │  Open file in editor        e    Switch file view       [ / ]│       │
 ╰───────│  Change source path         P    Side-by-side / save    s / w│       │
 ╭─ [3] L│  Switch repository          W    Pick revisions             v│       │
-│  Rev A│  Refresh / settings     R / S    Dir diff / untracked   D / U│───────╯
-│       │  Toggle live refresh        L    Toggle command log         x│───────╮
+│  Rev A│  Refresh / settings     R / S    Diff picked revisions  enter│───────╯
+│       │  Toggle live refresh        L    Dir diff / untracked   D / U│───────╮
+│       │                                  Toggle command log         x│       │
 │       │                                General                       │       │
 │       │                                  Toggle help                ?│       │
 │       │                                  Quit                       q│       │
-│       ╰──────────────────────────────────────────────────────────────╯       │
-╰──────────────────────────────╯╰──────────────────────────────────────────────╯
+╰───────╰──────────────────────────────────────────────────────────────╯───────╯
 space stage · n changelist · c commit · r revert · d delete · [ ] view · ? help 

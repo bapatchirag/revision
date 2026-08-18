@@ -141,7 +141,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		m.session.Purge()
 		m.clearDiff()
 		m.refreshChrome()
-		return tea.Batch(m.reloadStatus(), m.reloadLogPage(), m.reloadSavedDiffsIfShown(), m.reloadRejectsIfShown()), true
+		return tea.Batch(m.reloadStatus(), m.reloadLogPage(), m.reloadRevDiffIfShown(), m.reloadSavedDiffsIfShown(), m.reloadRejectsIfShown()), true
 	case key.Matches(k, m.keys.FocusNext):
 		m.focusNextPanel()
 		return m.afterFocusChange(), true
@@ -170,13 +170,13 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	case key.Matches(k, m.keys.OpenEditor):
 		return m.openInEditor(), true
 	case key.Matches(k, m.keys.Back):
-		// esc clears the focused panel's filter when it has one, then any revisions
-		// the Log panel is holding; otherwise it is left for the panel (e.g. to pop a
-		// changelist drill).
+		// esc unwinds the Log panel a step at a time — the filter, then the diff on
+		// Main, then the revisions held for it — and is otherwise left for the panel
+		// (e.g. to pop a changelist drill).
 		if cmd, cleared := m.clearFocusedFilter(); cleared {
 			return cmd, true
 		}
-		if m.focus.Index() == panelLog && m.clearLogPicks() {
+		if m.focus.Index() == panelLog && (m.closeRevDiff() || m.clearLogPicks()) {
 			return nil, true
 		}
 		return nil, false

@@ -41,6 +41,7 @@ func probeMsgs() []tea.Msg {
 		headLoadedMsg{err: err},
 		revisionPendingMsg{},
 		revisionDetailMsg{err: err},
+		revDiffLoadedMsg{err: err},
 		diffPendingMsg{},
 		diffLoadedMsg{err: err},
 		savedDiffsLoadedMsg{err: err},

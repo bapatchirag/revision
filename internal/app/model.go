@@ -91,6 +91,11 @@ type Model struct {
 	// picked and at most logPickMax of them. They are held by revision rather than
 	// by row, so a pick outlives the page, filter and sort it was made under.
 	logPicks []string
+	// revDiff is the range of history Main is showing instead of the selected
+	// revision's detail. It is a mode rather than a selection: moving the cursor
+	// or turning the page leaves it up, and only esc, a new pick or a change of
+	// source takes it down.
+	revDiff revRange
 	// headRev is the repository's newest revision, read at startup and refreshed
 	// whenever the first page of history lands.
 	headRev    string

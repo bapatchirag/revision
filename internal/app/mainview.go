@@ -82,6 +82,9 @@ func (m *Model) mainSelectionKey() string {
 	case sourceStatus:
 		return "status"
 	case sourceLog:
+		if m.revDiff.set() {
+			return "revdiff:" + m.revDiff.from + ":" + m.revDiff.to
+		}
 		e, _ := m.log.Selected()
 		return "log:" + e.Revision
 	}
@@ -117,6 +120,13 @@ func (m *Model) mainContent() string {
 		}
 	}
 	if m.source == sourceLog {
+		if m.revDiff.set() {
+			if m.revDiffShowsDiff() {
+				m.main.SetGutter(1)
+				m.main.SetCursorLine(true)
+			}
+			return m.revDiffDetail()
+		}
 		return m.logDetail()
 	}
 	if m.filesShowDiff() {
@@ -245,6 +255,31 @@ func (m *Model) fileDetail() string {
 		return strings.Join(append(head, "(no changes to display)"), "\n")
 	default:
 		return strings.Join(append(head, m.colorize(m.diffText)), "\n")
+	}
+}
+
+// revDiffShowsDiff reports whether Main is showing a patch for the range rather
+// than a placeholder — the only case with a +/-/space gutter to pin and lines
+// worth pointing at.
+func (m *Model) revDiffShowsDiff() bool {
+	e, ok := m.session.RevDiff(m.revDiff)
+	return ok && !e.failed && strings.TrimSpace(e.text) != ""
+}
+
+// revDiffDetail renders the diff over a range of history, headed by the range it
+// covers so what is being compared stays on screen while the patch scrolls.
+func (m *Model) revDiffDetail() string {
+	head := []string{m.revDiff.label(), ""}
+	e, ok := m.session.RevDiff(m.revDiff)
+	switch {
+	case !ok:
+		return strings.Join(append(head, "Loading diff…"), "\n")
+	case e.failed:
+		return strings.Join(append(head, e.text), "\n")
+	case strings.TrimSpace(e.text) == "":
+		return strings.Join(append(head, "(nothing changed between these revisions)"), "\n")
+	default:
+		return strings.Join(append(head, m.colorize(e.text)), "\n")
 	}
 }
 

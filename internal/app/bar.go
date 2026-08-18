@@ -54,8 +54,11 @@ func (m *Model) panelHints(p int) []string {
 		return m.filesHints()
 	case panelLog:
 		hints := []string{"v pick", "space update to rev", "n/p page", "/ filter"}
-		if len(m.logPicks) > 0 {
-			return append([]string{m.logPickLabel(), "esc clear"}, hints...)
+		switch {
+		case m.revDiff.set():
+			return append([]string{"diff " + m.revDiff.label(), "esc back"}, hints...)
+		case len(m.logPicks) > 0:
+			return append([]string{m.logPickLabel(), "enter diff", "esc clear"}, hints...)
 		}
 		return hints
 	}
