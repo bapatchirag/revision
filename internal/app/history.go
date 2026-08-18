@@ -1,7 +1,9 @@
 package app
 
 import (
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -138,6 +140,53 @@ func (m *Model) logFooter() string {
 		return ""
 	}
 	return label + " · " + strconv.Itoa(m.logPage)
+}
+
+// logPickMax is how many revisions can be held at once: a diff has two sides.
+const logPickMax = 2
+
+// toggleLogPick picks the highlighted revision to be diffed, or unpicks it when
+// it is already held. A third pick drops the one picked first, so a second end
+// can be moved around without unpicking it each time.
+func (m *Model) toggleLogPick() tea.Cmd {
+	e, ok := m.log.Selected()
+	if !ok || e.Revision == "" {
+		return nil
+	}
+	if i := slices.Index(m.logPicks, e.Revision); i >= 0 {
+		m.logPicks = slices.Delete(m.logPicks, i, i+1)
+	} else {
+		m.logPicks = append(m.logPicks, e.Revision)
+		if len(m.logPicks) > logPickMax {
+			m.logPicks = m.logPicks[len(m.logPicks)-logPickMax:]
+		}
+	}
+	m.updateBar()
+	return nil
+}
+
+// isLogPicked reports whether a revision is currently held for a diff.
+func (m *Model) isLogPicked(rev string) bool { return slices.Contains(m.logPicks, rev) }
+
+// clearLogPicks drops every held revision, reporting whether there was anything
+// to drop so esc can tell whether it was consumed here.
+func (m *Model) clearLogPicks() bool {
+	if len(m.logPicks) == 0 {
+		return false
+	}
+	m.logPicks = nil
+	m.updateBar()
+	return true
+}
+
+// logPickLabel names the held revisions for the status bar, in the order they
+// were picked so it is plain which one a third pick would displace.
+func (m *Model) logPickLabel() string {
+	revs := make([]string, len(m.logPicks))
+	for i, r := range m.logPicks {
+		revs[i] = "r" + r
+	}
+	return "picked " + strings.Join(revs, " ↔ ")
 }
 
 // revisionDetailForSelection returns a command to read the changed paths of the

@@ -170,10 +170,14 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	case key.Matches(k, m.keys.OpenEditor):
 		return m.openInEditor(), true
 	case key.Matches(k, m.keys.Back):
-		// esc clears the focused panel's filter when it has one; otherwise it is
-		// left for the panel (e.g. to pop a changelist drill).
+		// esc clears the focused panel's filter when it has one, then any revisions
+		// the Log panel is holding; otherwise it is left for the panel (e.g. to pop a
+		// changelist drill).
 		if cmd, cleared := m.clearFocusedFilter(); cleared {
 			return cmd, true
+		}
+		if m.focus.Index() == panelLog && m.clearLogPicks() {
+			return nil, true
 		}
 		return nil, false
 	case key.Matches(k, m.keys.Help):
@@ -229,7 +233,17 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		return nil, false
+	case "v":
+		if m.focus.Index() == panelLog {
+			return m.toggleLogPick(), true
+		}
+		return nil, false
 	case "c":
+		// The Log panel browses revisions that are already committed, and holds no
+		// working-copy selection a commit could be built from.
+		if m.focus.Index() == panelLog {
+			return nil, false
+		}
 		return m.openCommit(), true
 	case "m":
 		// Resolving acts on a conflicted file in the Changes tree, or on a reject in

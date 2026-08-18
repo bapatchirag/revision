@@ -312,3 +312,124 @@ func TestLogFilterSurvivesPageTurn(t *testing.T) {
 		t.Errorf("filtered page 2 = %+v, want just r48", items)
 	}
 }
+
+func TestLogPickTogglesAndMarksTheRow(t *testing.T) {
+	m := logPagedModel(t)
+
+	m, _ = pressRune(t, m, 'v')
+	if got := m.logPicks; len(got) != 1 || got[0] != "50" {
+		t.Fatalf("picks = %q, want just r50", got)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "● ") {
+		t.Errorf("expected the picked row to be marked, got:\n%s", view)
+	}
+
+	// The same revision again lets it go.
+	m, _ = pressRune(t, m, 'v')
+	if len(m.logPicks) != 0 {
+		t.Errorf("picks = %q, want the second press to unpick", m.logPicks)
+	}
+}
+
+func TestLogPickHoldsTwoAndDropsTheOldest(t *testing.T) {
+	m := logPagedModel(t)
+
+	m, _ = pressRune(t, m, 'v')
+	m, _ = pressRune(t, m, 'j')
+	m, _ = pressRune(t, m, 'v')
+	if got := m.logPicks; len(got) != 2 || got[0] != "50" || got[1] != "49" {
+		t.Fatalf("picks = %q, want r50 then r49 in pick order", got)
+	}
+
+	// A third pick displaces the one picked first, not the one nearest it.
+	next, _ := m.Update(logLoadedMsg{page: 1, more: true, entries: []svn.LogEntry{
+		{Revision: "50"}, {Revision: "49"}, {Revision: "48"},
+	}})
+	m = next.(*Model)
+	m, _ = pressRune(t, m, 'j')
+	m, _ = pressRune(t, m, 'v')
+	if got := m.logPicks; len(got) != 2 || got[0] != "49" || got[1] != "48" {
+		t.Errorf("picks = %q, want r50 displaced by r48", got)
+	}
+}
+
+func TestLogPickSurvivesAPageTurn(t *testing.T) {
+	m := logPagedModel(t)
+	m, _ = pressRune(t, m, 'v')
+
+	m, _ = pressRune(t, m, 'n')
+	next, _ := m.Update(logLoadedMsg{page: 2, entries: []svn.LogEntry{{Revision: "48"}, {Revision: "47"}}})
+	m = next.(*Model)
+
+	// Picks are held by revision, so the far end of a comparison can be on
+	// another page entirely.
+	if got := m.logPicks; len(got) != 1 || got[0] != "50" {
+		t.Fatalf("picks = %q, want r50 kept across the page turn", got)
+	}
+	m, _ = pressRune(t, m, 'v')
+	if got := m.logPicks; len(got) != 2 || got[1] != "48" {
+		t.Errorf("picks = %q, want r50 and r48 from different pages", got)
+	}
+}
+
+func TestEscClearsLogPicksAfterTheFilter(t *testing.T) {
+	m := logPagedModel(t)
+	m, _ = pressRune(t, m, 'v')
+	m.filters[panelLog] = "user:alice"
+	m.applyLogFilter()
+
+	// The filter goes first; the picks are still held.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*Model)
+	if m.filters[panelLog] != "" {
+		t.Fatalf("filter = %q, want esc to clear it first", m.filters[panelLog])
+	}
+	if len(m.logPicks) != 1 {
+		t.Fatalf("picks = %q, want them held until the filter is gone", m.logPicks)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*Model)
+	if len(m.logPicks) != 0 {
+		t.Errorf("picks = %q, want the second esc to let them go", m.logPicks)
+	}
+}
+
+func TestLogPicksAreDroppedWithTheSource(t *testing.T) {
+	m := logPagedModel(t)
+	m, _ = pressRune(t, m, 'v')
+
+	// The revisions belong to the tree being left, so they cannot outlive it.
+	m.resetForSource()
+	if len(m.logPicks) != 0 {
+		t.Errorf("picks = %q, want them dropped with the old source", m.logPicks)
+	}
+}
+
+// The Log panel lists revisions that are already committed, so c has nothing to
+// build a commit from there and must not open the editor — nor warn about an
+// empty staged bucket the panel never referred to.
+func TestCommitIsInertOnTheLogPanel(t *testing.T) {
+	m := logPagedModel(t)
+
+	m, _ = pressRune(t, m, 'c')
+	if m.editing {
+		t.Error("c on the Log panel should not open the commit editor")
+	}
+	if toast := stripANSI(m.toast.View()); strings.Contains(toast, "nothing staged") {
+		t.Errorf("c on the Log panel should say nothing at all, got: %s", toast)
+	}
+}
+
+func TestLogPicksAreReportedInTheStatusBar(t *testing.T) {
+	m := logPagedModel(t)
+	m, _ = pressRune(t, m, 'v')
+	m, _ = pressRune(t, m, 'j')
+	m, _ = pressRune(t, m, 'v')
+	if got := m.logPickLabel(); got != "picked r50 ↔ r49" {
+		t.Errorf("label = %q, want both revisions in pick order", got)
+	}
+	if bar := stripANSI(m.bar.View()); !strings.Contains(bar, "picked r50 ↔ r49") || !strings.Contains(bar, "esc clear") {
+		t.Errorf("status bar should report the picks and how to drop them, got:\n%s", bar)
+	}
+}

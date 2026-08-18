@@ -24,17 +24,24 @@ func logColumns() []component.Column {
 }
 
 // renderLogRow is the domain adapter that turns an svn.LogEntry into the cells
-// the reusable Table renders, keeping the Table component domain-agnostic. The
-// revision the working copy currently sits at (wcRevision) is marked with a
-// leading coloured asterisk; every other row gets the same two-cell blank prefix
-// so the Rev column stays aligned. While a page turn is in flight the rows still
-// on screen belong to the page being left, so they are dimmed.
-func renderLogRow(it svn.LogEntry, wcRevision string, stale bool, th theme.Theme) []string {
-	marker := "  "
-	if wcRevision != "" && it.Revision == wcRevision {
-		marker = lipgloss.NewStyle().Foreground(th.Accent).Render("*") + " "
+// the reusable Table renders, keeping the Table component domain-agnostic.
+//
+// Two markers lead the Rev column, each in a cell of its own: a dot for a
+// revision picked to be diffed, and an asterisk for the one the working copy
+// sits at. Both cells are always drawn, blank when they do not apply, so picking
+// a revision never shifts the column out from under the reader. While a page
+// turn is in flight the rows still on screen belong to the page being left, so
+// they are dimmed.
+func renderLogRow(it svn.LogEntry, wcRevision string, picked, stale bool, th theme.Theme) []string {
+	pick := " "
+	if picked {
+		pick = lipgloss.NewStyle().Foreground(th.Info).Bold(true).Render("●")
 	}
-	cells := []string{marker + "r" + it.Revision, it.Author, firstLine(it.Message)}
+	here := " "
+	if wcRevision != "" && it.Revision == wcRevision {
+		here = lipgloss.NewStyle().Foreground(th.Accent).Render("*")
+	}
+	cells := []string{pick + here + " r" + it.Revision, it.Author, firstLine(it.Message)}
 	if stale {
 		dim := lipgloss.NewStyle().Foreground(th.Muted)
 		for i, c := range cells {

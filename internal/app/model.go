@@ -87,6 +87,10 @@ type Model struct {
 	// page is in flight, which dims the rows of the page being left.
 	logRequested bool
 	logLoading   bool
+	// logPicks are the revisions chosen to be diffed, in the order they were
+	// picked and at most logPickMax of them. They are held by revision rather than
+	// by row, so a pick outlives the page, filter and sort it was made under.
+	logPicks []string
 	// headRev is the repository's newest revision, read at startup and refreshed
 	// whenever the first page of history lands.
 	headRev    string
@@ -277,7 +281,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		{Name: rejectsViewName, Content: rejects},
 	}, th, keys)
 	logTable := component.NewTable[svn.LogEntry]("log", logColumns(), func(it svn.LogEntry) []string {
-		return renderLogRow(it, m.wcRevision, m.logLoading, m.theme)
+		return renderLogRow(it, m.wcRevision, m.isLogPicked(it.Revision), m.logLoading, m.theme)
 	}, th, keys)
 	main := component.NewViewport(th, keys)
 	cmdLogView := component.NewViewport(th, keys)

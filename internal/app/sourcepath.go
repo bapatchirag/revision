@@ -185,6 +185,7 @@ func (m *Model) resetForSource() {
 	m.logErr = nil
 	m.logMore = false
 	m.logLoading = false
+	m.logPicks = nil
 	m.headRev = ""
 	// The Log table holds its own copy of the rows, so it has to be emptied here
 	// or the old tree's revisions stay on screen until the new page arrives.

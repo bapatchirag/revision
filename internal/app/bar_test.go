@@ -26,7 +26,7 @@ func TestBarHintsAreScopedToThePanel(t *testing.T) {
 	}{
 		{"files", panelFiles, []string{"space stage", "r revert", "? help"}, nil},
 		{"status", panelStatus, []string{"/ search", "? help"}, []string{"space stage", "r revert"}},
-		{"log", panelLog, []string{"space update to rev", "c commit"}, []string{"space stage", "d delete"}},
+		{"log", panelLog, []string{"space update to rev", "v pick"}, []string{"space stage", "d delete", "c commit"}},
 		{"main", panelMain, []string{"/ search", "? help"}, []string{"space stage", "d delete"}},
 		{"command log", panelCmdLog, nil, []string{"space stage", "? help"}},
 	} {

@@ -247,6 +247,10 @@ func HelpSections() []Section {
 				Description: "Open the diff on screen side by side in an overlay, or save it to a file in `diffOutputDir`.",
 			},
 			{
+				Action: "Pick revisions", Keys: []string{"v"}, Context: "Log",
+				Description: "Pick the selected revision to be diffed, or unpick it. Two can be held at once, and picking a third drops whichever was picked first, so the far end of a comparison can be moved without unpicking it each time. `esc` lets them go. A pick is held by revision rather than by row, so it survives paging and filtering — the two ends need not be on the same page.",
+			},
+			{
 				Action: "Dir diff / untracked", Keys: []string{"D", "U"}, Context: "Files",
 				Description: "Toggle the directory-level diff for the highlighted directory, or toggle hiding untracked files.",
 			},
