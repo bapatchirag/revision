@@ -35,6 +35,13 @@ const (
 	revDetailBytes      = 4 << 20 // 4 MiB
 )
 
+// Revision-diff cache bounds. A diff across a range of revisions can dwarf any
+// single file's, so few are kept and the byte ceiling is the one that binds.
+const (
+	revDiffEntries = 16
+	revDiffBytes   = 16 << 20 // 16 MiB
+)
+
 // Render cache bounds. Both hold work that is re-derived whenever the screen is
 // rebuilt — every filter keystroke, focus change and reload — so only the
 // handful of subjects being flipped between need to fit.
@@ -82,6 +89,36 @@ type historyPage struct {
 	more    bool
 }
 
+// revRange identifies a diff over history: the revision it starts after and the
+// one it ends at. An empty from means the single revision to, which svn diffs
+// against its own predecessor. Revisions are ordered lowest first when the range
+// is built, so the same pair picked either way round is one entry here.
+type revRange struct {
+	from string
+	to   string
+}
+
+// set reports whether the range names anything at all.
+func (r revRange) set() bool { return r.to != "" }
+
+// label names the range for the Main heading.
+func (r revRange) label() string {
+	if r.from == "" {
+		return "r" + r.to
+	}
+	return "r" + r.from + " → r" + r.to
+}
+
+// revDiffEntry is one cached revision diff. failed marks text as a load-failure
+// notice rather than a patch, and expires bounds how long that failure is
+// trusted; a diff itself never goes stale, since the revisions behind it cannot
+// change.
+type revDiffEntry struct {
+	text    string
+	failed  bool
+	expires time.Time
+}
+
 // renderKey identifies a colorized diff: a digest of the patch it was styled
 // from, and the theme it was styled with — the same patch takes different colors
 // under each palette, and the palette also fixes the color profile it renders
@@ -105,6 +142,7 @@ type sessionStore struct {
 	diffs      *cache.LRU[diffKey, diffEntry]
 	logPages   *cache.LRU[logKey, historyPage]
 	revDetails *cache.LRU[string, []svn.ChangedPath]
+	revDiffs   *cache.LRU[revRange, revDiffEntry]
 	rendered   *cache.LRU[renderKey, string]
 	trees      *cache.LRU[treeKey, []fileNode]
 }
@@ -117,8 +155,11 @@ func newSessionStore() *sessionStore {
 		}),
 		logPages:   cache.New[logKey, historyPage](logPageCacheEntries, logPageCacheBytes, historyPageSize),
 		revDetails: cache.New[string, []svn.ChangedPath](revDetailEntries, revDetailBytes, changedPathsSize),
-		rendered:   cache.New[renderKey, string](renderCacheEntries, renderCacheBytes, func(s string) int { return len(s) }),
-		trees:      cache.New[treeKey, []fileNode](treeCacheEntries, treeCacheBytes, fileTreeSize),
+		revDiffs: cache.New[revRange, revDiffEntry](revDiffEntries, revDiffBytes, func(e revDiffEntry) int {
+			return len(e.text)
+		}),
+		rendered: cache.New[renderKey, string](renderCacheEntries, renderCacheBytes, func(s string) int { return len(s) }),
+		trees:    cache.New[treeKey, []fileNode](treeCacheEntries, treeCacheBytes, fileTreeSize),
 	}
 }
 
@@ -193,6 +234,30 @@ func (s *sessionStore) PutRevDetail(rev string, paths []svn.ChangedPath) {
 	s.revDetails.Put(rev, paths)
 }
 
+// RevDiff returns the diff already read for a range of history. The revisions
+// behind it are immutable, so a patch here never goes stale; only a remembered
+// failure expires, so a transient one clears itself.
+func (s *sessionStore) RevDiff(r revRange) (revDiffEntry, bool) {
+	e, ok := s.revDiffs.Get(r)
+	if !ok {
+		return revDiffEntry{}, false
+	}
+	if e.failed && time.Now().After(e.expires) {
+		s.revDiffs.Delete(r)
+		return revDiffEntry{}, false
+	}
+	return e, true
+}
+
+// PutRevDiff records a loaded revision diff. A failure is only trusted for
+// diffFailTTL.
+func (s *sessionStore) PutRevDiff(r revRange, e revDiffEntry) {
+	if e.failed {
+		e.expires = time.Now().Add(diffFailTTL)
+	}
+	s.revDiffs.Put(r, e)
+}
+
 // Rendered returns the colorized form of a patch already styled for k's theme.
 func (s *sessionStore) Rendered(k renderKey) (string, bool) { return s.rendered.Get(k) }
 
@@ -212,6 +277,7 @@ func (s *sessionStore) Purge() {
 	s.diffs.Purge()
 	s.logPages.Purge()
 	s.revDetails.Purge()
+	s.revDiffs.Purge()
 	s.rendered.Purge()
 	s.trees.Purge()
 }

@@ -364,6 +364,116 @@ func TestChangelistDiffName(t *testing.T) {
 	}
 }
 
+// drilledSaveModel drills into a range whose diff is diff, with saved patches
+// going to dir.
+func drilledSaveModel(t *testing.T, dir, diff string) *Model {
+	t.Helper()
+	cfg := config.Default()
+	cfg.DiffOutputDir = dir
+	m := loadItems(t, sizedModelCfg(t, cfg), nil)
+	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{{Revision: "50"}, {Revision: "49"}}})
+	m = next.(*Model)
+	m, _ = pressRune(t, m, '3')
+	return drillInto(t, m, diff)
+}
+
+func TestSaveDiffWritesTheRangeOnScreen(t *testing.T) {
+	dir := t.TempDir()
+	m := drilledSaveModel(t, dir, treePatch)
+
+	m, msg := saveDiffKey(t, m, "")
+	saved, ok := msg.(diffSavedMsg)
+	if !ok {
+		t.Fatalf("expected a diffSavedMsg, got %T", msg)
+	}
+	if saved.err != nil {
+		t.Fatalf("save failed: %v", saved.err)
+	}
+	if want := filepath.Join(dir, "r49-r50.diff"); saved.path != want {
+		t.Errorf("saved to %q, want %q", saved.path, want)
+	}
+	body, err := os.ReadFile(saved.path)
+	if err != nil {
+		t.Fatalf("read saved diff: %v", err)
+	}
+	if string(body) != treePatch {
+		t.Errorf("saved diff = %q, want the whole range verbatim", body)
+	}
+
+	// Nothing was asked of svn: the patch was already in hand, and a range can be
+	// expensive enough that reproducing it purely to save it is not worth it.
+	if logged := m.cmdLog.snapshot(); len(logged) != 0 {
+		t.Errorf("saving a range should run no svn command, got %+v", logged)
+	}
+}
+
+func TestSaveDiffWritesOnePartOfTheRange(t *testing.T) {
+	dir := t.TempDir()
+	m := drilledSaveModel(t, dir, treePatch)
+	m.revFiles.SetIndex(indexOfNodePath(t, m, "src/a.go"))
+	m.updateMain()
+
+	_, msg := saveDiffKey(t, m, "")
+	saved := msg.(diffSavedMsg)
+	if saved.err != nil {
+		t.Fatalf("save failed: %v", saved.err)
+	}
+	// The default name carries the range and the path within it, separators
+	// folded so nested targets stay distinct in one flat directory.
+	if want := filepath.Join(dir, "r49-r50-src-a.go.diff"); saved.path != want {
+		t.Errorf("saved to %q, want %q", saved.path, want)
+	}
+	body, err := os.ReadFile(saved.path)
+	if err != nil {
+		t.Fatalf("read saved diff: %v", err)
+	}
+	if got := string(body); !strings.Contains(got, "+alpha") || strings.Contains(got, "+new") {
+		t.Errorf("saved diff = %q, want only the selected file's section", got)
+	}
+	if !strings.HasSuffix(string(body), "\n") {
+		t.Error("a saved patch should end with a newline")
+	}
+}
+
+func TestSaveDiffRefusesAFailedRange(t *testing.T) {
+	m := drilledModel(t, treePatch)
+	// Replace the cached patch with a failure, as a refused range would leave.
+	m.session.PutRevDiff(m.revDiff, revDiffEntry{text: "Unable to load diff: E160013", failed: true})
+
+	m, msg := saveDiffKey(t, m, "")
+	if msg != nil {
+		t.Fatalf("a failure notice is not a patch to write, got %v", msg)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "no diff to save") {
+		t.Errorf("expected a refusal, got:\n%s", view)
+	}
+}
+
+// A range names files as they were, which the working copy need no longer hold,
+// so there is nothing here for the editor to open. The Files panel is left
+// holding a real file, which is exactly what e falls through to when the
+// revision tree does not stop it.
+func TestEditorIsInertInTheRevisionTree(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{{Path: "live.go", State: svn.StateModified}})
+	next, _ := m.Update(logLoadedMsg{page: 1, entries: []svn.LogEntry{{Revision: "50"}, {Revision: "49"}}})
+	m = next.(*Model)
+	m, _ = pressRune(t, m, '3')
+	m = drillInto(t, m, treePatch)
+	m.revFiles.SetIndex(indexOfNodePath(t, m, "src/a.go"))
+	m.updateMain()
+
+	if path, _, _, ok := m.editTarget(); ok {
+		t.Errorf("the revision tree named %q to edit, want nothing", path)
+	}
+	m, cmd := pressRune(t, m, 'e')
+	if cmd != nil {
+		t.Error("e should not launch an editor from the revision tree")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "no file to open here") {
+		t.Errorf("expected e to say there is nothing to open, got:\n%s", view)
+	}
+}
+
 func TestColorizeDiff(t *testing.T) {
 	// Emit ANSI so the styling is observable, then restore the Ascii profile the
 	// rest of the suite relies on.
@@ -471,4 +581,117 @@ func BenchmarkColorizeDiff(b *testing.B) {
 			_ = m.colorize(diff)
 		}
 	})
+}
+
+// rangePatch is `svn diff -r 2:4` verbatim over a repository where r2 added
+// b.txt, r3 modified a.txt and r4 deleted b.txt.
+const rangePatch = `Index: b.txt
+===================================================================
+--- b.txt	(revision 2)
++++ b.txt	(nonexistent)
+@@ -1 +0,0 @@
+-b1
+Index: a.txt
+===================================================================
+--- a.txt	(revision 2)
++++ a.txt	(revision 4)
+@@ -1 +1,2 @@
+ a1
++a2
+`
+
+func TestSplitPatchByFile(t *testing.T) {
+	files := splitPatchByFile(rangePatch)
+	if len(files) != 2 {
+		t.Fatalf("split %d sections, want one per file: %+v", len(files), files)
+	}
+
+	// svn's order is kept: the tree decides how to arrange them, not this.
+	if files[0].Path != "b.txt" || files[1].Path != "a.txt" {
+		t.Errorf("paths = %q, %q, want b.txt then a.txt", files[0].Path, files[1].Path)
+	}
+	if files[0].State != svn.StateDeleted {
+		t.Errorf("b.txt state = %s, want deleted", files[0].State)
+	}
+	if files[1].State != svn.StateModified {
+		t.Errorf("a.txt state = %s, want modified", files[1].State)
+	}
+
+	// Each section must carry its own "Index:" line and stop before the next.
+	if !strings.HasPrefix(files[0].Text, "Index: b.txt\n") || strings.Contains(files[0].Text, "a.txt") {
+		t.Errorf("b.txt section leaked into the next file:\n%s", files[0].Text)
+	}
+
+	// Nothing may be lost or duplicated: the sections must tile the patch.
+	var texts []string
+	for _, f := range files {
+		texts = append(texts, f.Text)
+	}
+	if got := strings.Join(texts, "\n"); got != strings.TrimRight(rangePatch, "\n") {
+		t.Errorf("sections do not reassemble into the patch:\n%s", got)
+	}
+}
+
+func TestSplitPatchByFileReadsAnAddition(t *testing.T) {
+	const added = `Index: b.txt
+===================================================================
+--- b.txt	(nonexistent)
++++ b.txt	(revision 2)
+@@ -0,0 +1 @@
++b1
+`
+	files := splitPatchByFile(added)
+	if len(files) != 1 || files[0].State != svn.StateAdded {
+		t.Errorf("split = %+v, want a single added file", files)
+	}
+}
+
+// A removed line can begin "---" and end in the same marker svn writes on a file
+// header, so the markers are only trusted before a section's first hunk.
+func TestSplitPatchByFileIgnoresMarkersInsideHunks(t *testing.T) {
+	const tricky = `Index: notes.txt
+===================================================================
+--- notes.txt	(revision 1)
++++ notes.txt	(revision 2)
+@@ -1,2 +1,2 @@
+---- old.txt	(nonexistent)
+++++ new.txt	(nonexistent)
+`
+	files := splitPatchByFile(tricky)
+	if len(files) != 1 {
+		t.Fatalf("split %d sections, want 1: %+v", len(files), files)
+	}
+	if files[0].State != svn.StateModified {
+		t.Errorf("state = %s, want modified: a hunk's own lines are not file headers", files[0].State)
+	}
+}
+
+func TestSplitPatchByFileEdgeCases(t *testing.T) {
+	const binary = `Index: logo.png
+===================================================================
+Cannot display: file marked as a binary type.
+svn:mime-type = application/octet-stream
+`
+	t.Run("binary still yields a row", func(t *testing.T) {
+		files := splitPatchByFile(binary)
+		if len(files) != 1 || files[0].Path != "logo.png" {
+			t.Fatalf("split = %+v, want the binary file listed", files)
+		}
+		if !strings.Contains(files[0].Text, "Cannot display") {
+			t.Errorf("svn's notice should be kept as the section body:\n%s", files[0].Text)
+		}
+	})
+
+	for name, diff := range map[string]string{
+		"empty":       "",
+		"whitespace":  "  \n\n",
+		"no Index":    "@@ -1 +1 @@\n-old\n+new",
+		"only a hunk": "--- a.txt\t(nonexistent)\n@@ -0,0 +1 @@\n+a1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if files := splitPatchByFile(diff); files != nil {
+				t.Errorf("split = %+v, want nothing: no section to attach the text to", files)
+			}
+		})
+	}
 }

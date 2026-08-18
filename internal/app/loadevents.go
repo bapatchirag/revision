@@ -93,6 +93,23 @@ func (m *Model) loadEvent(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		return nil, true
 
+	case revDiffLoadedMsg:
+		if m.gens.revDiff.stale(msg.gen) {
+			return nil, true
+		}
+		e := revDiffEntry{text: msg.diff}
+		if msg.err != nil {
+			e.text, e.failed = "Unable to load diff: "+msg.err.Error(), true
+		}
+		m.session.PutRevDiff(msg.rng, e)
+		if !e.failed {
+			m.applyRevPatch(e.text)
+		}
+		if m.source == sourceLog {
+			m.updateMain()
+		}
+		return nil, true
+
 	case diffPendingMsg:
 		// The cursor rested long enough for this diff to be worth asking svn for.
 		if m.gens.diff.stale(msg.gen) {

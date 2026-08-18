@@ -40,6 +40,8 @@ type Model struct {
 	rejects     *component.List[rejectNode]
 	filesViews  *component.Views
 	log         *component.Table[svn.LogEntry]
+	logViews    *component.Views
+	revFiles    *component.List[revFileNode]
 	main        *component.Viewport
 
 	// cmdLogView displays cmdLog: the svn commands revision runs and their
@@ -87,6 +89,25 @@ type Model struct {
 	// page is in flight, which dims the rows of the page being left.
 	logRequested bool
 	logLoading   bool
+	// logPicks are the revisions chosen to be diffed, in the order they were
+	// picked and at most logPickMax of them. They are held by revision rather than
+	// by row, so a pick outlives the page, filter and sort it was made under.
+	logPicks []string
+	// revDiff is the range of history Main is showing instead of the selected
+	// revision's detail. It is a mode rather than a selection: moving the cursor
+	// or turning the page leaves it up, and only esc, a new pick or a change of
+	// source takes it down.
+	revDiff revRange
+	// revPatch is revDiff's diff cut into per-file sections, kept so neither the
+	// tree nor Main re-splits the whole patch on every keystroke. revCollapsed is
+	// that tree's own per-directory fold state.
+	revPatch     []patchFile
+	revCollapsed map[string]bool
+	// logFilterHeld is the filter the revisions were under, set aside while the
+	// panel shows a range's files instead. The two are written in different terms
+	// — authors and dates against paths and states — so neither can be left
+	// standing over the other.
+	logFilterHeld string
 	// headRev is the repository's newest revision, read at startup and refreshed
 	// whenever the first page of history lands.
 	headRev    string
@@ -277,15 +298,19 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		{Name: rejectsViewName, Content: rejects},
 	}, th, keys)
 	logTable := component.NewTable[svn.LogEntry]("log", logColumns(), func(it svn.LogEntry) []string {
-		return renderLogRow(it, m.wcRevision, m.logLoading, m.theme)
+		return renderLogRow(it, m.wcRevision, m.isLogPicked(it.Revision), m.logLoading, m.theme)
 	}, th, keys)
+	revFiles := component.NewList[revFileNode](revFilesListID, renderRevFileNode(th), th, keys)
+	// A lone view renders exactly as a plain panel would; the container is here
+	// for the drill into the files a range of history touched.
+	logViews := component.NewViews(logViewsID, []component.View{{Name: "Log", Content: logTable}}, th, keys)
 	main := component.NewViewport(th, keys)
 	cmdLogView := component.NewViewport(th, keys)
 
 	panels := []*component.Panel{
 		component.NewPanel("Status", 1, status, th),
 		component.NewPanel("Files", 2, filesViews, th),
-		component.NewPanel("Log", 3, logTable, th),
+		component.NewPanel("Log", 3, logViews, th),
 		component.NewPanel("Main", 0, main, th),
 		// No badge: the command log answers to x and the mouse, never a number.
 		component.NewPanel("Command Log", -1, cmdLogView, th),
@@ -306,6 +331,8 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		rejects:         rejects,
 		filesViews:      filesViews,
 		log:             logTable,
+		logViews:        logViews,
+		revFiles:        revFiles,
 		main:            main,
 		cmdLogView:      cmdLogView,
 		cmdLog:          newCommandLog(commandLogLimit),
@@ -330,6 +357,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		collapsedDirs:   map[string]bool{},
 		clCollapsedDirs: map[string]bool{},
 		rejectCollapsed: map[string]bool{},
+		revCollapsed:    map[string]bool{},
 		filters:         map[int]string{},
 		pendingOps:      map[string]pendingOp{},
 		session:         newSessionStore(),

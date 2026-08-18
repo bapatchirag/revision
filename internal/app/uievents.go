@@ -26,6 +26,10 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 			return m.toggleClCollapse(), true
 		case rejectsListID:
 			return m.toggleRejectCollapse(), true
+		case "log":
+			return m.showPickedDiff(), true
+		case revFilesListID:
+			return m.toggleRevCollapse(), true
 		case updateMenuID:
 			return m.chooseUpdate(msg.Index), true
 		case settingsFormID:
@@ -54,10 +58,13 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case uimsg.SubViewPoppedMsg:
-		if msg.ID == filesViewsID {
+		switch msg.ID {
+		case filesViewsID:
 			m.drilledCL = ""
 			m.updateBar()
 			m.updateMain()
+		case logViewsID:
+			m.closeRevDiff()
 		}
 		return nil, true
 

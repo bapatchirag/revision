@@ -41,6 +41,10 @@ func (m *Model) handleSelection(sel uimsg.SelectedMsg) tea.Cmd {
 			m.updateMain()
 			return m.revisionDetailForSelection()
 		}
+	case revFilesListID:
+		if m.source == sourceLog {
+			m.updateMain()
+		}
 	}
 	return nil
 }
@@ -107,9 +111,10 @@ func (m *Model) sourcePanel() int {
 }
 
 // syncMainTitle names the Main panel after the focused side panel: the Status
-// panel makes it "About", the Files panel "Diff", and the Log panel "Commit
-// message". Focusing Main itself leaves the heading unchanged, so it keeps
-// naming whichever side panel last drove it.
+// panel makes it "About", the Files panel "Diff", and the Log panel the commit
+// message — or "Diff" too, while it is showing a range of history. Focusing Main
+// itself leaves the heading unchanged, so it keeps naming whichever side panel
+// last drove it.
 func (m *Model) syncMainTitle() {
 	switch m.focus.Index() {
 	case panelStatus:
@@ -117,6 +122,10 @@ func (m *Model) syncMainTitle() {
 	case panelFiles:
 		m.panels[panelMain].SetTitle("Diff")
 	case panelLog:
+		if m.revDiff.set() {
+			m.panels[panelMain].SetTitle("Diff")
+			return
+		}
 		m.panels[panelMain].SetTitle("Commit message")
 	}
 }

@@ -15,10 +15,12 @@ import (
 // diffSource is what a queued save will write once the file-name prompt is
 // answered: the paths whose diff is to be generated — one target for a file or
 // directory row, every member for a changelist, none at all for the whole
-// working copy. name is the file name a blank entry falls back to.
+// working copy. text short-circuits that, carrying a patch already in hand to be
+// written as it stands. name is the file name a blank entry falls back to.
 type diffSource struct {
 	name  string
 	paths []string
+	text  string
 }
 
 // saveDiff opens the prompt that names the file a diff will be written to. In
@@ -31,6 +33,11 @@ type diffSource struct {
 // loading or failed to — warns instead, as do the Diffs and Rejects views, whose
 // entries are patch files on disk already.
 func (m *Model) saveDiff() tea.Cmd {
+	// The Log panel drives Main here, so what is on screen is a range of history
+	// rather than anything the Files panel is showing.
+	if m.showingRevDiff() {
+		return m.saveRevDiff()
+	}
 	if m.filesViewIsDiffs() {
 		m.showToast("this diff is already saved", component.LevelWarning)
 		return nil
@@ -60,6 +67,44 @@ func diffTargets(path string) []string {
 		return nil
 	}
 	return []string{path}
+}
+
+// saveRevDiff queues a save of the range diff on screen: whichever part of it
+// the drilled-in tree points at, down to a single file's section. The patch is
+// already in hand and is written as it stands rather than asked of svn a second
+// time — a range can take long enough that reproducing it purely to save it is
+// not worth the wait, and it would in any case reproduce exactly.
+func (m *Model) saveRevDiff() tea.Cmd {
+	e, ok := m.session.RevDiff(m.revDiff)
+	if !ok || e.failed {
+		m.showToast("no diff to save for "+m.revDiff.label(), component.LevelWarning)
+		return nil
+	}
+	text := m.revPatchUnderCursor(e.text)
+	if strings.TrimSpace(text) == "" {
+		m.showToast("nothing to save for this selection", component.LevelWarning)
+		return nil
+	}
+	path := ""
+	if n, sel := m.revFiles.Selected(); sel {
+		path = n.Path
+	}
+	m.openDiffPrompt(diffSource{name: revDiffFileName(m.revDiff, path), text: text})
+	return nil
+}
+
+// revDiffFileName is the name a saved range diff defaults to: the revisions it
+// covers, then the path within it when the save is of one part rather than the
+// whole, with separators folded into "-" as diffFileName does.
+func revDiffFileName(r revRange, path string) string {
+	name := "r" + r.to
+	if r.from != "" {
+		name = "r" + r.from + "-r" + r.to
+	}
+	if path != "" && path != fileTreeRoot {
+		name += "-" + strings.ReplaceAll(path, "/", "-")
+	}
+	return name + ".diff"
 }
 
 // saveChangelistDiff queues a save of the highlighted changelist's combined diff.
@@ -98,6 +143,9 @@ func (m *Model) openDiffPrompt(src diffSource) {
 func (m *Model) submitDiffName(name string) tea.Cmd {
 	src := m.diffSrc
 	m.closeDiffName()
+	if src.text != "" {
+		return writeDiffCmd(src.text, m.diffDir(), diffSaveName(name, src.name))
+	}
 	return saveDiffCmd(m.client, src.paths, m.diffDir(), diffSaveName(name, src.name))
 }
 
@@ -218,6 +266,66 @@ func diffTargetAt(diff string, idx int) (path string, line int) {
 		}
 	}
 	return lastFile, last
+}
+
+// patchFile is one file's section of a unified diff: the path its "Index:" line
+// names, the change that section records, and the raw text of the section
+// itself.
+type patchFile struct {
+	Path  string
+	State svn.FileState
+	Text  string
+}
+
+// splitPatchByFile cuts a unified diff into its per-file sections, in the order
+// svn emitted them. It joins colorizeDiff, splitDiffPages and diffTargetAt as a
+// reader of unified-diff structure, this one for the file boundaries: a diff
+// between two revisions is the only description of itself there is, so the tree
+// browsing it has to be built out of the patch rather than alongside it.
+//
+// A section's state comes from the "(nonexistent)" marker svn writes on
+// whichever side the file is missing from — the left for an addition, the right
+// for a deletion. The markers are only read before the section's first hunk,
+// since inside one a removed line can begin "---" and be mistaken for a header.
+// A replacement is indistinguishable from a modification here and reads as one.
+//
+// Anything ahead of the first "Index:" line belongs to no file and is dropped.
+func splitPatchByFile(diff string) []patchFile {
+	if strings.TrimSpace(diff) == "" {
+		return nil
+	}
+	var (
+		files  []patchFile
+		cur    *patchFile
+		body   []string
+		inHunk bool
+	)
+	flush := func() {
+		if cur != nil {
+			cur.Text = strings.Join(body, "\n")
+			files = append(files, *cur)
+		}
+		body = nil
+	}
+	for _, ln := range strings.Split(strings.TrimRight(diff, "\n"), "\n") {
+		switch {
+		case strings.HasPrefix(ln, "Index:"):
+			flush()
+			cur = &patchFile{Path: strings.TrimSpace(ln[len("Index:"):]), State: svn.StateModified}
+			inHunk = false
+		case cur == nil:
+			continue
+		case strings.HasPrefix(ln, "@@"):
+			inHunk = true
+		case !inHunk && strings.HasPrefix(ln, "--- ") && strings.HasSuffix(ln, "(nonexistent)"):
+			cur.State = svn.StateAdded
+		case !inHunk && strings.HasPrefix(ln, "+++ ") && strings.HasSuffix(ln, "(nonexistent)"):
+			cur.State = svn.StateDeleted
+		}
+		body = append(body, ln)
+	}
+	flush()
+	return files
 }
 
 // colorize is colorizeDiff memoized over the session. Main is rebuilt on every

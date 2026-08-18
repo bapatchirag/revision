@@ -200,6 +200,72 @@ func TestDiffPaths(t *testing.T) {
 	}
 }
 
+func TestDiffRevisionUsesChangeShorthand(t *testing.T) {
+	const patch = "Index: a.txt\n@@ -0,0 +1 @@\n+a1\n"
+
+	c, calls := stubClient(t, patch, 0)
+	got, err := c.DiffRevision(context.Background(), "7")
+	if err != nil {
+		t.Fatalf("DiffRevision: %v", err)
+	}
+	if got != patch {
+		t.Errorf("DiffRevision = %q, want svn's output verbatim", got)
+	}
+	// No path: the diff is scoped to the client's directory, so its paths come
+	// out relative to whatever the display scope rooted it at.
+	if argv := calls(); len(argv) != 1 || argv[0] != "diff -c 7 --non-interactive" {
+		t.Errorf("argv = %q, want the single revision diffed", argv)
+	}
+
+	bad, _ := stubClient(t, "", 1)
+	if _, err := bad.DiffRevision(context.Background(), "7"); err == nil {
+		t.Error("a revision svn refused must return an error")
+	}
+}
+
+func TestDiffRevisionsOrdersTheRangeForwards(t *testing.T) {
+	cases := map[string]struct {
+		from, to string
+		want     string
+	}{
+		"ascending":     {"2", "4", "diff -r 2:4"},
+		"descending":    {"4", "2", "diff -r 2:4"},
+		"same revision": {"4", "4", "diff -r 4:4"},
+		"multi-digit":   {"9", "100", "diff -r 9:100"},
+		// Left alone for svn to reject: guessing at an order here would turn a
+		// clear error into a silently wrong diff.
+		"unparsable": {"head", "4", "diff -r head:4"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := strings.Join(diffRevisionsArgs(tc.from, tc.to), " "); got != tc.want {
+				t.Errorf("diffRevisionsArgs(%q, %q) = %q, want %q", tc.from, tc.to, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDiffRevisionsRunsTheRange(t *testing.T) {
+	const patch = "Index: a.txt\n@@ -1 +1,2 @@\n a1\n+a2\n"
+
+	c, calls := stubClient(t, patch, 0)
+	got, err := c.DiffRevisions(context.Background(), "4", "2")
+	if err != nil {
+		t.Fatalf("DiffRevisions: %v", err)
+	}
+	if got != patch {
+		t.Errorf("DiffRevisions = %q, want svn's output verbatim", got)
+	}
+	if argv := calls(); len(argv) != 1 || argv[0] != "diff -r 2:4 --non-interactive" {
+		t.Errorf("argv = %q, want the ordered range diffed", argv)
+	}
+
+	bad, _ := stubClient(t, "", 1)
+	if _, err := bad.DiffRevisions(context.Background(), "2", "4"); err == nil {
+		t.Error("a range svn refused must return an error")
+	}
+}
+
 func TestRevisionDetailAndHeadRevisionErrors(t *testing.T) {
 	const empty = `<?xml version="1.0"?><log></log>`
 

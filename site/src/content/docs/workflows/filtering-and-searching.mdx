@@ -52,6 +52,7 @@ matching.
 | Panel | Behaviour | Parameters | Free text matches |
 |---|---|---|---|
 | Log | filter | `rev:` (exact revision, with or without the leading `r`), `user:` / `author:`, `path:` (a changed path), `date:` (`YYYY-MM-DD`) | The **full** commit message, not just its first line |
+| Log — [a compared range](/workflows/diffs/#comparing-revisions) | filter | `state:` (what the range did to the file: `A`, `M`, `D`, or part of a state name) | The file path |
 | Files — Changes, Changelists, Diffs, Rejects | filter | `state:` (a status code such as `M`, or part of a state name such as `modified`), `cl:` / `changelist:` | The file path |
 | Main / Status | highlight + jump | — | The visible lines |
 
@@ -99,6 +100,18 @@ match over `YYYY-MM-DD HH:MM`, so `date:2026-07-14` pins a single day and `date:
 covers a month.
 
 `rev:` is exact — `rev:12` does not match revision 128.
+
+Drilled into a [compared range](/workflows/diffs/#comparing-revisions) the panel lists
+files rather than revisions, so the filter narrows those instead — by path, or by what the
+range did to them:
+
+```text
+state:deleted internal/svn
+```
+
+The two queries are written in different terms, so they are kept apart: the revisions' own
+filter is set aside while you read a comparison and handed back when you leave it. The
+label in the input names whichever list is on screen.
 
 ### Main and Status
 

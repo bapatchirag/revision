@@ -52,6 +52,14 @@ const maxPassphraseAttempts = 3
 // messages (the Changes / Changelists tabs and their drill-downs).
 const filesViewsID = "files-views"
 
+// logViewsID identifies the Log panel's container on emitted messages. It holds
+// a single view, so it exists only for the drill into a revision's files.
+const logViewsID = "log-views"
+
+// revFilesListID identifies the drilled-in revision file tree on emitted
+// selection/activation messages.
+const revFilesListID = "rev-files"
+
 // changelistsListID / changelistFilesID identify the Changelists list and its
 // drilled-in file list on emitted selection/activation messages.
 const (

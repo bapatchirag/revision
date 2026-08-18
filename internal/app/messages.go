@@ -68,19 +68,20 @@ func (g *loadGen) stale(gen uint64) bool { return gen != 0 && gen != g.gen }
 // — since only one of them is on screen; saved and reject stamp the two
 // directory scans.
 type loadGens struct {
-	diff   loadGen
-	status loadGen
-	log    loadGen
-	rev    loadGen
-	saved  loadGen
-	reject loadGen
-	repos  loadGen
+	diff    loadGen
+	status  loadGen
+	log     loadGen
+	rev     loadGen
+	revDiff loadGen
+	saved   loadGen
+	reject  loadGen
+	repos   loadGen
 }
 
 // stopAll abandons every load in flight, releasing the context each holds. A
 // generation added above is abandoned at shutdown by listing it here.
 func (g *loadGens) stopAll() {
-	for _, l := range []*loadGen{&g.diff, &g.status, &g.log, &g.rev, &g.saved, &g.reject, &g.repos} {
+	for _, l := range []*loadGen{&g.diff, &g.status, &g.log, &g.rev, &g.revDiff, &g.saved, &g.reject, &g.repos} {
 		l.stop()
 	}
 }
@@ -254,6 +255,17 @@ type revisionDetailMsg struct {
 type revisionPendingMsg struct {
 	rev string
 	gen uint64
+}
+
+// revDiffLoadedMsg carries the diff of a range of history. Errors ride on the
+// message rather than tearing down the UI: a range svn will not diff — one
+// reaching back past the directory being displayed, say — is a dead end for that
+// pair alone.
+type revDiffLoadedMsg struct {
+	rng  revRange
+	diff string
+	err  error
+	gen  uint64
 }
 
 // stagedMsg carries the result of staging or unstaging a single path. token
@@ -488,6 +500,13 @@ func saveDiffCmd(client *svn.Client, paths []string, dir, name string) tea.Cmd {
 	}
 }
 
+// writeDiffCmd writes a patch already in hand into dir as name, off the UI
+// goroutine. Unlike saveDiffCmd it runs no svn command, so nothing about it
+// reaches the command log — there is no invocation behind it to report.
+func writeDiffCmd(diff, dir, name string) tea.Cmd {
+	return func() tea.Msg { return writeDiff(dir, name, diff) }
+}
+
 // loadSavedDiffsCmd lists the patch files already saved in dir, off the UI
 // goroutine, for the Diffs view to browse.
 func loadSavedDiffsCmd(dir string, gen uint64) tea.Cmd {
@@ -699,6 +718,24 @@ func loadRevisionDetailCmd(ctx context.Context, client *svn.Client, rev string, 
 	return func() tea.Msg {
 		entry, err := client.RevisionDetail(ctx, rev)
 		return revisionDetailMsg{rev: rev, paths: entry.Paths, err: err, gen: gen}
+	}
+}
+
+// loadRevDiffCmd reads the diff over a range of history off the UI goroutine. A
+// range with no start is the single revision it ends at, which svn diffs against
+// its own predecessor.
+func loadRevDiffCmd(ctx context.Context, client *svn.Client, r revRange, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		var (
+			diff string
+			err  error
+		)
+		if r.from == "" {
+			diff, err = client.DiffRevision(ctx, r.to)
+		} else {
+			diff, err = client.DiffRevisions(ctx, r.from, r.to)
+		}
+		return revDiffLoadedMsg{rng: r, diff: diff, err: err, gen: gen}
 	}
 }
 

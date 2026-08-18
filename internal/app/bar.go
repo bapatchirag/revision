@@ -53,7 +53,14 @@ func (m *Model) panelHints(p int) []string {
 	case panelFiles:
 		return m.filesHints()
 	case panelLog:
-		return []string{"space update to rev", "n/p page", "c commit", "/ filter"}
+		if m.inRevDrill() {
+			return []string{"diff " + m.revDiff.label(), "enter expand", "w save", "/ filter", "esc back"}
+		}
+		hints := []string{"v pick", "space update to rev", "n/p page", "/ filter"}
+		if len(m.logPicks) > 0 {
+			return append([]string{m.logPickLabel(), "enter diff", "esc clear"}, hints...)
+		}
+		return hints
 	}
 	// The command log only scrolls; it has no actions of its own.
 	return nil

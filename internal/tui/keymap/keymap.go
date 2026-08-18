@@ -244,7 +244,15 @@ func HelpSections() []Section {
 			},
 			{
 				Action: "Side-by-side / save", Keys: []string{"s", "w"}, Context: "Main",
-				Description: "Open the diff on screen side by side in an overlay, or save it to a file in `diffOutputDir`.",
+				Description: "Open the diff on screen side by side in an overlay, or save it to a file in `diffOutputDir`. `w` saves a range of history too, down to the single file the drilled-in tree points at; that patch has already been read, so it is written as it stands rather than asked of svn a second time.",
+			},
+			{
+				Action: "Pick revisions", Keys: []string{"v"}, Context: "Log",
+				Description: "Pick the selected revision to be diffed, or unpick it. Two can be held at once, and picking a third drops whichever was picked first, so the far end of a comparison can be moved without unpicking it each time. `esc` lets them go. A pick is held by revision rather than by row, so it survives paging and filtering — the two ends need not be on the same page.",
+			},
+			{
+				Action: "Diff picked revisions", Keys: []string{"enter"}, Context: "Log",
+				Description: "Diff whatever is picked, and open the files it touched as a tree in place of the revisions. One revision on its own is compared with the one before it, so what that commit changed is what you see. Two are compared with each other as they stand: the diff runs from the older to the newer, which is the state at one against the state at the other rather than the sum of the commits between them — the older revision's own change is already on the left-hand side and is not part of it. The tree reads like the Changes view: a file shows its own patch, a directory everything beneath it, and `enter` folds a directory away. It covers the directory `displayFrom` roots the views at. `esc` comes back out to the revisions, leaving the picks held for another look.",
 			},
 			{
 				Action: "Dir diff / untracked", Keys: []string{"D", "U"}, Context: "Files",

@@ -71,6 +71,12 @@ func (m *Model) editTarget() (path, name string, line int, ok bool) {
 		}
 		return m.absPath(rel), rel, line, true
 	}
+	// A range of history names files as they were, which the working copy need no
+	// longer hold; opening today's version of one at a line number read off an old
+	// patch would point the editor somewhere the diff never described.
+	if m.showingRevDiff() {
+		return "", "", 0, false
+	}
 	if m.filesViewIsDiffs() {
 		d, ok := m.savedDiffs.Selected()
 		if !ok {

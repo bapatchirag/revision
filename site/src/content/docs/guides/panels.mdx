@@ -21,7 +21,7 @@ border (`1 of 3`) where a count makes sense.
 |-------|-----|---------------|
 | Status | <KeyCap key="1" /> | The working-copy root, the source path `revision` is operating on, the current directory, the branch, and the checked-out revision against HEAD. |
 | Files | <KeyCap key="2" /> | Pending changes, as a directory tree, grouped by changelist, or as saved patches. |
-| Log | <KeyCap key="3" /> | Revision history, newest first. An asterisk marks the revision the working copy sits at. |
+| Log | <KeyCap key="3" /> | Revision history, newest first. An asterisk marks the revision the working copy sits at, and a dot any picked to be compared. |
 | Command Log | <KeyCap key="x" /> | The `svn` actions `revision` has run on your behalf, newest first, each marked ✓ or ✗. |
 | Main | <KeyCap key="0" /> | Detail for whatever is selected: a diff for a file or directory, metadata and changed paths for a revision. |
 
@@ -184,14 +184,20 @@ Selecting a revision shows its date, full message and changed paths in Main.
 <KeyCap key="space" /> [updates the working copy](/workflows/updating/) to the selected
 revision.
 
+<KeyCap key="v" /> picks a revision to compare, up to two at a time, and
+<KeyCap key="enter" /> diffs them: the panel becomes a tree of the files they touched and
+Main follows it like the Changes view. <KeyCap key="esc" /> comes back out. See
+[Comparing revisions](/workflows/diffs/#comparing-revisions).
+
 A page holds [`logLimit`](/reference/configuration/#loglimit) revisions — 100 by default.
 <KeyCap key="n" /> loads the next page and <KeyCap key="p" /> the previous one. The footer
 shows where the cursor sits within the page and which page you are on, so `12 of 100 · 3`
 is the twelfth revision of the third page.
 
 Filtering with <KeyCap key="/" /> searches the page on screen, not the whole history; the
-filter stays applied as you turn pages. Committing returns the panel to the first page, so
-the new revision is in view.
+filter stays applied as you turn pages. Drilled into a comparison it narrows the files
+instead, and the revisions get their own filter back on the way out. Committing returns
+the panel to the first page, so the new revision is in view.
 
 ## Command Log
 
@@ -215,6 +221,7 @@ Detail for the current selection, and the target of the
 | A changelist | The combined diff of its members. |
 | A saved patch | The patch file's contents. |
 | A revision | Date, author, full message, and changed paths. |
+| A file in a compared range | That file's section of the range's diff. |
 | The Status panel | Project links and version information. |
 
 A diff is fetched once and reused for the rest of the session, so stepping back to a file

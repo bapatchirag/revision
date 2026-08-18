@@ -141,7 +141,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		m.session.Purge()
 		m.clearDiff()
 		m.refreshChrome()
-		return tea.Batch(m.reloadStatus(), m.reloadLogPage(), m.reloadSavedDiffsIfShown(), m.reloadRejectsIfShown()), true
+		return tea.Batch(m.reloadStatus(), m.reloadLogPage(), m.reloadRevDiffIfShown(), m.reloadSavedDiffsIfShown(), m.reloadRejectsIfShown()), true
 	case key.Matches(k, m.keys.FocusNext):
 		m.focusNextPanel()
 		return m.afterFocusChange(), true
@@ -170,10 +170,15 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	case key.Matches(k, m.keys.OpenEditor):
 		return m.openInEditor(), true
 	case key.Matches(k, m.keys.Back):
-		// esc clears the focused panel's filter when it has one; otherwise it is
-		// left for the panel (e.g. to pop a changelist drill).
+		// esc unwinds the Log panel a step at a time: the filter, then the drill into
+		// a range's files — which the container pops itself, so it is left to do so —
+		// and then the revisions held for it. It is otherwise left for the panel
+		// (e.g. to pop a changelist drill).
 		if cmd, cleared := m.clearFocusedFilter(); cleared {
 			return cmd, true
+		}
+		if m.focus.Index() == panelLog && !m.inRevDrill() && m.clearLogPicks() {
+			return nil, true
 		}
 		return nil, false
 	case key.Matches(k, m.keys.Help):
@@ -198,6 +203,9 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		case panelFiles:
 			return m.stageSelected(), true
 		case panelLog:
+			if m.inRevDrill() {
+				return nil, false
+			}
 			return m.requestUpdateToRevision(), true
 		}
 		return nil, false
@@ -210,6 +218,9 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 			return m.assignChangelist(), true
 		}
 		if m.focus.Index() == panelLog {
+			if m.inRevDrill() {
+				return nil, false
+			}
 			return m.nextLogPage(), true
 		}
 		return nil, false
@@ -220,6 +231,9 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 			return m.requestApplyPatch(), true
 		}
 		if m.focus.Index() == panelLog {
+			if m.inRevDrill() {
+				return nil, false
+			}
 			return m.prevLogPage(), true
 		}
 		return nil, false
@@ -229,7 +243,17 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		return nil, false
+	case "v":
+		if m.focus.Index() == panelLog && !m.inRevDrill() {
+			return m.toggleLogPick(), true
+		}
+		return nil, false
 	case "c":
+		// The Log panel browses revisions that are already committed, and holds no
+		// working-copy selection a commit could be built from.
+		if m.focus.Index() == panelLog {
+			return nil, false
+		}
 		return m.openCommit(), true
 	case "m":
 		// Resolving acts on a conflicted file in the Changes tree, or on a reject in
@@ -249,6 +273,11 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		}
 		return nil, false
 	case "u":
+		// Nothing on screen describes the working copy while a range of history is
+		// being read, so there is no update to be asked for from here.
+		if m.showingRevDiff() {
+			return nil, false
+		}
 		return m.requestUpdate(), true
 	case "D":
 		return m.toggleDirDiff(), true

@@ -146,6 +146,76 @@ func TestIntegrationLogAndDiff(t *testing.T) {
 	}
 }
 
+// TestIntegrationRevisionDiff pins the two properties the Log panel's diff is
+// built on: an added or deleted file is marked by "(nonexistent)" on the side it
+// is missing from, and a range is literal — the state at one revision against
+// the state at another, not the sum of the commits between them.
+func TestIntegrationRevisionDiff(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	// r1 adds a.txt, r2 adds b.txt, r3 modifies a.txt, r4 deletes b.txt.
+	writeFile(t, filepath.Join(wc, "a.txt"), "a1\n")
+	mustRun(t, wc, "svn", "add", "a.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "r1")
+	mustRun(t, wc, "svn", "update")
+
+	writeFile(t, filepath.Join(wc, "b.txt"), "b1\n")
+	mustRun(t, wc, "svn", "add", "b.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "r2")
+	mustRun(t, wc, "svn", "update")
+
+	writeFile(t, filepath.Join(wc, "a.txt"), "a1\na2\n")
+	mustRun(t, wc, "svn", "commit", "-m", "r3")
+	mustRun(t, wc, "svn", "update")
+
+	mustRun(t, wc, "svn", "rm", "b.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "r4")
+	mustRun(t, wc, "svn", "update")
+
+	added, err := c.DiffRevision(ctx, "2")
+	if err != nil {
+		t.Fatalf("DiffRevision(2): %v", err)
+	}
+	if !strings.Contains(added, "--- b.txt\t(nonexistent)") {
+		t.Errorf("an added file should be missing from the left side:\n%s", added)
+	}
+
+	deleted, err := c.DiffRevision(ctx, "4")
+	if err != nil {
+		t.Fatalf("DiffRevision(4): %v", err)
+	}
+	if !strings.Contains(deleted, "+++ b.txt\t(nonexistent)") {
+		t.Errorf("a deleted file should be missing from the right side:\n%s", deleted)
+	}
+
+	// r2 is the left-hand endpoint, so b.txt is already present there: the range
+	// records it being deleted, never added. That is what makes the range literal.
+	rng, err := c.DiffRevisions(ctx, "2", "4")
+	if err != nil {
+		t.Fatalf("DiffRevisions(2, 4): %v", err)
+	}
+	if !strings.Contains(rng, "+++ b.txt\t(nonexistent)") {
+		t.Errorf("the range should delete b.txt:\n%s", rng)
+	}
+	if strings.Contains(rng, "--- b.txt\t(nonexistent)") {
+		t.Errorf("a literal range must not replay the left endpoint's own change:\n%s", rng)
+	}
+	if !strings.Contains(rng, "+a2") {
+		t.Errorf("the range should carry r3's modification:\n%s", rng)
+	}
+
+	// Picked the other way round, the same pair must still read forwards.
+	reversed, err := c.DiffRevisions(ctx, "4", "2")
+	if err != nil {
+		t.Fatalf("DiffRevisions(4, 2): %v", err)
+	}
+	if reversed != rng {
+		t.Errorf("a range picked newest-first should match the same range picked oldest-first:\n%s\n---\n%s", reversed, rng)
+	}
+}
+
 func TestIntegrationLogPaging(t *testing.T) {
 	wc := setupWC(t)
 	ctx := context.Background()
