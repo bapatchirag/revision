@@ -32,5 +32,4 @@ Enter
 Sleep 4s
 
 # Both invocations are recorded in the Command Log, marked with their result.
-Type "4"
 Sleep 3s
