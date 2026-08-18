@@ -1,10 +1,17 @@
 package app
 
 import (
+	"slices"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	uimsg "github.com/bapatchirag/revision/internal/tui/msg"
 )
+
+// sidePanels is what Tab cycles through. Main and the command log are left out
+// of it, as in lazygit: Main is reached with 0 or a click, the command log with
+// x or a click, so neither has a second way in.
+var sidePanels = []int{panelStatus, panelFiles, panelLog}
 
 // handleSelection re-renders Main when the selection that drives it changes, and
 // loads the diff for a newly selected file.
@@ -66,21 +73,36 @@ func (m *Model) afterFocusChange() tea.Cmd {
 	return cmd
 }
 
-// focusNextPanel and focusPrevPanel cycle focus like the focus manager but skip
-// the command-log panel while it is hidden, so Tab never lands on an off-screen
-// panel. It is the only hideable panel and sits at the end of the ring, so a
-// single extra step is always enough to pass it.
-func (m *Model) focusNextPanel() {
-	m.focus.Next()
-	if m.focus.Index() == panelCmdLog && !m.showCmdLog {
-		m.focus.Next()
+// focusNextPanel and focusPrevPanel step around the side panels only, so Tab
+// never lands on Main or the command log.
+func (m *Model) focusNextPanel() { m.stepPanel(1) }
+
+func (m *Model) focusPrevPanel() { m.stepPanel(-1) }
+
+// stepPanel moves focus one place around sidePanels. Pressed on Main or the
+// command log — which are outside the cycle — it returns to the side panel
+// driving Main, which is where the user came from.
+func (m *Model) stepPanel(step int) {
+	at := slices.Index(sidePanels, m.focus.Index())
+	if at < 0 {
+		m.focus.Focus(m.sourcePanel())
+		return
 	}
+	n := len(sidePanels)
+	m.focus.Focus(sidePanels[((at+step)%n+n)%n])
 }
 
-func (m *Model) focusPrevPanel() {
-	m.focus.Prev()
-	if m.focus.Index() == panelCmdLog && !m.showCmdLog {
-		m.focus.Prev()
+// sourcePanel is the side panel currently driving Main. Focusing Main or the
+// command log leaves the source alone, so it still names the last side panel to
+// hold focus.
+func (m *Model) sourcePanel() int {
+	switch m.source {
+	case sourceStatus:
+		return panelStatus
+	case sourceLog:
+		return panelLog
+	default:
+		return panelFiles
 	}
 }
 

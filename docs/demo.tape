@@ -191,7 +191,6 @@ Escape
 Sleep 800ms
 
 # --- every svn action is mirrored in the command log ------------------------
-Type "4"
 Sleep 2.2s
 
 # --- settings: edit the config file in place, previewing the theme live -----

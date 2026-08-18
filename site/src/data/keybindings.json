@@ -134,11 +134,10 @@
       "1",
       "2",
       "3",
-      "4",
       "0"
     ],
     "context": "Global",
-    "description": "Focus the Status, Files, Log, Command Log or Main panel."
+    "description": "Focus the Status, Files, Log or Main panel. The Command Log has no number: `x` shows it and a click focuses it."
   },
   {
     "section": "Navigation",
@@ -148,7 +147,7 @@
       "shift+tab"
     ],
     "context": "Global",
-    "description": "Move focus to the next or previous panel."
+    "description": "Move focus to the next or previous side panel — Status, Files, Log. Main and the Command Log are outside the cycle, so `tab` pressed on either returns to the side panel driving Main."
   },
   {
     "section": "Navigation",
@@ -256,7 +255,7 @@
       "x"
     ],
     "context": "Global",
-    "description": "Show or hide the Command Log panel."
+    "description": "Show or hide the Command Log panel. It sits outside the panel cycle and has no number, so clicking it is the only way to focus and scroll it."
   },
   {
     "section": "General",

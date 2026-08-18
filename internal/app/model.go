@@ -287,7 +287,8 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		component.NewPanel("Files", 2, filesViews, th),
 		component.NewPanel("Log", 3, logTable, th),
 		component.NewPanel("Main", 0, main, th),
-		component.NewPanel("Command Log", 4, cmdLogView, th),
+		// No badge: the command log answers to x and the mouse, never a number.
+		component.NewPanel("Command Log", -1, cmdLogView, th),
 	}
 
 	m = &Model{

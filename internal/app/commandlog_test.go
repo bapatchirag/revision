@@ -104,50 +104,45 @@ func TestCommandLogKeepsUserRequestedReadOnlyCommands(t *testing.T) {
 	}
 }
 
-func TestFocusCommandLogPanel(t *testing.T) {
+// TestNumberKeysDoNotReachTheCommandLog pins the panel outside the numbered
+// range: x shows it and a click focuses it, nothing else.
+func TestNumberKeysDoNotReachTheCommandLog(t *testing.T) {
 	m := sizedModel(t)
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
-	m = next.(*Model)
-	if m.focus.Index() != panelCmdLog {
-		t.Fatalf("pressing 4 should focus the command log, got index %d", m.focus.Index())
+	m = stepModel(t, m, keyRunes("4"))
+	if m.focus.Index() == panelCmdLog {
+		t.Error("4 should no longer focus the command log")
 	}
-}
 
-func TestFocusFourRevealsHiddenCommandLog(t *testing.T) {
-	m := sizedModel(t)
-	// Hide it, then focus by number: it should reappear and take focus.
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
-	m = next.(*Model)
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
-	m = next.(*Model)
-	if !m.showCmdLog {
-		t.Error("focusing the command log should reveal it when hidden")
+	m = stepModel(t, m, keyRunes("x"))
+	if m.showCmdLog {
+		t.Fatal("x should hide the command log")
 	}
-	if m.focus.Index() != panelCmdLog {
-		t.Errorf("pressing 4 should focus the command log, got index %d", m.focus.Index())
+	m = stepModel(t, m, keyRunes("4"))
+	if m.showCmdLog {
+		t.Error("4 should not reveal the hidden command log")
 	}
 }
 
 func TestHidingFocusedCommandLogMovesFocusToMain(t *testing.T) {
 	m := sizedModel(t)
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}}) // focus it
-	m = next.(*Model)
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}) // hide it
-	m = next.(*Model)
+	m.focus.Focus(panelCmdLog) // as a click on it would
+	m.afterFocusChange()
+	m = stepModel(t, m, keyRunes("x")) // hide it
 	if m.focus.Index() != panelMain {
 		t.Errorf("hiding the focused command log should move focus to Main, got index %d", m.focus.Index())
 	}
 }
 
-func TestTabSkipsHiddenCommandLog(t *testing.T) {
+func TestTabNeverReachesTheCommandLog(t *testing.T) {
 	m := sizedModel(t)
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}) // hide it
-	m = next.(*Model)
-	m.focus.Focus(panelMain)
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // cycle forward
-	m = next.(*Model)
-	if m.focus.Index() == panelCmdLog {
-		t.Error("Tab should skip the command log while it is hidden")
+	if !m.showCmdLog {
+		t.Fatal("the command log starts shown")
+	}
+	for range m.focus.Len() + 1 {
+		m = stepModel(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		if m.focus.Index() == panelCmdLog {
+			t.Fatal("tab should not reach the command log even while it is shown")
+		}
 	}
 }
 

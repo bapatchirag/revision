@@ -32,5 +32,4 @@ Type "3"
 Sleep 2500ms
 
 # The svn commit invocation is recorded in the Command Log.
-Type "4"
 Sleep 3s

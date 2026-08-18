@@ -92,7 +92,7 @@ cd /path/to/working-copy
 revision                 # or from anywhere: revision --path /path/to/working-copy
 ```
 
-- `1` `2` `3` `4` `0` or `Tab` — move between the Status, Files, Log, Command Log and Main panels
+- `1` `2` `3` `0` or `Tab` — move between the Status, Files, Log and Main panels
 - `space` — stage the selected file, or every change beneath the selected directory
 - `c` — commit the staged set · `u` — update the working copy
 - `/` — filter or search the focused panel · `R` — refresh

@@ -201,12 +201,12 @@ func HelpSections() []Section {
 		}},
 		{Title: "Navigation", Bindings: []Binding{
 			{
-				Action: "Jump to panel", Keys: []string{"1", "2", "3", "4", "0"}, sep: " ", Context: "Global",
-				Description: "Focus the Status, Files, Log, Command Log or Main panel.",
+				Action: "Jump to panel", Keys: []string{"1", "2", "3", "0"}, sep: " ", Context: "Global",
+				Description: "Focus the Status, Files, Log or Main panel. The Command Log has no number: `x` shows it and a click focuses it.",
 			},
 			{
 				Action: "Cycle panels", Keys: []string{"tab", "shift+tab"}, Context: "Global",
-				Description: "Move focus to the next or previous panel.",
+				Description: "Move focus to the next or previous side panel — Status, Files, Log. Main and the Command Log are outside the cycle, so `tab` pressed on either returns to the side panel driving Main.",
 			},
 			{
 				Action: "Move up / down", Keys: []string{"k", "j"}, Context: "Any panel",
@@ -252,7 +252,7 @@ func HelpSections() []Section {
 			},
 			{
 				Action: "Toggle command log", Keys: []string{"x"}, Context: "Global",
-				Description: "Show or hide the Command Log panel.",
+				Description: "Show or hide the Command Log panel. It sits outside the panel cycle and has no number, so clicking it is the only way to focus and scroll it.",
 			},
 		}},
 		{Title: "General", Bindings: []Binding{

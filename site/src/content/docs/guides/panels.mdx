@@ -13,7 +13,8 @@ Command Log beneath it.
 <AppScreen golden="TestModelGoldenLayout" />
 
 Each panel carries its number in the top border — `[2] Files` — and the focused one is
-drawn in the accent colour. The frame also carries a position and count in the bottom
+drawn in the accent colour. The Command Log has no number; it is reached with
+<KeyCap key="x" /> and the mouse. The frame also carries a position and count in the bottom
 border (`1 of 3`) where a count makes sense.
 
 | Panel | Key | What it shows |
@@ -21,14 +22,17 @@ border (`1 of 3`) where a count makes sense.
 | Status | <KeyCap key="1" /> | The working-copy root, the source path `revision` is operating on, the current directory, the branch, and the checked-out revision against HEAD. |
 | Files | <KeyCap key="2" /> | Pending changes, as a directory tree, grouped by changelist, or as saved patches. |
 | Log | <KeyCap key="3" /> | Revision history, newest first. An asterisk marks the revision the working copy sits at. |
-| Command Log | <KeyCap key="4" /> | The `svn` actions `revision` has run on your behalf, newest first, each marked ✓ or ✗. |
+| Command Log | <KeyCap key="x" /> | The `svn` actions `revision` has run on your behalf, newest first, each marked ✓ or ✗. |
 | Main | <KeyCap key="0" /> | Detail for whatever is selected: a diff for a file or directory, metadata and changed paths for a revision. |
 
 ## Moving between panels
 
-- <KeyCap key="1" /> … <KeyCap key="4" />, <KeyCap key="0" /> — focus a panel directly.
-- <KeyCap key="tab" /> / <KeyCap key="shift+tab" /> — cycle forwards and backwards.
-- <KeyCap key="x" /> — show or hide the Command Log.
+- <KeyCap key="1" />, <KeyCap key="2" />, <KeyCap key="3" />, <KeyCap key="0" /> — focus a panel directly.
+- <KeyCap key="tab" /> / <KeyCap key="shift+tab" /> — cycle forwards and backwards through the
+  side panels: Status, Files and Log. Main and the Command Log are outside the cycle, so
+  <KeyCap key="tab" /> pressed on either returns to the side panel driving Main.
+- <KeyCap key="x" /> — show or hide the Command Log. It has no number of its own, so
+  clicking it is the only way to focus and scroll it.
 
 With [`allowMouse`](/reference/configuration/#allowmouse) on, clicking a panel focuses it.
 
@@ -195,7 +199,8 @@ Every `svn` command `revision` ran on your behalf, newest first, each marked ✓
 Read-only queries — the status and log refreshes that happen constantly, including the
 background ones — are left out, so the list stays a record of what actually changed.
 
-Toggle the panel with <KeyCap key="x" />.
+Toggle the panel with <KeyCap key="x" />. It has no number and is not in the
+<KeyCap key="tab" /> cycle, so click it to focus and scroll it.
 
 ## Main
 

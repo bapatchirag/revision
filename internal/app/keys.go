@@ -190,15 +190,6 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	case "3":
 		m.focus.Focus(panelLog)
 		return m.afterFocusChange(), true
-	case "4":
-		// Focusing the command log reveals it first when hidden, since it cannot
-		// be focused while off-screen.
-		if !m.showCmdLog {
-			m.showCmdLog = true
-			m.layout()
-		}
-		m.focus.Focus(panelCmdLog)
-		return m.afterFocusChange(), true
 	case "0":
 		m.focus.Focus(panelMain)
 		return m.afterFocusChange(), true
