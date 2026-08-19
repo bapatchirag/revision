@@ -28,6 +28,9 @@ func (m *Model) systemEvent(msg tea.Msg) (tea.Cmd, bool) {
 		if m.savingDiff {
 			m.sizeDiffEditor()
 		}
+		if m.shelfNaming {
+			m.sizeShelfName()
+		}
 		if m.retargeting {
 			m.sizeSourcePath()
 		}

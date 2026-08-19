@@ -120,6 +120,33 @@ func (m *Model) mutationEvent(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		return m.reloadSavedDiffs(), true
 
+	case shelvedMsg:
+		if msg.err != nil {
+			if msg.entry.ID == "" {
+				m.showToast(failureText("shelve", msg.err), component.LevelError)
+				return nil, true
+			}
+			// The changes are safely on the shelf; it is the working copy that did
+			// not come clean, so the reload below shows what is still in it.
+			m.showToast(failureText("clear the working copy", msg.err), component.LevelError)
+		} else {
+			m.showToast(shelveToast(msg.entry, msg.left))
+		}
+		// What was picked has been taken, so the picks go with it either way: the
+		// files they named are no longer in the working copy to act on.
+		m.shelfPicks = nil
+		m.clearDiff()
+		return tea.Batch(m.reloadShelves(), m.reloadStatus()), true
+
+	case shelveAllMsg:
+		items := shelvableItems(m.fileItems)
+		if len(items) == 0 {
+			m.showToast("nothing to shelve", component.LevelWarning)
+			return nil, true
+		}
+		m.openShelveName(shelveScope{label: "all changes", items: items})
+		return nil, true
+
 	case rejectDeletedMsg:
 		if msg.err != nil {
 			m.showToast(failureText("delete "+msg.name, msg.err), component.LevelError)

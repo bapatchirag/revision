@@ -7,10 +7,10 @@
 │                              ││                                              │
 ╰──────────────────────────────╯│                                              │
 ╭─ [2] ─ Changes ─── Changelist╮│                                              │
-│  ▾ / 2…                     ┃││                                              │
-│    ▾ src/ 2…                ┃││                                              │
-│>       M a.go …             ┃││                                              │
-│        M b.go …             │││                                              │
+│   ▾ / 2…                    ┃││                                              │
+│     ▾ src/ 2…               ┃││                                              │
+│>        M a.go …            ┃││                                              │
+│         M b.go …            │││                                              │
 ╰────────────────── 1 of 3 ────╯│                                              │
 ╭─ [3] Log ────────────────────╮│                                              │
 │  Rev Author Message          ││                                              │
@@ -21,4 +21,4 @@
 ╭─ [4] Shelf ──────────────────╮│                                              │
 │                              ││                                              │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-space stage · n changelist · c commit · r revert · d delete · [ ] view · ? help 
+space stage · v pick · n changelist · c commit · r revert · d delete · …        

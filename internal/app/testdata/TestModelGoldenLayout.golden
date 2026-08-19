@@ -7,10 +7,10 @@
 │HEAD      r50                 ││                                              │
 ╰──────────────────────────────╯│                                              │
 ╭─ [2] ─ Changes ─── Changelist╮│                                              │
-│  ▾ /                         ││                                              │
-│>   ● A added.txt             ││                                              │
-│      M modified.go           ││                                              │
-│      D gone.txt              ││                                              │
+│   ▾ /                        ││                                              │
+│>    ● A added.txt            ││                                              │
+│       M modified.go          ││                                              │
+│       D gone.txt             ││                                              │
 ╰────────────────── 1 of 3 ────╯│                                              │
 ╭─ [3] Log ────────────────────╮│                                              │
 │  Rev    Author Message       ││                                              │
@@ -21,4 +21,4 @@
 ╭─ [4] Shelf ──────────────────╮│                                              │
 │                              ││                                              │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-space stage · n changelist · c commit · r revert · d delete · [ ] view · ? help 
+space stage · v pick · n changelist · c commit · r revert · d delete · …        

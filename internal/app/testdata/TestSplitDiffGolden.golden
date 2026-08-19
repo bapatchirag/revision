@@ -21,4 +21,4 @@
 ╭─│                                    │                                     │ │
 │ ╰────────────────────────── src/a.go · 1-12 of 12 · e edit · esc close ────╯ │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-space stage · n changelist · c commit · r revert · d delete · [ ] view · ? help 
+space stage · v pick · n changelist · c commit · r revert · d delete · …        

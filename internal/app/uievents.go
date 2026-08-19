@@ -76,6 +76,8 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 			return m.submitChangelist(msg.Value), true
 		case diffNameEditorID:
 			return m.submitDiffName(msg.Value), true
+		case shelfNameEditorID:
+			return m.submitShelveName(msg.Value), true
 		case sourcePathID:
 			return m.submitSourcePath(msg.Value), true
 		case repoSwitchID:
@@ -126,6 +128,8 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 			m.nameEditor.Blur()
 		case diffNameEditorID:
 			m.closeDiffName()
+		case shelfNameEditorID:
+			m.closeShelfName()
 		case sourcePathID:
 			m.closeSourcePath()
 		case repoSwitchID:

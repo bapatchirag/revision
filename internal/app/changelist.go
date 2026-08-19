@@ -95,9 +95,11 @@ func isContainerDirEntry(path string, items []svn.StatusItem) bool {
 }
 
 // renderChangelistGroup is the domain adapter that turns a changelistGroup into
-// the row the reusable List renders: a colored marker (green staged, muted
-// default, accent for a named list), the label, and the file count.
-func renderChangelistGroup(th theme.Theme) func(changelistGroup) string {
+// the row the reusable List renders: a pick cell, a colored marker (green
+// staged, muted default, accent for a named list), the label, and the file
+// count. picked reports how many of the group's files are held for shelving, so
+// a partly-picked changelist reads differently from a whole one.
+func renderChangelistGroup(th theme.Theme, picked func(changelistGroup) int) func(changelistGroup) string {
 	return func(g changelistGroup) string {
 		var color lipgloss.Color
 		switch g.Name {
@@ -111,7 +113,20 @@ func renderChangelistGroup(th theme.Theme) func(changelistGroup) string {
 		marker := lipgloss.NewStyle().Foreground(color).Bold(true).Render("◆")
 		label := lipgloss.NewStyle().Foreground(th.Text).Render(g.Label())
 		count := lipgloss.NewStyle().Foreground(th.Muted).Render(fmt.Sprintf(" (%d)", len(g.Items)))
-		return marker + " " + label + count
+		return groupPickCell(th, picked(g), len(g.Items)) + marker + " " + label + count
+	}
+}
+
+// groupPickCell marks a changelist by how much of it is held for shelving: a
+// tick for all of it, a dot for some, a blank for none.
+func groupPickCell(th theme.Theme, picked, total int) string {
+	switch {
+	case picked == 0 || total == 0:
+		return " "
+	case picked >= total:
+		return lipgloss.NewStyle().Foreground(th.Accent).Bold(true).Render("✓")
+	default:
+		return lipgloss.NewStyle().Foreground(th.Accent).Render("·")
 	}
 }
 

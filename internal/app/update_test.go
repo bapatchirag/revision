@@ -60,6 +60,8 @@ func probeMsgs() []tea.Msg {
 		updatedMsg{err: err},
 		diffSavedMsg{err: err},
 		savedDiffDeletedMsg{err: err},
+		shelvedMsg{err: err},
+		shelveAllMsg{},
 		rejectDeletedMsg{err: err},
 		patchAppliedMsg{err: err},
 		mergeWrittenMsg{err: err},

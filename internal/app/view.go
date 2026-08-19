@@ -31,6 +31,8 @@ func (m *Model) View() string {
 		view = m.overlayCenter(view, m.nameEditor.View())
 	case m.savingDiff:
 		view = m.overlayCenter(view, m.diffEditor.View())
+	case m.shelfNaming:
+		view = m.overlayCenter(view, m.shelfEditor.View())
 	case m.retargeting:
 		view = m.overlayCenter(view, m.pathEditor.View())
 	case m.switchingRepo:

@@ -21,4 +21,4 @@
 ╭─│                                    │                                     │ │
 │ ╰───── line 5 · 1-5 of 5 · 3 take both · 0 undo · [ ] next · esc close ────╯ │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-space stage · n changelist · c commit · r revert · d delete · [ ] view · ? help 
+space stage · v pick · n changelist · c commit · r revert · d delete · …        

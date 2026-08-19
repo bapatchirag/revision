@@ -64,6 +64,7 @@ type Model struct {
 	progress    *component.Modal
 	menu        *component.Menu
 	updateMenu  *component.Menu
+	shelfEditor *component.Prompt
 	form        *component.Form
 	rulesEditor *component.EditList
 	toast       *component.Toast
@@ -150,6 +151,13 @@ type Model struct {
 	shelfID      string
 	shelfText    string
 	shelfReadErr bool
+	// shelfPicks are the paths held for the next shelve, by path so a pick
+	// outlives the reload, filter and rebuild it was made under. shelveTarget is
+	// the set the open name prompt will take, held so what is shelved cannot drift
+	// with the working copy behind the overlay.
+	shelfPicks   map[string]bool
+	shelveTarget shelveScope
+	shelfNaming  bool
 
 	source   mainSource
 	diffPath string
@@ -297,9 +305,11 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	// The pending lookup reads through m, which is assigned below before any row
 	// is rendered, so a row marked in flight dims without a rebuild.
 	pending := func(n fileNode) int { return m.pendingCount(n) }
-	files := component.NewList[fileNode]("files", renderFileNode(th, pending), th, keys)
-	changelists := component.NewList[changelistGroup](changelistsListID, renderChangelistGroup(th), th, keys)
-	clFiles := component.NewList[fileNode](changelistFilesID, renderFileNode(th, pending), th, keys)
+	picked := func(n fileNode) bool { return m.nodePicked(n) }
+	groupPicked := func(g changelistGroup) int { return m.groupPicked(g) }
+	files := component.NewList[fileNode]("files", renderFileNode(th, pending, picked), th, keys)
+	changelists := component.NewList[changelistGroup](changelistsListID, renderChangelistGroup(th, groupPicked), th, keys)
+	clFiles := component.NewList[fileNode](changelistFilesID, renderFileNode(th, pending, picked), th, keys)
 	savedDiffs := component.NewList[savedDiff](savedDiffsListID, renderSavedDiff(th), th, keys)
 	rejects := component.NewList[rejectNode](rejectsListID, renderRejectNode(th), th, keys)
 	filesViews := component.NewViews(filesViewsID, []component.View{
@@ -362,6 +372,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		progress:        component.NewModal("update-progress", "", "", th, keys),
 		menu:            component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
 		updateMenu:      component.NewMenu(updateMenuID, "Update available", updateMenuItems(), th, keys),
+		shelfEditor:     component.NewPrompt(shelfNameEditorID, "Shelve as", "e.g. wip refactor", th, keys),
 		form:            component.NewForm(settingsFormID, "Settings", settingsFields(cfg, cfg.DirectoryDiff), th, keys),
 		rulesEditor:     component.NewEditList(hideRulesEditorID, "Hide rules", "No rules yet — press a to add one.", th, keys),
 		toast:           component.NewToast(th),

@@ -8,6 +8,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/bapatchirag/revision/internal/shelf"
+	"github.com/bapatchirag/revision/internal/svn"
+	"github.com/bapatchirag/revision/internal/tui/component"
 	"github.com/bapatchirag/revision/internal/tui/theme"
 )
 
@@ -120,4 +122,254 @@ func (m *Model) shelfShowsPatch() bool {
 	e, ok := m.shelves.Selected()
 	return ok && m.shelfErr == nil && !m.shelfReadErr &&
 		m.shelfID == e.ID && strings.TrimSpace(m.shelfText) != ""
+}
+
+// shelveScope is the set of changes a shelve takes in. label names it in the
+// prompt and is what the entry falls back to being called.
+type shelveScope struct {
+	label string
+	items []svn.StatusItem
+}
+
+// shelvableItem reports whether a status entry is one a shelf can take and put
+// back. A conflicted file is left out: it needs deciding rather than setting
+// aside, and reverting one throws the merge away. Ignored and external entries
+// are not this working copy's changes to move.
+func shelvableItem(it svn.StatusItem) bool {
+	switch it.State {
+	case svn.StateConflicted, svn.StateIgnored, svn.StateExternal,
+		svn.StateObstructed, svn.StateIncomplete:
+		return false
+	case svn.StateUnversioned:
+		return true
+	}
+	return it.State.IsDirty() || it.PropState.IsDirty()
+}
+
+// shelvableItems narrows a set of status entries to the ones a shelf can take.
+func shelvableItems(items []svn.StatusItem) []svn.StatusItem {
+	out := make([]svn.StatusItem, 0, len(items))
+	for _, it := range items {
+		if shelvableItem(it) {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// itemPaths pulls the paths out of a set of status entries.
+func itemPaths(items []svn.StatusItem) []string {
+	paths := make([]string, 0, len(items))
+	for _, it := range items {
+		paths = append(paths, it.Path)
+	}
+	return paths
+}
+
+// isShelfPicked reports whether a path is held for the next shelve.
+func (m *Model) isShelfPicked(path string) bool { return m.shelfPicks[path] }
+
+// nodePicked reports whether a Files-panel tree row is held: a file leaf on its
+// own account, a directory row when everything shelvable beneath it is.
+func (m *Model) nodePicked(n fileNode) bool {
+	if n.Item != nil {
+		return m.isShelfPicked(n.Item.Path)
+	}
+	under := shelvableItems(filesUnder(n, m.fileItems))
+	if len(under) == 0 {
+		return false
+	}
+	for _, it := range under {
+		if !m.isShelfPicked(it.Path) {
+			return false
+		}
+	}
+	return true
+}
+
+// groupPicked counts how many of a changelist's files are held.
+func (m *Model) groupPicked(g changelistGroup) int {
+	n := 0
+	for _, it := range g.Items {
+		if m.isShelfPicked(it.Path) {
+			n++
+		}
+	}
+	return n
+}
+
+// pickedItems resolves the held paths against the working copy as it stands, so
+// a pick whose file has since been committed or reverted simply drops out.
+func (m *Model) pickedItems() []svn.StatusItem {
+	if len(m.shelfPicks) == 0 {
+		return nil
+	}
+	var out []svn.StatusItem
+	for _, it := range m.fileItems {
+		if m.shelfPicks[it.Path] && shelvableItem(it) {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// toggleShelfPick holds or releases what the Files panel points at, for the next
+// shelve. It works on a file leaf, on a directory row (everything shelvable
+// beneath it, so a subtree is picked in one press), and on a changelist row in
+// the Changelists overview — which is how changes already filed under a
+// changelist are shelved without drilling into it.
+func (m *Model) toggleShelfPick() tea.Cmd {
+	if m.filesViewIsStore() {
+		return nil
+	}
+	var targets []svn.StatusItem
+	switch {
+	case m.filesViewIsChangelists() && !m.inChangelistDrill():
+		g, ok := m.changelists.Selected()
+		if !ok {
+			return nil
+		}
+		targets = shelvableItems(g.Items)
+	default:
+		n, items, ok := m.selectedTreeNode()
+		if !ok {
+			return nil
+		}
+		if n.Item != nil {
+			targets = shelvableItems([]svn.StatusItem{*n.Item})
+		} else {
+			targets = shelvableItems(filesUnder(n, items))
+		}
+	}
+	if len(targets) == 0 {
+		m.showToast("nothing here can be shelved", component.LevelWarning)
+		return nil
+	}
+	m.setShelfPicks(targets, !m.allPicked(targets))
+	m.rebuildFilesViews()
+	m.updateBar()
+	return nil
+}
+
+// allPicked reports whether every one of the targets is already held, which is
+// what makes a second press on the same row release them.
+func (m *Model) allPicked(targets []svn.StatusItem) bool {
+	for _, it := range targets {
+		if !m.isShelfPicked(it.Path) {
+			return false
+		}
+	}
+	return len(targets) > 0
+}
+
+// setShelfPicks holds or releases a set of paths.
+func (m *Model) setShelfPicks(targets []svn.StatusItem, hold bool) {
+	if m.shelfPicks == nil {
+		m.shelfPicks = map[string]bool{}
+	}
+	for _, it := range targets {
+		if hold {
+			m.shelfPicks[it.Path] = true
+		} else {
+			delete(m.shelfPicks, it.Path)
+		}
+	}
+}
+
+// clearShelfPicks releases everything held, reporting whether there was anything
+// to release so esc can tell whether it was consumed here.
+func (m *Model) clearShelfPicks() bool {
+	if len(m.shelfPicks) == 0 {
+		return false
+	}
+	m.shelfPicks = nil
+	m.rebuildFilesViews()
+	m.updateBar()
+	return true
+}
+
+// shelfPickLabel describes what is held, for the status bar.
+func (m *Model) shelfPickLabel() string {
+	return fileCount(len(m.pickedItems())) + " picked"
+}
+
+// openShelve takes what is held out of the working copy. With nothing held it is
+// the whole working copy that would go, which is a large enough thing to do by
+// one keystroke that it is confirmed first.
+func (m *Model) openShelve() tea.Cmd {
+	if picked := m.pickedItems(); len(picked) > 0 {
+		m.openShelveName(shelveScope{label: pickedScopeLabel(picked), items: picked})
+		return nil
+	}
+	items := shelvableItems(m.fileItems)
+	if len(items) == 0 {
+		m.showToast("nothing to shelve", component.LevelWarning)
+		return nil
+	}
+	m.confirmAction(func() tea.Msg { return shelveAllMsg{} }, nil)
+	m.openConfirm("Shelve all changes?",
+		"Nothing is picked, so all "+fileCount(len(items))+" will be taken out of the working "+
+			"copy and put on the shelf. Pick files with v to shelve only some.")
+	return nil
+}
+
+// pickedScopeLabel is what a shelve of the held files defaults to being called.
+func pickedScopeLabel(items []svn.StatusItem) string {
+	if len(items) == 1 {
+		return items[0].Path
+	}
+	return "picked changes"
+}
+
+// openShelveName floats the prompt that names the entry. The scope is
+// snapshotted here, so what is shelved is what was picked however the working
+// copy moves behind the overlay.
+func (m *Model) openShelveName(scope shelveScope) {
+	m.shelveTarget = scope
+	m.shelfNaming = true
+	m.shelfEditor.Reset()
+	m.shelfEditor.Focus()
+	m.sizeShelfName()
+}
+
+// closeShelfName hides the name prompt and drops the queued scope.
+func (m *Model) closeShelfName() {
+	m.shelfNaming = false
+	m.shelveTarget = shelveScope{}
+	m.shelfEditor.Blur()
+}
+
+// submitShelveName takes the queued set out of the working copy under the
+// entered name.
+func (m *Model) submitShelveName(name string) tea.Cmd {
+	scope := m.shelveTarget
+	m.closeShelfName()
+	if len(scope.items) == 0 {
+		return nil
+	}
+	return shelveCmd(m.client, m.shelfDir(), shelveRequest{
+		name:    shelveEntryName(name, scope.label),
+		baseRev: m.wcRevision,
+		items:   scope.items,
+	})
+}
+
+// shelveEntryName is what an entry ends up called: what was typed, or the set it
+// was taken from when nothing was.
+func shelveEntryName(entered, fallback string) string {
+	if name := strings.TrimSpace(entered); name != "" {
+		return name
+	}
+	return fallback
+}
+
+// shelveToast describes a finished shelve: what was taken, and what stayed in
+// the working copy because no patch could carry it.
+func shelveToast(e shelf.Entry, left []string) (string, component.Level) {
+	text := "shelved " + fileCount(shelfSize(e)) + " as " + shelfLabel(e)
+	if len(left) == 0 {
+		return text, component.LevelSuccess
+	}
+	return text + ", " + fileCount(len(left)) + " left behind (svn cannot put them in a patch)",
+		component.LevelWarning
 }

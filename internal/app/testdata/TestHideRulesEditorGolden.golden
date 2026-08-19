@@ -7,8 +7,8 @@
 │       ╭─ Hide rules ─────────────────────────────────────────────────╮       │
 ╰───────│> [x] ^build/                                                 │       │
 ╭─ [2] ─│  [x] \.class$                                                │       │
-│  ▾ /  │  [ ] ^vendor/                                                │       │
-│>     M│                                                              │       │
+│   ▾ / │  [ ] ^vendor/                                                │       │
+│>      │                                                              │       │
 │       │                                                              │       │
 │       │                                                              │       │
 ╰───────│                                                              │       │
@@ -21,4 +21,4 @@
 ╭─ [4] Shelf ──────────────────╮│                                              │
 │                              ││                                              │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-space stage · n changelist · c commit · r revert · d delete · [ ] view · ? help 
+space stage · v pick · n changelist · c commit · r revert · d delete · …        

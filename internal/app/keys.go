@@ -35,6 +35,9 @@ func (m *Model) routeKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	if m.savingDiff {
 		return m.diffEditor.Update(msg), true
 	}
+	if m.shelfNaming {
+		return m.shelfEditor.Update(msg), true
+	}
 	if m.retargeting {
 		// Every edit re-lists the directories under the path being typed, so the
 		// suggestions follow it. Scrolling the list writes the value too, so its
@@ -180,6 +183,12 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		if m.focus.Index() == panelLog && !m.inRevDrill() && m.clearLogPicks() {
 			return nil, true
 		}
+		// Leaving a drilled-in changelist comes first: the files picked inside it
+		// are what the user is on their way to shelve, so esc has to be a step back
+		// out rather than a release of everything they just picked.
+		if m.focus.Index() == panelFiles && !m.inChangelistDrill() && m.clearShelfPicks() {
+			return nil, true
+		}
 		return nil, false
 	case key.Matches(k, m.keys.Help):
 		return m.openHelp(), true
@@ -247,6 +256,11 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		}
 		return nil, false
 	case "v":
+		// The Log panel picks revisions to diff; the Files panel picks files to
+		// shelve. Neither reaches the other's rows.
+		if m.focus.Index() == panelFiles {
+			return m.toggleShelfPick(), true
+		}
 		if m.focus.Index() == panelLog && !m.inRevDrill() {
 			return m.toggleLogPick(), true
 		}
@@ -286,6 +300,13 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return m.toggleDirDiff(), true
 	case "U":
 		return m.toggleUntracked(), true
+	case "z":
+		// Shelving acts on working-copy changes, which only the Files panel shows;
+		// the Shelf panel is where they land, so it opens the menu too.
+		if m.focus.Index() == panelFiles || m.focus.Index() == panelShelf {
+			return m.openShelve(), true
+		}
+		return nil, false
 	}
 	return nil, false
 }

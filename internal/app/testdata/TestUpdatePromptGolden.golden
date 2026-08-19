@@ -7,8 +7,8 @@
 │                              ││                                              │
 ╰──────────────────────────────╯│                                              │
 ╭─ [2] ─ Changes ─── Changelist╮│                                              │
-│  ▾ /              ╭─ Update available: v1.5.0 ───────────╮                   │
-│>     M modified.go│> Update with cURL                    │                   │
+│   ▾ /             ╭─ Update available: v1.5.0 ───────────╮                   │
+│>      M modified.g│> Update with cURL                    │                   │
 │                   │  Update with Go                      │                   │
 │                   │  Don't update this time              │                   │
 ╰────────────────── ╰──────────────────────────────────────╯                   │
@@ -21,4 +21,4 @@
 ╭─ [4] Shelf ──────────────────╮│                                              │
 │                              ││                                              │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-space stage · n changelist · c commit · r revert · d delete · [ ] view · ? help 
+space stage · v pick · n changelist · c commit · r revert · d delete · …        
