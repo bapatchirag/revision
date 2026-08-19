@@ -169,7 +169,9 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	case key.Matches(k, m.keys.SaveDiff):
 		return m.saveDiff(), true
 	case key.Matches(k, m.keys.SplitDiff):
-		if m.focus.Index() == panelFiles {
+		// Offered wherever the Files panel's diff is being read: from the panel
+		// that picks it, and from the diff itself once it is focused for scrolling.
+		if m.focus.Index() == panelFiles || (m.focus.Index() == panelMain && m.source == sourceFiles) {
 			return m.openSplitDiff(), true
 		}
 		return nil, false
