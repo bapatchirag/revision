@@ -162,6 +162,9 @@ type Model struct {
 	// renameTarget is the entry the open rename prompt is relabelling.
 	renameTarget  string
 	shelfRenaming bool
+	// shelfStoreWarned records that the user has already been told svn can see the
+	// shelf store, so the notice is given once rather than on every reload.
+	shelfStoreWarned bool
 
 	source   mainSource
 	diffPath string

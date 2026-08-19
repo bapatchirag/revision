@@ -39,6 +39,43 @@ func shelfLabel(e shelf.Entry) string {
 	return e.ID
 }
 
+// underShelfStore reports whether a path names the shelf store or something
+// inside it. The store's name matches Subversion's built-in ignore glob, so it
+// normally never reaches a status report at all; a path that does means the
+// user's own global-ignores has replaced that built-in list, since a value there
+// is a replacement rather than an addition.
+func underShelfStore(path string) bool {
+	return path == shelf.DirName || strings.HasPrefix(path, shelf.DirName+"/")
+}
+
+// withoutShelfStore drops the shelf store from a status report, returning what
+// is left and whether anything was taken out. Whatever svn has been told to
+// think of it, the store is revision's own bookkeeping and never the working
+// copy's content: it is not staged, committed, reverted or shelved.
+func withoutShelfStore(items []svn.StatusItem) ([]svn.StatusItem, bool) {
+	kept := make([]svn.StatusItem, 0, len(items))
+	for _, it := range items {
+		if underShelfStore(it.Path) {
+			continue
+		}
+		kept = append(kept, it)
+	}
+	return kept, len(kept) != len(items)
+}
+
+// noteShelfStoreVisible says once in a session that svn can see the shelf store,
+// which it only can when global-ignores has been set and the built-in ".#*"
+// rule went with it. revision keeps the store out of its own views either way;
+// what the user is being told is that their other svn tools will not.
+func (m *Model) noteShelfStoreVisible(leaked bool) {
+	if !leaked || m.shelfStoreWarned {
+		return
+	}
+	m.shelfStoreWarned = true
+	m.showToast("svn can see "+shelf.DirName+": a global-ignores setting has replaced the built-in \".#*\" rule",
+		component.LevelWarning)
+}
+
 // shelfSize is how many files an entry holds, counting the unversioned ones it
 // carries as bytes alongside the ones its patch describes.
 func shelfSize(e shelf.Entry) int { return len(e.Files) + len(e.Untracked) }

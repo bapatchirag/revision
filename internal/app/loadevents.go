@@ -21,7 +21,9 @@ func (m *Model) loadEvent(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		m.loading = false
 		m.err = nil
-		m.fileItems = msg.items
+		items, leaked := withoutShelfStore(msg.items)
+		m.fileItems = items
+		m.noteShelfStoreVisible(leaked)
 		// The poller watches the paths svn reports, so the rows this reload added are
 		// the new baseline rather than a change of their own.
 		m.rebaseWatch()
