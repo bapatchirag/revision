@@ -1,24 +1,24 @@
 ╭─ [1] Status ─────────────────╮╭─ [0] Diff ───────────────────────────────────╮
-│Root      /home/alice/work/wc ││Loading diff…                                 │
-│Source ╭─ Keybindings ────────────────────────────────────────────────╮       │
-│CWD    │Changes                         Navigation                    │       │
-│Branch │  Stage / unstage        space    Jump to panel      1 2 3 4 0│       │
-│Revisio│  Assign changelist          n    Cycle panels tab / shift+tab│       │
-│       │  Commit staged / list       c    Move up / down         k / j│       │
-╰───────│  Expand changelist      enter    Jump top / bottom      g / G│       │
-╭─ [2] ─│  Revert / delete file   r / d    Next / prev history pa n / p│       │
-│  ▾ /  │  Apply saved patch          p    Scroll main up / down  K / J│       │
-│>     M│  Resolve conflict           m    Scroll main l / r      h / l│       │
-│       │Working copy                      Line start / end  home / end│       │
-│       │  Update working copy        u    Filter panel               /│       │
-│       │  Update to rev (Log)    space  View                          │       │
-╰───────│  Open file in editor        e    Switch file view       [ / ]│       │
-╭─ [3] L│  Change source path         P    Side-by-side / save    s / w│       │
-│  Rev A│  Switch repository          W    Dir diff / untracked   D / U│───────╯
-│       │  Refresh / settings     R / S    Toggle command log         x│───────╮
-│       │  Toggle live refresh        L  General                       │       │
-│       │                                  Toggle help                ?│       │
-│       │                                  Quit                       q│       │
-│       ╰──────────────────────────────────────────────────────────────╯       │
-╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-space stage · n changelist · c commit · r revert · d delete · [ ] view · ? help 
+│Root   ╭─ Keybindings ────────────────────────────────────────────────╮       │
+│Source │Changes                         Navigation                    │       │
+│CWD    │  Stage / unstage        space    Jump to panel      1 2 3 4 0│       │
+│Branch │  Assign changelist          n    Cycle panels tab / shift+tab│       │
+│Revisio│  Commit staged / list       c    Move up / down         k / j│       │
+│       │  Expand changelist      enter    Jump top / bottom      g / G│       │
+╰───────│  Revert / delete file   r / d    Next / prev history pa n / p│       │
+╭─ [2] ─│  Apply saved patch          p    Scroll main up / down  K / J│       │
+│   ▾ / │  Resolve conflict           m    Scroll main l / r      h / l│       │
+│>      │Shelf                             Line start / end  home / end│       │
+│       │  Pick / shelve          v / z    Filter panel               /│       │
+│       │  Apply / pop        enter / p  View                          │       │
+╰───────│  Drop / rename          d / n    Switch file view       [ / ]│       │
+╭─ [3] L│Working copy                      Side-by-side / save    s / w│       │
+│  Rev A│  Update working copy        u    Pick revisions             v│       │
+│       │  Update to rev (Log)    space    Diff picked revisions  enter│───────╯
+│       │  Open file in editor        e    Dir diff / untracked   D / U│───────╮
+│       │  Change source path         P    Toggle command log         x│       │
+╰───────│  Switch repository          W  General                       │       │
+╭─ [4] S│  Refresh / settings     R / S    Toggle help                ?│       │
+│       │  Toggle live refresh        L    Quit                       q│       │
+╰───────╰──────────────────────────────────────────────────────────────╯───────╯
+space stage · v pick · n changelist · c commit · r revert · d delete · …        

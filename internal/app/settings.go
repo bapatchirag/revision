@@ -1,6 +1,9 @@
 package app
 
 import (
+	"fmt"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -36,15 +39,19 @@ func (m *Model) previewTheme(name string) {
 	m.modal.SetTheme(th)
 	m.menu.SetTheme(th)
 	m.updateMenu.SetTheme(th)
+	m.shelfEditor.SetTheme(th)
+	m.renameEditor.SetTheme(th)
 	m.form.SetTheme(th)
+	m.rulesEditor.SetTheme(th)
 	m.toast.SetTheme(th)
 	m.splitDiff.SetTheme(th)
 	m.mergeView.SetTheme(th)
-	m.files.SetRender(renderFileNode(th, m.pendingCount))
-	m.clFiles.SetRender(renderFileNode(th, m.pendingCount))
-	m.changelists.SetRender(renderChangelistGroup(th))
+	m.files.SetRender(renderFileNode(th, m.pendingCount, m.nodePicked))
+	m.clFiles.SetRender(renderFileNode(th, m.pendingCount, m.nodePicked))
+	m.changelists.SetRender(renderChangelistGroup(th, m.groupPicked))
 	m.savedDiffs.SetRender(renderSavedDiff(th))
 	m.rejects.SetRender(renderRejectNode(th))
+	m.shelves.SetRender(renderShelfEntry(th))
 	m.refreshChrome()
 }
 
@@ -55,6 +62,9 @@ func (m *Model) previewTheme(name string) {
 // keybind is a session-only toggle the editor must not capture.
 func (m *Model) openSettings() tea.Cmd {
 	m.form.SetFields(settingsFields(m.cfg, m.dirDiff))
+	// The hide rules are edited in their own overlay, so the editor works on a
+	// draft the form only writes back to the configuration when it is saved.
+	m.rulesDraft = append(make([]config.HideRule, 0, len(m.cfg.HideRules)), m.cfg.HideRules...)
 	// Remember the active theme so canceling reverts any live Theme-field preview.
 	m.themeBefore = m.cfg.Theme
 	m.configuring = true
@@ -69,6 +79,7 @@ func (m *Model) openSettings() tea.Cmd {
 func (m *Model) closeSettings() {
 	m.previewTheme(m.themeBefore)
 	m.configuring = false
+	m.rulesDraft = nil
 	m.form.Blur()
 }
 
@@ -100,11 +111,13 @@ func (m *Model) submitSettings() tea.Cmd {
 	cfg.OptimisticUpdates = vals[8] == "true"
 	cfg.LiveRefresh = vals[9] == "true"
 	cfg.AllowMouse = vals[10] == "true"
+	cfg.HideRules = m.rulesDraft
 
 	m.closeSettings()
 
 	themeChanged := cfg.Theme != m.cfg.Theme
 	untrackedChanged := cfg.HideUntracked != m.hideUntracked
+	rulesChanged := !slices.Equal(cfg.HideRules, m.cfg.HideRules)
 	liveChanged := cfg.LiveRefresh != m.liveRefresh
 	mouseChanged := cfg.AllowMouse != m.cfg.AllowMouse
 	displayChanged := cfg.DisplayFrom != m.cfg.DisplayFrom
@@ -119,6 +132,11 @@ func (m *Model) submitSettings() tea.Cmd {
 	}
 	if untrackedChanged {
 		m.rebuildFilesViews()
+	}
+	// Hide rules narrow the Changes tree alone, so only it is rebuilt.
+	if rulesChanged {
+		m.compileHideRules()
+		m.rebuildFileTree()
 	}
 	// A new display scope re-roots every svn command, so the status and history
 	// on screen no longer describe the tree being shown; load them afresh.
@@ -185,6 +203,85 @@ func (m *Model) submitSettings() tea.Cmd {
 // changes, and submitSettings reads the same position back as the theme.
 const themeFieldIndex = 2
 
+// hideRulesFieldIndex is the position of the Hide rules field within
+// settingsFields. It is an action field: activating it opens the rules editor,
+// and its value is the summary shown on the row.
+const hideRulesFieldIndex = 11
+
+// openHideRules raises the hide-rules editor over the settings editor, seeded
+// with the draft rules. It is reached by activating the form's Hide rules row.
+func (m *Model) openHideRules() tea.Cmd {
+	m.rulesEditor.SetEntries(hideRuleEntries(m.rulesDraft))
+	m.editingRules = true
+	m.form.Blur()
+	m.rulesEditor.Focus()
+	m.sizeHideRules()
+	return nil
+}
+
+// closeHideRules drops the rules editor without keeping its edits, handing the
+// keyboard back to the settings editor beneath it.
+func (m *Model) closeHideRules() {
+	m.editingRules = false
+	m.rulesEditor.Blur()
+	m.form.Focus()
+}
+
+// submitHideRules keeps the edited rules in the draft the settings editor will
+// save, refreshing the summary on its Hide rules row. A pattern that does not
+// compile could never hide anything, so it is reported and the editor stays open
+// on it rather than saving a rule that does nothing.
+func (m *Model) submitHideRules() tea.Cmd {
+	rules := hideRulesFrom(m.rulesEditor.Entries())
+	for _, r := range rules {
+		if _, err := regexp.Compile(r.Pattern); err != nil {
+			m.showToast("invalid pattern: "+r.Pattern, component.LevelWarning)
+			return nil
+		}
+	}
+	m.rulesDraft = rules
+	m.form.SetValue(hideRulesFieldIndex, hideRulesSummary(rules))
+	m.closeHideRules()
+	return nil
+}
+
+// hideRuleEntries adapts the configured rules to the editor's rows.
+func hideRuleEntries(rules []config.HideRule) []component.EditEntry {
+	entries := make([]component.EditEntry, 0, len(rules))
+	for _, r := range rules {
+		entries = append(entries, component.EditEntry{Text: r.Pattern, Enabled: r.Enabled})
+	}
+	return entries
+}
+
+// hideRulesFrom adapts the editor's rows back into configured rules.
+func hideRulesFrom(entries []component.EditEntry) []config.HideRule {
+	rules := make([]config.HideRule, 0, len(entries))
+	for _, e := range entries {
+		rules = append(rules, config.HideRule{Pattern: e.Text, Enabled: e.Enabled})
+	}
+	return rules
+}
+
+// hideRulesSummary is what the settings editor's Hide rules row displays: how
+// many rules there are and how many of them are in force.
+func hideRulesSummary(rules []config.HideRule) string {
+	if len(rules) == 0 {
+		return "none"
+	}
+	on := 0
+	for _, r := range rules {
+		if r.Enabled {
+			on++
+		}
+	}
+	noun := "rules"
+	if len(rules) == 1 {
+		noun = "rule"
+	}
+	return fmt.Sprintf("%d %s · %d on", len(rules), noun, on)
+}
+
 // settingsFields builds the settings editor's fields from the configuration, in
 // the field order submitSettings relies on. The directory-diff field is seeded
 // from the live runtime state (dirDiff) rather than cfg so the form shows what
@@ -206,5 +303,6 @@ func settingsFields(cfg config.Config, dirDiff bool) []component.Field {
 		{Label: "Optimistic updates", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.OptimisticUpdates)},
 		{Label: "Live refresh", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.LiveRefresh)},
 		{Label: "Allow mouse", Kind: component.FieldBool, Value: strconv.FormatBool(cfg.AllowMouse)},
+		{Label: "Hide rules", Kind: component.FieldAction, Value: hideRulesSummary(cfg.HideRules)},
 	}
 }

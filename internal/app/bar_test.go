@@ -20,18 +20,19 @@ func TestBarHintsAreScopedToThePanel(t *testing.T) {
 
 	for _, tc := range []struct {
 		name  string
-		key   string
+		panel int
 		want  []string
 		avoid []string
 	}{
-		{"files", "2", []string{"space stage", "r revert", "? help"}, nil},
-		{"status", "1", []string{"/ search", "? help"}, []string{"space stage", "r revert"}},
-		{"log", "3", []string{"space update to rev", "c commit"}, []string{"space stage", "d delete"}},
-		{"main", "0", []string{"/ search", "? help"}, []string{"space stage", "d delete"}},
-		{"command log", "4", nil, []string{"space stage", "? help"}},
+		{"files", panelFiles, []string{"space stage", "r revert", "? help"}, nil},
+		{"status", panelStatus, []string{"/ search", "? help"}, []string{"space stage", "r revert"}},
+		{"log", panelLog, []string{"space update to rev", "v pick"}, []string{"space stage", "d delete", "c commit"}},
+		{"main", panelMain, []string{"/ search", "? help"}, []string{"space stage", "d delete"}},
+		{"command log", panelCmdLog, nil, []string{"space stage", "? help"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m = stepModel(t, m, keyRunes(tc.key))
+			m.focus.Focus(tc.panel)
+			m.afterFocusChange()
 			got := m.barHints()
 			for _, want := range tc.want {
 				if !slices.Contains(got, want) {

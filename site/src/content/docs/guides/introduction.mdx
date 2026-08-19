@@ -31,8 +31,8 @@ your existing SVN configuration. Nothing is cached behind your back, and anythin
 **Layout and navigation**
 
 - A left column of Status, Files and Log panels beside a Main detail view, with a Command
-  Log beneath it. Switch panels with the number keys or <kbd>Tab</kbd>, and scroll any
-  panel on both axes.
+  Log beneath it. Switch panels with the number keys or <kbd>Tab</kbd>, click the Command
+  Log or show it with <kbd>x</kbd>, and scroll any panel on both axes.
 - Changed files as a collapsible directory tree, each change grouped under its folder.
 - A contextual hint bar at the bottom, plus a full <kbd>?</kbd> help menu.
 - Optional mouse support: turn it on and the panels can be clicked and scrolled, with
@@ -60,6 +60,8 @@ your existing SVN configuration. Nothing is cached behind your back, and anythin
   revision.
 - [Save any diff](/workflows/diffs/#saving-a-diff) on screen to a file with <kbd>w</kbd>,
   then browse the saved patches from the Files panel's Diffs view.
+- [Compare revisions](/workflows/diffs/#comparing-revisions) — pick one for what it
+  changed, or two for everything between them, and browse the result as a file tree.
 
 **Making changes**
 
@@ -68,6 +70,10 @@ your existing SVN configuration. Nothing is cached behind your back, and anythin
   subtree with a single keystroke.
 - [Named changelists](/workflows/changelists/) — group the staged set in a tabbed view,
   drill into any list, and commit it as a unit.
+- [Shelving](/workflows/shelving/) — the `git stash` SVN never shipped. Pick files with
+  <kbd>v</kbd>, set them aside with <kbd>z</kbd>, and merge them back with <kbd>enter</kbd>
+  or <kbd>p</kbd>. Shelves sit in an ignored directory beside the working copy, so there is
+  nothing to configure and nothing for `svn` to trip over.
 - Commit through an inline message editor; add, revert and delete with confirmation
   prompts before anything destructive.
 - [Update](/workflows/updating/) to HEAD, or to any revision picked in the Log panel.
@@ -75,7 +81,7 @@ your existing SVN configuration. Nothing is cached behind your back, and anythin
 **Finding things**
 
 - A read-only log viewer with per-revision detail and an asterisk marking where the
-  working copy sits.
+  working copy sits. Pick any two revisions to see what changed between them.
 - [Filter or search any panel](/workflows/filtering-and-searching/) with <kbd>/</kbd> —
   the list panels filter, the detail panels highlight matches in place.
 

@@ -249,12 +249,29 @@ func TestSplitDiffRefusesFailedDiff(t *testing.T) {
 	}
 }
 
-func TestSplitDiffIsFilesPanelOnly(t *testing.T) {
+func TestSplitDiffIsInertWhereMainIsNotShowingTheFilesDiff(t *testing.T) {
 	m := modifiedFileModel(t)
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}}) // focus Log
-	m = splitKey(t, next.(*Model))
-	if m.splitting {
+	next, _ := m.Update(keyRunes("3")) // Log now drives Main
+	if m = splitKey(t, next.(*Model)); m.splitting {
 		t.Error("s should be inert while a panel other than Files is focused")
+	}
+	// Focusing Main leaves the Log panel driving it, so there is still no
+	// file diff on screen to lay out.
+	next, _ = m.Update(keyRunes("0"))
+	if m = splitKey(t, next.(*Model)); m.splitting {
+		t.Error("s should not lay out a stale file diff Main is no longer showing")
+	}
+}
+
+func TestSplitDiffOpensFromTheFocusedDiff(t *testing.T) {
+	m := modifiedFileModel(t)
+	next, _ := m.Update(keyRunes("0")) // focus Main, still showing the file's diff
+	m = splitKey(t, next.(*Model))
+	if !m.splitting {
+		t.Fatal("s should open the overlay with the diff itself focused")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "Side-by-side diff — src/a.go") {
+		t.Errorf("overlay should lay out the diff on screen\n---\n%s", view)
 	}
 }
 

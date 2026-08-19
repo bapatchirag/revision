@@ -35,6 +35,12 @@ func (m *Model) routeKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	if m.savingDiff {
 		return m.diffEditor.Update(msg), true
 	}
+	if m.shelfNaming {
+		return m.shelfEditor.Update(msg), true
+	}
+	if m.shelfRenaming {
+		return m.renameEditor.Update(msg), true
+	}
 	if m.retargeting {
 		// Every edit re-lists the directories under the path being typed, so the
 		// suggestions follow it. Scrolling the list writes the value too, so its
@@ -93,6 +99,11 @@ func (m *Model) routeKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		return cmd, true
 	}
 	if m.configuring {
+		if m.editingRules {
+			// The rules editor sits over the settings editor and owns the keyboard
+			// while open; esc closes it alone (as a DismissMsg), leaving the form up.
+			return m.rulesEditor.Update(msg), true
+		}
 		// The settings editor live-previews the palette while its Theme field
 		// changes, so scrolling that field re-themes the UI immediately. The
 		// choice is only persisted on ctrl+s; esc reverts it via closeSettings.
@@ -136,7 +147,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		m.session.Purge()
 		m.clearDiff()
 		m.refreshChrome()
-		return tea.Batch(m.reloadStatus(), m.reloadLogPage(), m.reloadSavedDiffsIfShown(), m.reloadRejectsIfShown()), true
+		return tea.Batch(m.reloadStatus(), m.reloadLogPage(), m.reloadRevDiffIfShown(), m.reloadSavedDiffsIfShown(), m.reloadRejectsIfShown(), m.reloadShelves()), true
 	case key.Matches(k, m.keys.FocusNext):
 		m.focusNextPanel()
 		return m.afterFocusChange(), true
@@ -158,17 +169,30 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	case key.Matches(k, m.keys.SaveDiff):
 		return m.saveDiff(), true
 	case key.Matches(k, m.keys.SplitDiff):
-		if m.focus.Index() == panelFiles {
+		// Offered wherever the Files panel's diff is being read: from the panel
+		// that picks it, and from the diff itself once it is focused for scrolling.
+		if m.focus.Index() == panelFiles || (m.focus.Index() == panelMain && m.source == sourceFiles) {
 			return m.openSplitDiff(), true
 		}
 		return nil, false
 	case key.Matches(k, m.keys.OpenEditor):
 		return m.openInEditor(), true
 	case key.Matches(k, m.keys.Back):
-		// esc clears the focused panel's filter when it has one; otherwise it is
-		// left for the panel (e.g. to pop a changelist drill).
+		// esc unwinds the Log panel a step at a time: the filter, then the drill into
+		// a range's files — which the container pops itself, so it is left to do so —
+		// and then the revisions held for it. It is otherwise left for the panel
+		// (e.g. to pop a changelist drill).
 		if cmd, cleared := m.clearFocusedFilter(); cleared {
 			return cmd, true
+		}
+		if m.focus.Index() == panelLog && !m.inRevDrill() && m.clearLogPicks() {
+			return nil, true
+		}
+		// Leaving a drilled-in changelist comes first: the files picked inside it
+		// are what the user is on their way to shelve, so esc has to be a step back
+		// out rather than a release of everything they just picked.
+		if m.focus.Index() == panelFiles && !m.inChangelistDrill() && m.clearShelfPicks() {
+			return nil, true
 		}
 		return nil, false
 	case key.Matches(k, m.keys.Help):
@@ -186,13 +210,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		m.focus.Focus(panelLog)
 		return m.afterFocusChange(), true
 	case "4":
-		// Focusing the command log reveals it first when hidden, since it cannot
-		// be focused while off-screen.
-		if !m.showCmdLog {
-			m.showCmdLog = true
-			m.layout()
-		}
-		m.focus.Focus(panelCmdLog)
+		m.focus.Focus(panelShelf)
 		return m.afterFocusChange(), true
 	case "0":
 		m.focus.Focus(panelMain)
@@ -202,6 +220,9 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		case panelFiles:
 			return m.stageSelected(), true
 		case panelLog:
+			if m.inRevDrill() {
+				return nil, false
+			}
 			return m.requestUpdateToRevision(), true
 		}
 		return nil, false
@@ -213,17 +234,30 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		if m.focus.Index() == panelFiles {
 			return m.assignChangelist(), true
 		}
+		if m.focus.Index() == panelShelf {
+			return m.openShelfRename(), true
+		}
 		if m.focus.Index() == panelLog {
+			if m.inRevDrill() {
+				return nil, false
+			}
 			return m.nextLogPage(), true
 		}
 		return nil, false
 	case "p":
-		// In the Diffs view p applies the highlighted patch; everywhere else in the
-		// Files panel it means nothing, so it stays the Log panel's page-back key.
+		// In the Diffs view p applies the highlighted patch and on the Shelf panel it
+		// pops one; elsewhere in the Files panel it means nothing, so it stays the Log
+		// panel's page-back key.
 		if m.focus.Index() == panelFiles && m.filesViewIsDiffs() {
 			return m.requestApplyPatch(), true
 		}
+		if m.focus.Index() == panelShelf {
+			return m.requestRestoreShelf(true), true
+		}
 		if m.focus.Index() == panelLog {
+			if m.inRevDrill() {
+				return nil, false
+			}
 			return m.prevLogPage(), true
 		}
 		return nil, false
@@ -233,7 +267,22 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		return nil, false
+	case "v":
+		// The Log panel picks revisions to diff; the Files panel picks files to
+		// shelve. Neither reaches the other's rows.
+		if m.focus.Index() == panelFiles {
+			return m.toggleShelfPick(), true
+		}
+		if m.focus.Index() == panelLog && !m.inRevDrill() {
+			return m.toggleLogPick(), true
+		}
+		return nil, false
 	case "c":
+		// The Log panel browses revisions that are already committed, and holds no
+		// working-copy selection a commit could be built from.
+		if m.focus.Index() == panelLog {
+			return nil, false
+		}
 		return m.openCommit(), true
 	case "m":
 		// Resolving acts on a conflicted file in the Changes tree, or on a reject in
@@ -251,13 +300,28 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		if m.focus.Index() == panelFiles {
 			return m.requestDelete(), true
 		}
+		if m.focus.Index() == panelShelf {
+			return m.requestDropShelf(), true
+		}
 		return nil, false
 	case "u":
+		// Nothing on screen describes the working copy while a range of history is
+		// being read, so there is no update to be asked for from here.
+		if m.showingRevDiff() {
+			return nil, false
+		}
 		return m.requestUpdate(), true
 	case "D":
 		return m.toggleDirDiff(), true
 	case "U":
 		return m.toggleUntracked(), true
+	case "z":
+		// Shelving acts on working-copy changes, which only the Files panel shows;
+		// the Shelf panel is where they land, so it opens the menu too.
+		if m.focus.Index() == panelFiles || m.focus.Index() == panelShelf {
+			return m.openShelve(), true
+		}
+		return nil, false
 	}
 	return nil, false
 }

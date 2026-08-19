@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/bapatchirag/revision/internal/config"
 	"github.com/bapatchirag/revision/internal/selfupdate"
+	"github.com/bapatchirag/revision/internal/shelf"
 	"github.com/bapatchirag/revision/internal/svn"
 	"github.com/bapatchirag/revision/internal/tui/component"
 	"github.com/bapatchirag/revision/internal/tui/focus"
@@ -37,8 +39,11 @@ type Model struct {
 	clFiles     *component.List[fileNode]
 	savedDiffs  *component.List[savedDiff]
 	rejects     *component.List[rejectNode]
+	shelves     *component.List[shelf.Entry]
 	filesViews  *component.Views
 	log         *component.Table[svn.LogEntry]
+	logViews    *component.Views
+	revFiles    *component.List[revFileNode]
 	main        *component.Viewport
 
 	// cmdLogView displays cmdLog: the svn commands revision runs and their
@@ -47,24 +52,27 @@ type Model struct {
 	cmdLog     *commandLog
 	cmdLogSeen int64
 
-	panels     []*component.Panel
-	bar        *component.StatusBar
-	editor     *component.TextArea
-	nameEditor *component.Prompt
-	diffEditor *component.Prompt
-	pathEditor *component.Prompt
-	repoEditor *component.Prompt
-	passEditor *component.Prompt
-	modal      *component.Modal
-	progress   *component.Modal
-	menu       *component.Menu
-	updateMenu *component.Menu
-	form       *component.Form
-	toast      *component.Toast
-	searchBar  *component.SearchBar
-	splitDiff  *component.SplitView
-	mergeView  *component.SplitView
-	focus      *focus.Manager
+	panels       []*component.Panel
+	bar          *component.StatusBar
+	editor       *component.TextArea
+	nameEditor   *component.Prompt
+	diffEditor   *component.Prompt
+	pathEditor   *component.Prompt
+	repoEditor   *component.Prompt
+	passEditor   *component.Prompt
+	modal        *component.Modal
+	progress     *component.Modal
+	menu         *component.Menu
+	updateMenu   *component.Menu
+	shelfEditor  *component.Prompt
+	renameEditor *component.Prompt
+	form         *component.Form
+	rulesEditor  *component.EditList
+	toast        *component.Toast
+	searchBar    *component.SearchBar
+	splitDiff    *component.SplitView
+	mergeView    *component.SplitView
+	focus        *focus.Manager
 
 	fileItems        []svn.StatusItem
 	collapsedDirs    map[string]bool
@@ -85,6 +93,25 @@ type Model struct {
 	// page is in flight, which dims the rows of the page being left.
 	logRequested bool
 	logLoading   bool
+	// logPicks are the revisions chosen to be diffed, in the order they were
+	// picked and at most logPickMax of them. They are held by revision rather than
+	// by row, so a pick outlives the page, filter and sort it was made under.
+	logPicks []string
+	// revDiff is the range of history Main is showing instead of the selected
+	// revision's detail. It is a mode rather than a selection: moving the cursor
+	// or turning the page leaves it up, and only esc, a new pick or a change of
+	// source takes it down.
+	revDiff revRange
+	// revPatch is revDiff's diff cut into per-file sections, kept so neither the
+	// tree nor Main re-splits the whole patch on every keystroke. revCollapsed is
+	// that tree's own per-directory fold state.
+	revPatch     []patchFile
+	revCollapsed map[string]bool
+	// logFilterHeld is the filter the revisions were under, set aside while the
+	// panel shows a range's files instead. The two are written in different terms
+	// — authors and dates against paths and states — so neither can be left
+	// standing over the other.
+	logFilterHeld string
 	// headRev is the repository's newest revision, read at startup and refreshed
 	// whenever the first page of history lands.
 	headRev    string
@@ -117,6 +144,28 @@ type Model struct {
 	rejectErr       bool
 	rejectCollapsed map[string]bool
 
+	// shelfItems is every change set found in the working copy's shelf store,
+	// before the panel's filter narrows the list; shelfID and shelfText are the
+	// entry whose patch Main is showing.
+	shelfItems   []shelf.Entry
+	shelfErr     error
+	shelfID      string
+	shelfText    string
+	shelfReadErr bool
+	// shelfPicks are the paths held for the next shelve, by path so a pick
+	// outlives the reload, filter and rebuild it was made under. shelveTarget is
+	// the set the open name prompt will take, held so what is shelved cannot drift
+	// with the working copy behind the overlay.
+	shelfPicks   map[string]bool
+	shelveTarget shelveScope
+	shelfNaming  bool
+	// renameTarget is the entry the open rename prompt is relabelling.
+	renameTarget  string
+	shelfRenaming bool
+	// shelfStoreWarned records that the user has already been told svn can see the
+	// shelf store, so the notice is given once rather than on every reload.
+	shelfStoreWarned bool
+
 	source   mainSource
 	diffPath string
 	diffText string
@@ -147,6 +196,9 @@ type Model struct {
 	diffSrc       diffSource
 	dirDiff       bool
 	hideUntracked bool
+	// hideMatchers are the configured hide rules that are in force, compiled. They
+	// narrow the Changes tree alone.
+	hideMatchers []*regexp.Regexp
 	// liveRefresh is whether the working copy is being watched in the background.
 	// It is seeded from the configuration and toggled at runtime, kept apart from
 	// cfg so a session-only toggle is never persisted.
@@ -187,18 +239,23 @@ type Model struct {
 	splitting bool
 	// merging is true while the resolution overlay is up, with mergeDoc the file
 	// it is deciding: a conflicted file, or a reject against its target.
-	merging      bool
-	mergeDoc     *mergeDoc
-	filtering    bool
-	filterPanel  int
-	filters      map[int]string
-	nameTargets  []changelistTarget
-	drilledCL    string
-	commitCL     string
-	themeBefore  string
-	confirming   bool
-	helping      bool
-	configuring  bool
+	merging     bool
+	mergeDoc    *mergeDoc
+	filtering   bool
+	filterPanel int
+	filters     map[int]string
+	nameTargets []changelistTarget
+	drilledCL   string
+	commitCL    string
+	themeBefore string
+	confirming  bool
+	helping     bool
+	configuring bool
+	// editingRules is true while the hide-rules editor is open over the settings
+	// editor, with rulesDraft the rules it is editing. The draft only reaches the
+	// configuration when the settings editor is saved.
+	editingRules bool
+	rulesDraft   []config.HideRule
 	needsSSHKey  bool
 	unlocking    bool
 	adding       bool
@@ -255,9 +312,11 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	// The pending lookup reads through m, which is assigned below before any row
 	// is rendered, so a row marked in flight dims without a rebuild.
 	pending := func(n fileNode) int { return m.pendingCount(n) }
-	files := component.NewList[fileNode]("files", renderFileNode(th, pending), th, keys)
-	changelists := component.NewList[changelistGroup](changelistsListID, renderChangelistGroup(th), th, keys)
-	clFiles := component.NewList[fileNode](changelistFilesID, renderFileNode(th, pending), th, keys)
+	picked := func(n fileNode) bool { return m.nodePicked(n) }
+	groupPicked := func(g changelistGroup) int { return m.groupPicked(g) }
+	files := component.NewList[fileNode]("files", renderFileNode(th, pending, picked), th, keys)
+	changelists := component.NewList[changelistGroup](changelistsListID, renderChangelistGroup(th, groupPicked), th, keys)
+	clFiles := component.NewList[fileNode](changelistFilesID, renderFileNode(th, pending, picked), th, keys)
 	savedDiffs := component.NewList[savedDiff](savedDiffsListID, renderSavedDiff(th), th, keys)
 	rejects := component.NewList[rejectNode](rejectsListID, renderRejectNode(th), th, keys)
 	filesViews := component.NewViews(filesViewsID, []component.View{
@@ -267,17 +326,24 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		{Name: rejectsViewName, Content: rejects},
 	}, th, keys)
 	logTable := component.NewTable[svn.LogEntry]("log", logColumns(), func(it svn.LogEntry) []string {
-		return renderLogRow(it, m.wcRevision, m.logLoading, m.theme)
+		return renderLogRow(it, m.wcRevision, m.isLogPicked(it.Revision), m.logLoading, m.theme)
 	}, th, keys)
+	revFiles := component.NewList[revFileNode](revFilesListID, renderRevFileNode(th), th, keys)
+	// A lone view renders exactly as a plain panel would; the container is here
+	// for the drill into the files a range of history touched.
+	logViews := component.NewViews(logViewsID, []component.View{{Name: "Log", Content: logTable}}, th, keys)
 	main := component.NewViewport(th, keys)
 	cmdLogView := component.NewViewport(th, keys)
+	shelves := component.NewList[shelf.Entry](shelfListID, renderShelfEntry(th), th, keys)
 
 	panels := []*component.Panel{
 		component.NewPanel("Status", 1, status, th),
 		component.NewPanel("Files", 2, filesViews, th),
-		component.NewPanel("Log", 3, logTable, th),
+		component.NewPanel("Log", 3, logViews, th),
+		component.NewPanel("Shelf", 4, shelves, th),
 		component.NewPanel("Main", 0, main, th),
-		component.NewPanel("Command Log", 4, cmdLogView, th),
+		// No badge: the command log answers to x and the mouse, never a number.
+		component.NewPanel("Command Log", -1, cmdLogView, th),
 	}
 
 	m = &Model{
@@ -293,8 +359,11 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		clFiles:         clFiles,
 		savedDiffs:      savedDiffs,
 		rejects:         rejects,
+		shelves:         shelves,
 		filesViews:      filesViews,
 		log:             logTable,
+		logViews:        logViews,
+		revFiles:        revFiles,
 		main:            main,
 		cmdLogView:      cmdLogView,
 		cmdLog:          newCommandLog(commandLogLimit),
@@ -310,7 +379,10 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		progress:        component.NewModal("update-progress", "", "", th, keys),
 		menu:            component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
 		updateMenu:      component.NewMenu(updateMenuID, "Update available", updateMenuItems(), th, keys),
+		shelfEditor:     component.NewPrompt(shelfNameEditorID, "Shelve as", "e.g. wip refactor", th, keys),
+		renameEditor:    component.NewPrompt(shelfRenameID, "Rename shelf", "e.g. wip refactor", th, keys),
 		form:            component.NewForm(settingsFormID, "Settings", settingsFields(cfg, cfg.DirectoryDiff), th, keys),
+		rulesEditor:     component.NewEditList(hideRulesEditorID, "Hide rules", "No rules yet — press a to add one.", th, keys),
 		toast:           component.NewToast(th),
 		searchBar:       component.NewSearchBar(searchBarID, th, keys),
 		splitDiff:       component.NewSplitView(splitDiffID, "Side-by-side diff", th, keys),
@@ -318,6 +390,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		collapsedDirs:   map[string]bool{},
 		clCollapsedDirs: map[string]bool{},
 		rejectCollapsed: map[string]bool{},
+		revCollapsed:    map[string]bool{},
 		filters:         map[int]string{},
 		pendingOps:      map[string]pendingOp{},
 		session:         newSessionStore(),
@@ -335,6 +408,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	m.passEditor.SetSecret(true)
 	m.progress.SetHint("")
 	m.menu.SetReadOnly(true)
+	m.compileHideRules()
 	if client != nil {
 		m.launchDir = client.Dir
 	}
@@ -352,7 +426,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		}
 	}
 	m.cmdLogView.SetContent(m.renderCommandLog(nil))
-	m.focus = focus.New(panels[panelStatus], panels[panelFiles], panels[panelLog], panels[panelMain], panels[panelCmdLog])
+	m.focus = focus.New(panels[panelStatus], panels[panelFiles], panels[panelLog], panels[panelShelf], panels[panelMain], panels[panelCmdLog])
 	m.focus.Focus(panelFiles)
 	m.syncMainTitle()
 
@@ -392,7 +466,8 @@ func (m *Model) retargetDisplay(scope string) {
 // the passphrase overlay when the key still needs unlocking.
 //
 // A page of history and the saved-diff scan are not part of startup: neither can
-// be seen until a panel that shows them is looked at, so both are deferred.
+// be seen until a panel that shows them is looked at, so both are deferred. The
+// shelf store is read, its panel being on screen from the first frame.
 func (m *Model) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	if m.needsSSHKey {
@@ -400,6 +475,7 @@ func (m *Model) Init() tea.Cmd {
 	} else {
 		cmds = append(cmds, m.beginInitialLoad())
 	}
+	cmds = append(cmds, m.reloadShelves())
 	if m.build.IsRelease() {
 		cmds = append(cmds, checkUpdateCmd(m.build))
 	}

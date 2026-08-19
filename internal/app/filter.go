@@ -33,6 +33,13 @@ var fileFilterKeys = map[string]bool{
 	"changelist": true,
 }
 
+// revFileFilterKeys are the parameters the drilled-in revision tree understands.
+// A file in a range of history has a state the diff reported but no changelist,
+// which belongs to the working copy alone.
+var revFileFilterKeys = map[string]bool{
+	"state": true,
+}
+
 // empty reports whether the query would match everything (no params, no text).
 func (q filterQuery) empty() bool {
 	return len(q.params) == 0 && q.text == ""

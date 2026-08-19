@@ -43,7 +43,7 @@ func (m *Model) closeHelp() {
 // screen, so a background event (like the update check completing) knows not to
 // steal focus.
 func (m *Model) overlayActive() bool {
-	return m.aborting || m.unlocking || m.editing || m.naming || m.savingDiff || m.retargeting || m.switchingRepo || m.splitting || m.merging || m.confirming || m.helping || m.updating || m.configuring
+	return m.aborting || m.unlocking || m.editing || m.naming || m.savingDiff || m.retargeting || m.switchingRepo || m.splitting || m.merging || m.confirming || m.helping || m.updating || m.configuring || m.shelfNaming || m.shelfRenaming
 }
 
 // updateHeld reports whether now is the wrong moment to interrupt with the
@@ -224,8 +224,30 @@ func (m *Model) sizeUpdateMenu() {
 	m.updateMenu.SetSize(clamp(m.width/2, 40, max(m.width-6, 40)), 0)
 }
 
+// sizeShelfName sizes the shelve name prompt like the other name prompts.
+func (m *Model) sizeShelfName() {
+	w := clamp(m.width/2, 30, max(m.width-6, 30))
+	m.shelfEditor.SetSize(w, 0)
+}
+
+// sizeShelfRename sizes the shelf rename prompt like the shelve name prompt.
+func (m *Model) sizeShelfRename() {
+	w := clamp(m.width/2, 30, max(m.width-6, 30))
+	m.renameEditor.SetSize(w, 0)
+}
+
 // sizeForm sizes the settings editor to a centered portion of the screen (only
 // its width matters; the height follows the field count).
 func (m *Model) sizeForm() {
 	m.form.SetSize(clamp(m.width*3/5, 40, max(m.width-4, 40)), 0)
+}
+
+// sizeHideRules sizes the rules editor over the settings editor. It is wider
+// than the form beneath it — patterns are long and the row keys need spelling
+// out — with a height that scrolls a long rule set rather than growing past the
+// screen.
+func (m *Model) sizeHideRules() {
+	w := clamp(m.width*4/5, 44, max(m.width-4, 44))
+	h := clamp(m.height/2, 8, max(m.height-4, 8))
+	m.rulesEditor.SetSize(w, h)
 }

@@ -13,12 +13,16 @@ const (
 	panelStatus = 0
 	panelFiles  = 1
 	panelLog    = 2
-	panelMain   = 3
+	// panelShelf lists the change sets taken out of the working copy. It sits
+	// under the Log panel and, being a short list most of the time, shows only
+	// its newest row until it is focused.
+	panelShelf = 3
+	panelMain  = 4
 	// panelCmdLog is the command-log panel below Main. It is last in the focus
 	// ring and is skipped by Tab while hidden.
-	panelCmdLog = 4
+	panelCmdLog = 5
 
-	panelCount = 5
+	panelCount = 6
 )
 
 // stagedChangelist is the SVN changelist name revision uses to emulate a
@@ -33,6 +37,13 @@ const changelistEditorID = "changelist"
 
 // diffNameEditorID identifies the save-diff file-name prompt on emitted messages.
 const diffNameEditorID = "diff-name"
+
+// shelfNameEditorID identifies the prompt that names a shelved change set, and
+// shelfRenameID the one that relabels an existing one, on emitted messages.
+const (
+	shelfNameEditorID = "shelf-name"
+	shelfRenameID     = "shelf-rename"
+)
 
 // splitDiffID identifies the side-by-side diff overlay on emitted messages.
 const splitDiffID = "split-diff"
@@ -51,6 +62,14 @@ const maxPassphraseAttempts = 3
 // filesViewsID identifies the Files panel's multi-view container on emitted
 // messages (the Changes / Changelists tabs and their drill-downs).
 const filesViewsID = "files-views"
+
+// logViewsID identifies the Log panel's container on emitted messages. It holds
+// a single view, so it exists only for the drill into a revision's files.
+const logViewsID = "log-views"
+
+// revFilesListID identifies the drilled-in revision file tree on emitted
+// selection/activation messages.
+const revFilesListID = "rev-files"
 
 // changelistsListID / changelistFilesID identify the Changelists list and its
 // drilled-in file list on emitted selection/activation messages.
@@ -71,6 +90,10 @@ const updateMenuID = "update"
 // settingsFormID identifies the settings editor on emitted messages.
 const settingsFormID = "settings"
 
+// hideRulesEditorID identifies the hide-rules editor, opened from the settings
+// editor, on emitted messages.
+const hideRulesEditorID = "hide-rules"
+
 // searchBarID identifies the panel filter input on emitted messages.
 const searchBarID = "search"
 
@@ -86,4 +109,5 @@ const (
 	sourceFiles mainSource = iota
 	sourceLog
 	sourceStatus
+	sourceShelf
 )

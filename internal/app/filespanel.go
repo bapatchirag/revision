@@ -39,7 +39,7 @@ func (m *Model) selectedFile() (svn.StatusItem, bool) {
 // the user on the same file rather than the same row number.
 func (m *Model) rebuildFileTree() {
 	path := selectedNodePath(m.files)
-	m.files.SetItems(m.fileTree(m.filteredStatusItems(m.fileItems), m.collapsedDirs))
+	m.files.SetItems(m.fileTree(m.visibleChanges(m.filteredStatusItems(m.fileItems)), m.collapsedDirs))
 	selectNodePath(m.files, path)
 }
 
@@ -164,11 +164,12 @@ func (m *Model) inChangelistDrill() bool {
 
 // filesFooter returns the position/count indicator inlaid into the Files panel's
 // bottom border: the 1-based position within the active view, the number of
-// entries shown, and — when a filter or the hide-untracked toggle hides some —
-// the full unfiltered count in brackets. It counts file leaves in the Changes
-// tree and a drilled-in changelist (ignoring the synthetic root and directory
-// rows), changelists in the Changelists overview, saved patch files in the Diffs
-// view and rejects in the Rejects view, following whichever view is active.
+// entries shown, and — when a filter, the hide-untracked toggle or a hide rule
+// hides some — the full unfiltered count in brackets. It counts file leaves in
+// the Changes tree and a drilled-in changelist (ignoring the synthetic root and
+// directory rows), changelists in the Changelists overview, saved patch files in
+// the Diffs view and rejects in the Rejects view, following whichever view is
+// active.
 func (m *Model) filesFooter() string {
 	hiding := m.hideUntracked || m.filters[panelFiles] != ""
 	switch {
@@ -199,7 +200,8 @@ func (m *Model) filesFooter() string {
 	default:
 		index, shown := fileLeafStats(m.files.Items(), m.files.Index())
 		full := shown
-		if hiding {
+		// Hide rules narrow this view alone, so they only count here.
+		if hiding || m.hideRulesActive() {
 			full = leafCount(m.fileTree(m.fileItems, m.collapsedDirs))
 		}
 		return countLabel(index, shown, full)

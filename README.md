@@ -26,7 +26,7 @@
 A lazygit-style terminal UI for Subversion (SVN). `revision` gives you a fast, keyboard-driven interface over the `svn` command line — review changes, stage with changelists, commit, update, and browse history without leaving your terminal.
 
 <p align="center">
-  <img src="site/public/demos/hero.gif" alt="revision in action — working-copy status, colour-coded diffs with in-place search, filtering, directory staging, named changelists, history and update-to-revision, the svn command log, live theming, and committing" width="100%" />
+  <img src="site/public/demos/hero.gif" alt="revision in action — working-copy status, shelving a change and popping it back, colour-coded diffs with in-place search, filtering, directory staging, named changelists, history, update-to-revision and comparing two revisions, the svn command log, live theming, and committing" width="100%" />
 </p>
 
 ## Why
@@ -35,11 +35,12 @@ SVN's command line is powerful but verbose for day-to-day work. `revision` wraps
 
 ## Features
 
-- **lazygit-style layout** — Status, Files and Log panels down the left, a Main detail view beside them, and the `svn` command log beneath; switch with the number keys or `Tab`
+- **lazygit-style layout** — Status, Files, Log and Shelf panels down the left, a Main detail view beside them, and the `svn` command log beneath; switch with the number keys or `Tab`
 - **Changed files as a collapsible directory tree**, grouped under their folders, with the visible count in the panel footer
 - **Colour-coded diffs** that follow your selection — read one side by side with `s`, save it to a file with `w`, or highlight a directory for the combined diff of everything beneath it
 - **Staging** built on a native SVN changelist — `space` stages a file or a whole subtree, `c` commits the set through an inline message editor
 - **Named changelists** — group the staged set into real SVN changelists, drill into one in a tabbed view, and commit it on its own
+- **Shelving** — the `git stash` SVN never shipped: pick files with `v`, set them aside with `z`, and merge them back with `enter` or `p`. Shelves live in an ignored directory beside the working copy, so there is nothing to configure
 - **Update** to HEAD with `u`, or to any revision picked in the Log panel — conflicts are spelled out before you confirm
 - **Resolve conflicts side by side** with `m` — each conflict, or each hunk a patch could not place, laid out two panes wide with a key to take either side, both, or your editor
 - **Add, revert and delete** a single file or every change beneath a directory, with confirmation prompts
@@ -92,7 +93,7 @@ cd /path/to/working-copy
 revision                 # or from anywhere: revision --path /path/to/working-copy
 ```
 
-- `1` `2` `3` `4` `0` or `Tab` — move between the Status, Files, Log, Command Log and Main panels
+- `1` `2` `3` `0` or `Tab` — move between the Status, Files, Log and Main panels
 - `space` — stage the selected file, or every change beneath the selected directory
 - `c` — commit the staged set · `u` — update the working copy
 - `/` — filter or search the focused panel · `R` — refresh

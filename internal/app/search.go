@@ -1,6 +1,7 @@
 package app
 
 import (
+	"regexp"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,7 +18,7 @@ func (m *Model) openFilter() tea.Cmd {
 	p := m.focus.Index()
 	m.filtering = true
 	m.filterPanel = p
-	m.searchBar.SetPrefix(filterPrefix(p))
+	m.searchBar.SetPrefix(m.filterPrefix(p))
 	m.searchBar.SetValue(m.filters[p])
 	m.searchBar.SetSize(m.width, 1)
 	m.searchBar.Focus()
@@ -47,6 +48,11 @@ func (m *Model) afterFilterChange(p int) tea.Cmd {
 	case panelLog:
 		if m.source == sourceLog {
 			m.updateMain()
+		}
+	case panelShelf:
+		if m.source == sourceShelf {
+			m.updateMain()
+			return m.shelfLoadForSelection()
 		}
 	}
 	return nil
@@ -104,11 +110,19 @@ func (m *Model) setFilter(p int, q string) {
 	case panelFiles:
 		m.rebuildFilesViews()
 	case panelLog:
-		m.applyLogFilter()
+		// The Log panel shows the revisions or, drilled in, the files a range of
+		// them touched; the filter narrows whichever of the two is on screen.
+		if m.inRevDrill() {
+			m.rebuildRevFiles()
+		} else {
+			m.applyLogFilter()
+		}
 	case panelStatus:
 		m.status.SetSearch(m.filters[panelStatus])
 	case panelMain:
 		m.main.SetSearch(m.filters[panelMain])
+	case panelShelf:
+		m.rebuildShelves()
 	}
 }
 
@@ -145,11 +159,16 @@ func (m *Model) jumpMatch(p, dir int) {
 
 // filterPrefix is the muted label shown in the filter input for panel p, naming
 // the panel, its behavior (filter vs. search) and its available parameters.
-func filterPrefix(p int) string {
+// Drilled into a range's files the Log panel is filtered as a file tree, so it
+// offers what those rows carry rather than what a revision does.
+func (m *Model) filterPrefix(p int) string {
 	switch p {
 	case panelFiles:
 		return "filter files (state: cl:)"
 	case panelLog:
+		if m.inRevDrill() {
+			return "filter files (state:)"
+		}
 		return "filter log (rev: user: path: date:)"
 	case panelStatus:
 		return "search status"
@@ -182,6 +201,53 @@ func (m *Model) filteredStatusItems(items []svn.StatusItem) []svn.StatusItem {
 		}
 	}
 	return out
+}
+
+// compileHideRules rebuilds the matchers from the configured rules that are in
+// force. A pattern that does not compile is skipped; the configuration drops
+// those on load and the rules editor refuses to save one, so a rule that reaches
+// here can be relied on.
+func (m *Model) compileHideRules() {
+	m.hideMatchers = nil
+	for _, r := range m.cfg.HideRules {
+		if !r.Enabled {
+			continue
+		}
+		if re, err := regexp.Compile(r.Pattern); err == nil {
+			m.hideMatchers = append(m.hideMatchers, re)
+		}
+	}
+}
+
+// hideRulesActive reports whether any hide rule is in force, so the Changes view
+// can say it is showing less than the working copy holds.
+func (m *Model) hideRulesActive() bool { return len(m.hideMatchers) > 0 }
+
+// visibleChanges drops the files a hide rule matches. It narrows the Changes
+// tree alone: the Changelists views, a commit and every svn action still see
+// every file, so a hidden file is out of sight rather than out of the way.
+func (m *Model) visibleChanges(items []svn.StatusItem) []svn.StatusItem {
+	if !m.hideRulesActive() {
+		return items
+	}
+	out := make([]svn.StatusItem, 0, len(items))
+	for _, it := range items {
+		if !m.hiddenByRule(it.Path) {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// hiddenByRule reports whether any rule in force matches path. Patterns are
+// unanchored, so one naming a directory hides everything beneath it.
+func (m *Model) hiddenByRule(path string) bool {
+	for _, re := range m.hideMatchers {
+		if re.MatchString(path) {
+			return true
+		}
+	}
+	return false
 }
 
 // applyLogFilter repopulates the Log table from the raw revision history under

@@ -81,7 +81,14 @@ func (m *Model) mainSelectionKey() string {
 	switch m.source {
 	case sourceStatus:
 		return "status"
+	case sourceShelf:
+		e, _ := m.shelves.Selected()
+		return "shelf:" + e.ID
 	case sourceLog:
+		if m.revDiff.set() {
+			n, _ := m.revFiles.Selected()
+			return "revdiff:" + m.revDiff.from + ":" + m.revDiff.to + ":" + n.Path
+		}
 		e, _ := m.log.Selected()
 		return "log:" + e.Revision
 	}
@@ -106,6 +113,15 @@ func (m *Model) mainContent() string {
 	if m.source == sourceStatus {
 		return m.statusDetail()
 	}
+	// The shelf store is local disk, like the Diffs and Rejects views, so it stays
+	// readable while the working copy is still loading or has failed to load.
+	if m.source == sourceShelf {
+		if m.shelfShowsPatch() {
+			m.main.SetGutter(1)
+			m.main.SetCursorLine(true)
+		}
+		return m.shelfDetail()
+	}
 	// The Diffs and Rejects views browse files on local disk, so they stay
 	// readable while the working copy is still loading or has failed to load.
 	if m.source != sourceFiles || !m.filesViewIsStore() {
@@ -117,6 +133,13 @@ func (m *Model) mainContent() string {
 		}
 	}
 	if m.source == sourceLog {
+		if m.revDiff.set() {
+			if m.revDiffShowsDiff() {
+				m.main.SetGutter(1)
+				m.main.SetCursorLine(true)
+			}
+			return m.revDiffDetail()
+		}
 		return m.logDetail()
 	}
 	if m.filesShowDiff() {
@@ -246,6 +269,58 @@ func (m *Model) fileDetail() string {
 	default:
 		return strings.Join(append(head, m.colorize(m.diffText)), "\n")
 	}
+}
+
+// revDiffShowsDiff reports whether Main is showing a patch for the range rather
+// than a placeholder — the only case with a +/-/space gutter to pin and lines
+// worth pointing at.
+func (m *Model) revDiffShowsDiff() bool {
+	e, ok := m.session.RevDiff(m.revDiff)
+	return ok && !e.failed && strings.TrimSpace(m.revPatchUnderCursor(e.text)) != ""
+}
+
+// revPatchUnderCursor is the part of the range's diff the drilled-in tree points
+// at: one file's section, every section beneath a directory, or — at the "/"
+// root — the whole patch, which is also what is shown before the tree has been
+// moved off it.
+func (m *Model) revPatchUnderCursor(whole string) string {
+	n, ok := m.revFiles.Selected()
+	if !ok || n.Path == fileTreeRoot {
+		return whole
+	}
+	if n.Item != nil {
+		return n.Item.Text
+	}
+	var parts []string
+	prefix := n.Path + "/"
+	for _, f := range m.revPatch {
+		if strings.HasPrefix(f.Path, prefix) {
+			parts = append(parts, f.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// revDiffDetail renders the diff over a range of history, headed by the range it
+// covers and the path being read within it, so what is being compared stays on
+// screen while the patch scrolls.
+func (m *Model) revDiffDetail() string {
+	e, ok := m.session.RevDiff(m.revDiff)
+	switch {
+	case !ok:
+		return strings.Join([]string{m.revDiff.label(), "", "Loading diff…"}, "\n")
+	case e.failed:
+		return strings.Join([]string{m.revDiff.label(), "", e.text}, "\n")
+	}
+	head := m.revDiff.label()
+	if n, sel := m.revFiles.Selected(); sel && n.Path != fileTreeRoot {
+		head += " · " + n.Path
+	}
+	text := m.revPatchUnderCursor(e.text)
+	if strings.TrimSpace(text) == "" {
+		return strings.Join([]string{head, "", "(nothing changed between these revisions)"}, "\n")
+	}
+	return strings.Join([]string{head, "", m.colorize(text)}, "\n")
 }
 
 // logDetail renders the metadata, message and changed paths of the selected

@@ -97,6 +97,10 @@ func TestCommandWrappersBuildTheirArgv(t *testing.T) {
 			func(c *Client) error { return c.Revert(context.Background(), "a.txt") },
 			"revert a.txt --non-interactive",
 		},
+		"revert paths": {
+			func(c *Client) error { return c.RevertPaths(context.Background(), []string{"a.txt", "sub"}) },
+			"revert --depth infinity a.txt sub --non-interactive",
+		},
 		"resolve": {
 			func(c *Client) error { return c.Resolve(context.Background(), "a.txt") },
 			"resolve --accept working a.txt --non-interactive",
@@ -197,6 +201,117 @@ func TestDiffPaths(t *testing.T) {
 	bad, _ := stubClient(t, "", 1)
 	if _, err := bad.DiffPaths(context.Background(), []string{"a.txt"}); err == nil {
 		t.Error("a diff svn refused must return an error")
+	}
+}
+
+func TestDiffPathsForPatchingAsksForCopiedContent(t *testing.T) {
+	const patch = "Index: a.txt\n@@ -0,0 +1 @@\n+new\n"
+
+	cases := map[string]struct {
+		paths []string
+		want  string
+	}{
+		"none":   {nil, "diff --show-copies-as-adds --non-interactive"},
+		"single": {[]string{"a.txt"}, "diff --show-copies-as-adds a.txt --non-interactive"},
+		"many":   {[]string{"a.txt", "sub/b.txt"}, "diff --show-copies-as-adds a.txt sub/b.txt --non-interactive"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			c, calls := stubClient(t, patch, 0)
+			got, err := c.DiffPathsForPatching(context.Background(), tc.paths)
+			if err != nil {
+				t.Fatalf("DiffPathsForPatching: %v", err)
+			}
+			if got != patch {
+				t.Errorf("DiffPathsForPatching = %q, want svn's output verbatim", got)
+			}
+			if argv := calls(); len(argv) != 1 || argv[0] != tc.want {
+				t.Errorf("argv = %q, want %q", argv, tc.want)
+			}
+		})
+	}
+
+	bad, _ := stubClient(t, "", 1)
+	if _, err := bad.DiffPathsForPatching(context.Background(), []string{"a.txt"}); err == nil {
+		t.Error("a diff svn refused must return an error")
+	}
+}
+
+func TestRevertPathsWithNothingToRevertRunsNothing(t *testing.T) {
+	// svn refuses an invocation naming no path, so an empty set has to stop here
+	// rather than reach the command line.
+	c, calls := stubClient(t, "", 0)
+	if err := c.RevertPaths(context.Background(), nil); err != nil {
+		t.Fatalf("RevertPaths(nil) = %v, want no error", err)
+	}
+	if got := calls(); len(got) != 0 {
+		t.Errorf("argv = %q, want no svn invocation", got)
+	}
+}
+
+func TestDiffRevisionUsesChangeShorthand(t *testing.T) {
+	const patch = "Index: a.txt\n@@ -0,0 +1 @@\n+a1\n"
+
+	c, calls := stubClient(t, patch, 0)
+	got, err := c.DiffRevision(context.Background(), "7")
+	if err != nil {
+		t.Fatalf("DiffRevision: %v", err)
+	}
+	if got != patch {
+		t.Errorf("DiffRevision = %q, want svn's output verbatim", got)
+	}
+	// No path: the diff is scoped to the client's directory, so its paths come
+	// out relative to whatever the display scope rooted it at.
+	if argv := calls(); len(argv) != 1 || argv[0] != "diff -c 7 --non-interactive" {
+		t.Errorf("argv = %q, want the single revision diffed", argv)
+	}
+
+	bad, _ := stubClient(t, "", 1)
+	if _, err := bad.DiffRevision(context.Background(), "7"); err == nil {
+		t.Error("a revision svn refused must return an error")
+	}
+}
+
+func TestDiffRevisionsOrdersTheRangeForwards(t *testing.T) {
+	cases := map[string]struct {
+		from, to string
+		want     string
+	}{
+		"ascending":     {"2", "4", "diff -r 2:4"},
+		"descending":    {"4", "2", "diff -r 2:4"},
+		"same revision": {"4", "4", "diff -r 4:4"},
+		"multi-digit":   {"9", "100", "diff -r 9:100"},
+		// Left alone for svn to reject: guessing at an order here would turn a
+		// clear error into a silently wrong diff.
+		"unparsable": {"head", "4", "diff -r head:4"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := strings.Join(diffRevisionsArgs(tc.from, tc.to), " "); got != tc.want {
+				t.Errorf("diffRevisionsArgs(%q, %q) = %q, want %q", tc.from, tc.to, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDiffRevisionsRunsTheRange(t *testing.T) {
+	const patch = "Index: a.txt\n@@ -1 +1,2 @@\n a1\n+a2\n"
+
+	c, calls := stubClient(t, patch, 0)
+	got, err := c.DiffRevisions(context.Background(), "4", "2")
+	if err != nil {
+		t.Fatalf("DiffRevisions: %v", err)
+	}
+	if got != patch {
+		t.Errorf("DiffRevisions = %q, want svn's output verbatim", got)
+	}
+	if argv := calls(); len(argv) != 1 || argv[0] != "diff -r 2:4 --non-interactive" {
+		t.Errorf("argv = %q, want the ordered range diffed", argv)
+	}
+
+	bad, _ := stubClient(t, "", 1)
+	if _, err := bad.DiffRevisions(context.Background(), "2", "4"); err == nil {
+		t.Error("a range svn refused must return an error")
 	}
 }
 

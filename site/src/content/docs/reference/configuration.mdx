@@ -4,6 +4,7 @@ description: Where revision keeps its settings, what each one does, and how to e
 ---
 
 import AppScreen from '../../../components/AppScreen.astro';
+import DemoVideo from '../../../components/DemoVideo.astro';
 import KeyCap from '../../../components/KeyCap.astro';
 
 ## Where the file lives
@@ -38,7 +39,7 @@ Press <KeyCap key="S" />:
 
 Cycling the theme applies it live so you can preview each scheme in place;
 <KeyCap key="esc" /> reverts the preview and <KeyCap key="ctrl+s" /> keeps it. Saving
-writes the same `config.json`, and the theme, directory-diff, hide-untracked,
+writes the same `config.json`, and the theme, directory-diff, hide-untracked, hide-rule,
 live-refresh, mouse and display-scope changes take effect immediately.
 
 ## Settings
@@ -48,6 +49,7 @@ live-refresh, mouse and display-scope changes take effect immediately.
 | `theme` | string | `auto` | Colour scheme — see [Themes](/reference/themes/). |
 | `directoryDiff` | bool | `true` | Show the combined diff of every change beneath a directory when its row is highlighted. |
 | `hideUntracked` | bool | `false` | Hide untracked (unversioned) files from the Changes and diff panels. |
+| `hideRules` | list | `[]` | Regular expressions that hide matching files from the Changes view. |
 | `displayFrom` | string | `cwd` | Where the working copy is displayed from: `cwd` or `root`. |
 | `sshKeyPath` | string | `~/.ssh/id_rsa` | The SSH private key to load for `svn+ssh://` working copies. |
 | `diffOutputDir` | string | `""` | Where diffs saved with <KeyCap key="w" /> are written. |
@@ -76,6 +78,63 @@ generate.
 With `hideUntracked` set to `true`, untracked files are left out of the Changes tree, the
 Changelists view and the diff panel. Pressing <KeyCap key="U" /> toggles them back into
 view for the current session, so you can inspect or add one without changing the file.
+
+### hideRules
+
+Build output, generated code, editor droppings — the files that are always in the way.
+A hide rule keeps them out of the Changes view for good:
+
+```json
+"hideRules": [
+  { "pattern": "^build/", "enabled": true },
+  { "pattern": "\\.class$", "enabled": false }
+]
+```
+
+Each `pattern` is a [Go regular expression](https://pkg.go.dev/regexp/syntax) matched,
+unanchored, against a file's path relative to the displayed root — so `build` hides that
+directory wherever it appears, `^build/` only at the root, and `\.class$` an extension.
+A rule with `enabled: false` is kept as written but does nothing, which is how you park
+one without deleting it. With every rule off, nothing is hidden.
+
+Edit them in place rather than by hand: press <KeyCap key="S" />, move to the **Hide
+rules** row and press <KeyCap key="enter" />.
+
+<AppScreen golden="TestHideRulesEditorGolden" />
+
+| Key | Action |
+|---|---|
+| <KeyCap key="a" /> | Add a rule |
+| <KeyCap key="e" /> / <KeyCap key="enter" /> | Edit the highlighted rule |
+| <KeyCap key="d" /> | Delete it |
+| <KeyCap key="space" /> | Turn it on or off |
+| <KeyCap key="ctrl+s" /> | Keep the rules and return to the settings |
+| <KeyCap key="esc" /> | Discard the changes and return to the settings |
+
+While a rule is open for typing, <KeyCap key="enter" /> keeps it and <KeyCap key="esc" />
+discards that one edit — every other key is literal text. The rules reach `config.json`
+only when the settings form itself is saved, so <KeyCap key="esc" /> there abandons them
+like any other field.
+
+A pattern that does not compile is refused with a toast rather than saved, and one that
+reaches the file by hand is dropped on the next start and reported.
+
+<DemoVideo
+	name="hide-rules"
+	width={1600}
+	height={900}
+	label="Adding two hide rules from the settings editor, parking one with space, and saving — the matching files leave the Changes tree while the footer still counts them"
+/>
+
+:::note
+Hiding is a **view** setting, and only for the Changes tree. Hidden files are still
+committed, still counted in the Changelists view, and still there for `svn` — nothing is
+ignored or excluded from the working copy. The Changes footer shows the true total in
+brackets so you can see what is out of sight.
+:::
+
+For narrowing the view for a moment rather than for good, use a
+[filter](/workflows/filtering-and-searching/) instead.
 
 ### displayFrom
 
@@ -172,6 +231,7 @@ leaving it off costs nothing but the pointer.
   "theme": "cipher",
   "directoryDiff": false,
   "hideUntracked": true,
+  "hideRules": [{ "pattern": "^build/", "enabled": true }],
   "displayFrom": "root",
   "diffOutputDir": "~/patches",
   "liveRefresh": false

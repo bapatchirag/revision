@@ -26,8 +26,19 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 			return m.toggleClCollapse(), true
 		case rejectsListID:
 			return m.toggleRejectCollapse(), true
+		case shelfListID:
+			return m.requestRestoreShelf(false), true
+		case "log":
+			return m.showPickedDiff(), true
+		case revFilesListID:
+			return m.toggleRevCollapse(), true
 		case updateMenuID:
 			return m.chooseUpdate(msg.Index), true
+		case settingsFormID:
+			// The only activatable row in the settings editor opens the rules editor.
+			if msg.Index == hideRulesFieldIndex {
+				return m.openHideRules(), true
+			}
 		}
 		return nil, true
 
@@ -49,10 +60,13 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case uimsg.SubViewPoppedMsg:
-		if msg.ID == filesViewsID {
+		switch msg.ID {
+		case filesViewsID:
 			m.drilledCL = ""
 			m.updateBar()
 			m.updateMain()
+		case logViewsID:
+			m.closeRevDiff()
 		}
 		return nil, true
 
@@ -64,12 +78,18 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 			return m.submitChangelist(msg.Value), true
 		case diffNameEditorID:
 			return m.submitDiffName(msg.Value), true
+		case shelfNameEditorID:
+			return m.submitShelveName(msg.Value), true
+		case shelfRenameID:
+			return m.submitShelfRename(msg.Value), true
 		case sourcePathID:
 			return m.submitSourcePath(msg.Value), true
 		case repoSwitchID:
 			return m.submitRepoPath(msg.Value), true
 		case settingsFormID:
 			return m.submitSettings(), true
+		case hideRulesEditorID:
+			return m.submitHideRules(), true
 		case passphraseEditorID:
 			return m.submitUnlock(msg.Value), true
 		case searchBarID:
@@ -112,6 +132,10 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 			m.nameEditor.Blur()
 		case diffNameEditorID:
 			m.closeDiffName()
+		case shelfNameEditorID:
+			m.closeShelfName()
+		case shelfRenameID:
+			m.closeShelfRename()
 		case sourcePathID:
 			m.closeSourcePath()
 		case repoSwitchID:
@@ -135,6 +159,8 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 			m.closeUpdate()
 		case settingsFormID:
 			m.closeSettings()
+		case hideRulesEditorID:
+			m.closeHideRules()
 		case searchBarID:
 			return m.clearFilter(), true
 		}

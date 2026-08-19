@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -22,6 +23,9 @@ func TestDefault(t *testing.T) {
 	}
 	if def.HideUntracked {
 		t.Error("Default().HideUntracked = true, want false")
+	}
+	if len(def.HideRules) != 0 {
+		t.Errorf("Default().HideRules = %+v, want none", def.HideRules)
 	}
 	if !def.OptimisticUpdates {
 		t.Error("Default().OptimisticUpdates = false, want true")
@@ -96,7 +100,7 @@ func TestLoadMissingReturnsDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadFrom(missing): unexpected error %v", err)
 	}
-	if got != Default() {
+	if !reflect.DeepEqual(got, Default()) {
 		t.Errorf("loadFrom(missing) = %+v, want Default() %+v", got, Default())
 	}
 }
@@ -118,7 +122,7 @@ func TestSaveThenLoadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadFrom: unexpected error %v", err)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("round trip = %+v, want %+v", got, want)
 	}
 }
@@ -202,6 +206,42 @@ func TestLoadDisablesLiveRefresh(t *testing.T) {
 	}
 	if got.LiveRefresh {
 		t.Error("LiveRefresh = true, want false (disabled on disk)")
+	}
+}
+
+func TestLoadHideRules(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	const onDisk = `{"hideRules":[{"pattern":"^build/","enabled":true},{"pattern":"\\.class$","enabled":false}]}`
+	if err := os.WriteFile(path, []byte(onDisk), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got, err := loadFrom(path)
+	if err != nil {
+		t.Fatalf("loadFrom: unexpected error %v", err)
+	}
+	want := []HideRule{{Pattern: "^build/", Enabled: true}, {Pattern: `\.class$`}}
+	if !reflect.DeepEqual(got.HideRules, want) {
+		t.Errorf("HideRules = %+v, want %+v", got.HideRules, want)
+	}
+}
+
+func TestLoadDropsUnusableHideRules(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	// A blank pattern and one that does not compile are dropped; a usable pattern
+	// survives, trimmed.
+	const onDisk = `{"hideRules":[{"pattern":"   ","enabled":true},{"pattern":"[unclosed","enabled":true},{"pattern":"  ^out/  ","enabled":true}]}`
+	if err := os.WriteFile(path, []byte(onDisk), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got, err := loadFrom(path)
+	if err != nil {
+		t.Fatalf("loadFrom: unexpected error %v", err)
+	}
+	want := []HideRule{{Pattern: "^out/", Enabled: true}}
+	if !reflect.DeepEqual(got.HideRules, want) {
+		t.Errorf("HideRules = %+v, want %+v", got.HideRules, want)
 	}
 }
 
@@ -383,7 +423,7 @@ func TestLoadInvalidJSONReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("loadFrom(malformed): expected an error, got nil")
 	}
-	if got != Default() {
+	if !reflect.DeepEqual(got, Default()) {
 		t.Errorf("loadFrom(malformed) = %+v, want Default() %+v", got, Default())
 	}
 }
@@ -401,7 +441,7 @@ func TestReconcileCreatesDefaultFileWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Reconcile: unexpected error %v", err)
 	}
-	if got != Default() {
+	if !reflect.DeepEqual(got, Default()) {
 		t.Errorf("Reconcile() = %+v, want Default() %+v", got, Default())
 	}
 	if !rec.Created || rec.Updated || len(rec.Conflicts) != 0 {
@@ -413,7 +453,7 @@ func TestReconcileCreatesDefaultFileWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadFrom after Reconcile: %v", err)
 	}
-	if onDisk != Default() {
+	if !reflect.DeepEqual(onDisk, Default()) {
 		t.Errorf("persisted config = %+v, want Default() %+v", onDisk, Default())
 	}
 }
@@ -566,6 +606,38 @@ func TestReconcileResetsUnknownEditor(t *testing.T) {
 	}
 }
 
+func TestReconcileDropsInvalidHideRule(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	const onDisk = `{"hideRules":[{"pattern":"[unclosed","enabled":true},{"pattern":"^out/","enabled":true}]}`
+	if err := os.WriteFile(path, []byte(onDisk), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got, rec, err := reconcileAt(path, nil)
+	if err != nil {
+		t.Fatalf("reconcileAt: unexpected error %v", err)
+	}
+	want := []HideRule{{Pattern: "^out/", Enabled: true}}
+	if !reflect.DeepEqual(got.HideRules, want) {
+		t.Errorf("HideRules = %+v, want %+v", got.HideRules, want)
+	}
+	if len(rec.Conflicts) != 1 || !rec.Updated {
+		t.Fatalf("Reconciliation = %+v, want one conflict and Updated", rec)
+	}
+	if note := rec.Notice(); !strings.Contains(note, "hideRules") {
+		t.Errorf("Notice() = %q, want a message mentioning hideRules", note)
+	}
+
+	// The rule the user can still use must survive the rewrite.
+	reloaded, err := loadFrom(path)
+	if err != nil {
+		t.Fatalf("loadFrom after reconcile: %v", err)
+	}
+	if !reflect.DeepEqual(reloaded.HideRules, want) {
+		t.Errorf("persisted HideRules = %+v, want %+v", reloaded.HideRules, want)
+	}
+}
+
 func TestReconcileRunsValidatorForDomainConflicts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	const onDisk = `{"logLimit":100,"editor":"native","theme":"retired","directoryDiff":true}`
@@ -614,7 +686,7 @@ func TestReconcileMalformedJSONLeavesFileIntact(t *testing.T) {
 	if err == nil {
 		t.Fatal("reconcileAt(malformed): expected an error, got nil")
 	}
-	if got != Default() {
+	if !reflect.DeepEqual(got, Default()) {
 		t.Errorf("reconcileAt(malformed) = %+v, want Default()", got)
 	}
 	if rec.Updated || rec.Created {

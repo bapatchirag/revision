@@ -13,6 +13,7 @@ import (
 
 	"github.com/bapatchirag/revision/internal/config"
 	"github.com/bapatchirag/revision/internal/selfupdate"
+	"github.com/bapatchirag/revision/internal/shelf"
 	"github.com/bapatchirag/revision/internal/sshagent"
 	"github.com/bapatchirag/revision/internal/svn"
 )
@@ -68,19 +69,21 @@ func (g *loadGen) stale(gen uint64) bool { return gen != 0 && gen != g.gen }
 // — since only one of them is on screen; saved and reject stamp the two
 // directory scans.
 type loadGens struct {
-	diff   loadGen
-	status loadGen
-	log    loadGen
-	rev    loadGen
-	saved  loadGen
-	reject loadGen
-	repos  loadGen
+	diff    loadGen
+	status  loadGen
+	log     loadGen
+	rev     loadGen
+	revDiff loadGen
+	saved   loadGen
+	reject  loadGen
+	shelf   loadGen
+	repos   loadGen
 }
 
 // stopAll abandons every load in flight, releasing the context each holds. A
 // generation added above is abandoned at shutdown by listing it here.
 func (g *loadGens) stopAll() {
-	for _, l := range []*loadGen{&g.diff, &g.status, &g.log, &g.rev, &g.saved, &g.reject, &g.repos} {
+	for _, l := range []*loadGen{&g.diff, &g.status, &g.log, &g.rev, &g.revDiff, &g.saved, &g.reject, &g.shelf, &g.repos} {
 		l.stop()
 	}
 }
@@ -159,6 +162,72 @@ type rejectsLoadedMsg struct {
 	files []rejectFile
 	err   error
 	gen   uint64
+}
+
+// shelvesLoadedMsg carries the change sets found in the working copy's shelf
+// store, for the Shelf panel.
+type shelvesLoadedMsg struct {
+	entries []shelf.Entry
+	err     error
+	gen     uint64
+}
+
+// shelfReadMsg carries the patch a shelved change set holds, keyed by the entry
+// it was read from so the current selection can match it.
+type shelfReadMsg struct {
+	id   string
+	text string
+	err  error
+	gen  uint64
+}
+
+// shelveRequest is one capture: the changes to take, what to call them, and the
+// revision the working copy was at when they were taken.
+type shelveRequest struct {
+	name    string
+	baseRev string
+	items   []svn.StatusItem
+}
+
+// shelvedMsg carries the result of taking a set of changes out of the working
+// copy. left names what stayed behind because no patch could carry it; entry is
+// filled whenever the shelf was written, including when clearing the working
+// copy afterwards is what failed.
+type shelvedMsg struct {
+	entry shelf.Entry
+	left  []string
+	err   error
+}
+
+// shelveAllMsg is what accepting the shelve-everything confirmation sends, so
+// the name prompt only opens once the whole working copy has been agreed to.
+type shelveAllMsg struct{}
+
+// shelfRestoredMsg carries the result of putting a shelved change set back. res
+// describes what svn did with the patch's targets; restored and blocked are the
+// unversioned files copied back and the ones whose path was already taken;
+// dropped reports that the entry was popped off the shelf afterwards.
+type shelfRestoredMsg struct {
+	name     string
+	res      svn.PatchResult
+	restored []string
+	blocked  []string
+	dropped  bool
+	err      error
+}
+
+// shelfDroppedMsg carries the result of removing a shelved change set, named as
+// the panel showed it.
+type shelfDroppedMsg struct {
+	id   string
+	name string
+	err  error
+}
+
+// shelfRenamedMsg carries the result of relabelling a shelved change set.
+type shelfRenamedMsg struct {
+	name string
+	err  error
 }
 
 // rejectDeletedMsg carries the result of removing a reject file, along with the
@@ -254,6 +323,17 @@ type revisionDetailMsg struct {
 type revisionPendingMsg struct {
 	rev string
 	gen uint64
+}
+
+// revDiffLoadedMsg carries the diff of a range of history. Errors ride on the
+// message rather than tearing down the UI: a range svn will not diff — one
+// reaching back past the directory being displayed, say — is a dead end for that
+// pair alone.
+type revDiffLoadedMsg struct {
+	rng  revRange
+	diff string
+	err  error
+	gen  uint64
 }
 
 // stagedMsg carries the result of staging or unstaging a single path. token
@@ -488,6 +568,13 @@ func saveDiffCmd(client *svn.Client, paths []string, dir, name string) tea.Cmd {
 	}
 }
 
+// writeDiffCmd writes a patch already in hand into dir as name, off the UI
+// goroutine. Unlike saveDiffCmd it runs no svn command, so nothing about it
+// reaches the command log — there is no invocation behind it to report.
+func writeDiffCmd(diff, dir, name string) tea.Cmd {
+	return func() tea.Msg { return writeDiff(dir, name, diff) }
+}
+
 // loadSavedDiffsCmd lists the patch files already saved in dir, off the UI
 // goroutine, for the Diffs view to browse.
 func loadSavedDiffsCmd(dir string, gen uint64) tea.Cmd {
@@ -497,6 +584,131 @@ func loadSavedDiffsCmd(dir string, gen uint64) tea.Cmd {
 	}
 }
 
+// loadShelvesCmd lists the change sets in the working copy's shelf store, off
+// the UI goroutine, for the Shelf panel to browse.
+func loadShelvesCmd(dir string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		entries, err := shelf.Scan(dir)
+		return shelvesLoadedMsg{entries: entries, err: err, gen: gen}
+	}
+}
+
+// readShelfCmd reads a shelved change set's patch off the UI goroutine so it can
+// be shown in Main. A read failure is carried on the message rather than
+// promoted to a fatal error, so an unreadable entry never tears down the UI.
+func readShelfCmd(dir, id string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		text, err := shelf.ReadPatch(dir, id)
+		return shelfReadMsg{id: id, text: text, err: err, gen: gen}
+	}
+}
+
+// shelveCmd takes a set of changes out of the working copy, off the UI
+// goroutine.
+func shelveCmd(client *svn.Client, dir string, req shelveRequest) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(svn.WithUserAction(context.Background()), 60*time.Second)
+		defer cancel()
+		entry, left, err := captureShelf(ctx, client, dir, req)
+		return shelvedMsg{entry: entry, left: left, err: err}
+	}
+}
+
+// captureShelf writes a set of changes into the shelf store and then clears them
+// from the working copy.
+//
+// The order is the whole safety of the feature: the patch is produced and the
+// entry written to disk *before* anything is reverted, so a capture that fails
+// part way through leaves the working copy as it was rather than with the
+// changes gone and nowhere left to find them.
+//
+// What svn will not put in a patch is left alone rather than lost: a binary
+// file's content never reaches a diff, and an unversioned directory or symlink
+// has no bytes of its own to copy. None of those are reverted or removed, and
+// all are named in the returned list so the caller can say what stayed behind.
+func captureShelf(ctx context.Context, client *svn.Client, dir string, req shelveRequest) (shelf.Entry, []string, error) {
+	var versioned, untracked []svn.StatusItem
+	for _, it := range req.items {
+		if it.State == svn.StateUnversioned {
+			untracked = append(untracked, it)
+			continue
+		}
+		versioned = append(versioned, it)
+	}
+
+	var patch string
+	if len(versioned) > 0 {
+		var err error
+		if patch, err = client.DiffPathsForPatching(ctx, itemPaths(versioned)); err != nil {
+			return shelf.Entry{}, nil, err
+		}
+	}
+
+	binaries := svn.BinarySkips(patch)
+	isBinary := make(map[string]bool, len(binaries))
+	for _, p := range binaries {
+		isBinary[p] = true
+	}
+	left := append([]string{}, binaries...)
+
+	entry := shelf.Entry{Name: req.name, BaseRevision: req.baseRev, SkippedBinary: binaries}
+	var revert []string
+	for _, it := range versioned {
+		if isBinary[it.Path] {
+			continue
+		}
+		entry.Files = append(entry.Files, shelf.FileRec{
+			Path:       it.Path,
+			State:      string(it.State),
+			Changelist: it.Changelist,
+		})
+		revert = append(revert, it.Path)
+	}
+
+	var payloads []shelf.Payload
+	for _, it := range untracked {
+		src := filepath.Join(client.Dir, it.Path)
+		if info, err := os.Lstat(src); err != nil || !info.Mode().IsRegular() {
+			left = append(left, it.Path)
+			continue
+		}
+		payloads = append(payloads, shelf.Payload{Rel: it.Path, Src: src})
+	}
+
+	if len(entry.Files) == 0 && len(payloads) == 0 {
+		return shelf.Entry{}, left, errors.New("nothing here can be put in a patch")
+	}
+
+	saved, err := shelf.Save(dir, entry, patch, payloads)
+	if err != nil {
+		return shelf.Entry{}, left, err
+	}
+
+	// The entry is on disk from here, so anything that fails below has left the
+	// changes recoverable rather than lost.
+	if err := client.RevertPaths(ctx, revert); err != nil {
+		return saved, left, err
+	}
+	var stuck []string
+	for _, it := range versioned {
+		// A revert un-schedules an add but leaves the file where it was.
+		if it.State == svn.StateAdded && !isBinary[it.Path] {
+			if err := client.RemoveUnversioned(it.Path); err != nil {
+				stuck = append(stuck, it.Path)
+			}
+		}
+	}
+	for _, p := range payloads {
+		if err := client.RemoveUnversioned(p.Rel); err != nil {
+			stuck = append(stuck, p.Rel)
+		}
+	}
+	if len(stuck) > 0 {
+		return saved, left, fmt.Errorf("could not clear %s", strings.Join(stuck, ", "))
+	}
+	return saved, left, nil
+}
+
 // readSavedDiffCmd reads a saved patch file off the UI goroutine so it can be
 // shown in Main. A read failure is carried on the message rather than promoted
 // to a fatal error, so an unreadable file never tears down the UI.
@@ -504,6 +716,109 @@ func readSavedDiffCmd(path string, gen uint64) tea.Cmd {
 	return func() tea.Msg {
 		b, err := os.ReadFile(path)
 		return savedDiffReadMsg{path: path, text: string(b), err: err, gen: gen}
+	}
+}
+
+// restoreShelfCmd puts a shelved change set back into the working copy, off the
+// UI goroutine, and pops the entry off the shelf when pop is set.
+//
+// The patch goes through the same gate a saved one does — was it taken from
+// here, and does svn say any of it would land — before anything is written. Only
+// a restore that came back whole drops the entry: while a hunk is still sitting
+// in a .rej file, or an unversioned file could not be put back, the shelf is the
+// only remaining copy of what did not make it.
+func restoreShelfCmd(client *svn.Client, dir string, e shelf.Entry, pop bool) tea.Cmd {
+	return func() tea.Msg {
+		name := shelfLabel(e)
+		res, err := applyShelfPatch(client, dir, e)
+		if err != nil {
+			return shelfRestoredMsg{name: name, err: err}
+		}
+		restored, blocked, err := shelf.Restore(dir, e.ID, client.Dir)
+		if err != nil {
+			return shelfRestoredMsg{name: name, res: res, restored: restored, blocked: blocked, err: err}
+		}
+
+		ctx, cancel := context.WithTimeout(svn.WithUserAction(context.Background()), 60*time.Second)
+		defer cancel()
+		if err := replayChangelists(ctx, client, e.Files); err != nil {
+			return shelfRestoredMsg{name: name, res: res, restored: restored, blocked: blocked, err: err}
+		}
+
+		msg := shelfRestoredMsg{name: name, res: res, restored: restored, blocked: blocked}
+		if pop && len(res.Conflicted) == 0 && len(res.Skipped) == 0 && len(blocked) == 0 {
+			if err := shelf.Drop(dir, e.ID); err != nil {
+				msg.err = err
+				return msg
+			}
+			msg.dropped = true
+		}
+		return msg
+	}
+}
+
+// applyShelfPatch runs an entry's patch against the working copy. An entry that
+// carries only unversioned files has no patch to apply, which is not a failure.
+func applyShelfPatch(client *svn.Client, dir string, e shelf.Entry) (svn.PatchResult, error) {
+	path, err := shelf.PatchPath(dir, e.ID)
+	if err != nil {
+		return svn.PatchResult{}, err
+	}
+	text, err := os.ReadFile(path)
+	if err != nil {
+		return svn.PatchResult{}, err
+	}
+	if strings.TrimSpace(string(text)) == "" {
+		return svn.PatchResult{}, nil
+	}
+	if !svn.PatchBelongsTo(string(text), client.Dir) {
+		return svn.PatchResult{}, fmt.Errorf(
+			"none of the files it changes are in %s — it was shelved from another directory", client.Dir)
+	}
+	ctx, cancel := context.WithTimeout(svn.WithUserAction(context.Background()), 60*time.Second)
+	defer cancel()
+	dry, err := client.Patch(ctx, path, true)
+	if err != nil {
+		return svn.PatchResult{}, err
+	}
+	if err := patchTrialErr(dry); err != nil {
+		return svn.PatchResult{}, err
+	}
+	return client.Patch(ctx, path, false)
+}
+
+// replayChangelists puts the restored files back into the changelists they were
+// shelved from, which no patch records. A file the patch did not bring back —
+// one shelved as a deletion, or one svn could not place — is passed over rather
+// than named to svn, which would only reject a path that is not there.
+func replayChangelists(ctx context.Context, client *svn.Client, files []shelf.FileRec) error {
+	for _, f := range files {
+		if f.Changelist == "" {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(client.Dir, filepath.FromSlash(f.Path))); err != nil {
+			continue
+		}
+		if err := client.AddToChangelist(ctx, f.Changelist, f.Path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// dropShelfCmd removes a shelved change set off the UI goroutine. The store is
+// files on disk, not working-copy state, so nothing svn knows about is involved.
+func dropShelfCmd(dir, id, name string) tea.Cmd {
+	return func() tea.Msg {
+		return shelfDroppedMsg{id: id, name: name, err: shelf.Drop(dir, id)}
+	}
+}
+
+// renameShelfCmd relabels a shelved change set off the UI goroutine, leaving
+// everything it captured untouched.
+func renameShelfCmd(dir, id, name string) tea.Cmd {
+	return func() tea.Msg {
+		return shelfRenamedMsg{name: name, err: shelf.Rename(dir, id, name)}
 	}
 }
 
@@ -699,6 +1014,24 @@ func loadRevisionDetailCmd(ctx context.Context, client *svn.Client, rev string, 
 	return func() tea.Msg {
 		entry, err := client.RevisionDetail(ctx, rev)
 		return revisionDetailMsg{rev: rev, paths: entry.Paths, err: err, gen: gen}
+	}
+}
+
+// loadRevDiffCmd reads the diff over a range of history off the UI goroutine. A
+// range with no start is the single revision it ends at, which svn diffs against
+// its own predecessor.
+func loadRevDiffCmd(ctx context.Context, client *svn.Client, r revRange, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		var (
+			diff string
+			err  error
+		)
+		if r.from == "" {
+			diff, err = client.DiffRevision(ctx, r.to)
+		} else {
+			diff, err = client.DiffRevisions(ctx, r.from, r.to)
+		}
+		return revDiffLoadedMsg{rng: r, diff: diff, err: err, gen: gen}
 	}
 }
 

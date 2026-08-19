@@ -132,40 +132,47 @@ func TestCommandLogEvictsTheOldest(t *testing.T) {
 	}
 }
 
-func TestFocusPrevPanelSkipsTheHiddenCommandLog(t *testing.T) {
-	m := sizedModel(t)
-	if !m.showCmdLog {
-		t.Fatal("the command log starts shown")
+// TestPanelCycleCoversTheSidePanelsOnly walks the cycle both ways: it visits
+// Status, Files and Log and nothing else, and pressed on a panel outside it
+// returns to the side panel driving Main.
+func TestPanelCycleCoversTheSidePanelsOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  tea.KeyMsg
+	}{
+		{"tab", tea.KeyMsg{Type: tea.KeyTab}},
+		{"shift+tab", tea.KeyMsg{Type: tea.KeyShiftTab}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := sizedModel(t)
+			seen := map[int]bool{}
+			for range 6 {
+				m = stepModel(t, m, tc.key)
+				seen[m.focus.Index()] = true
+			}
+			for _, p := range sidePanels {
+				if !seen[p] {
+					t.Errorf("panel %d should be in the cycle, reached %v", p, seen)
+				}
+			}
+			if seen[panelMain] || seen[panelCmdLog] {
+				t.Errorf("Main and the command log are outside the cycle, reached %v", seen)
+			}
+		})
 	}
+}
 
-	// While it is shown it takes its place in the ring.
-	reached := false
-	for range 6 {
-		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
-		m = next.(*Model)
-		if m.focus.Index() == panelCmdLog {
-			reached = true
-		}
-	}
-	if !reached {
-		t.Error("a shown command log should be reachable with shift+tab")
-	}
-
-	// Hidden, stepping back must pass over it rather than landing on it.
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
-	m = next.(*Model)
-	if m.showCmdLog {
-		t.Fatal("x should hide the command log")
-	}
-	seen := make([]int, 0, 6)
-	for range 6 {
-		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
-		m = next.(*Model)
-		seen = append(seen, m.focus.Index())
-	}
-	for _, idx := range seen {
-		if idx == panelCmdLog {
-			t.Fatalf("focus landed on the hidden command log; ring was %v", seen)
+// TestPanelCycleReturnsFromMain covers stepping off a panel that is not in the
+// cycle: focus goes back to the side panel that drove Main, not to the top.
+func TestPanelCycleReturnsFromMain(t *testing.T) {
+	for _, from := range []int{panelMain, panelCmdLog} {
+		m := sizedModel(t)
+		m = stepModel(t, m, keyRunes("3")) // the Log panel now drives Main
+		m.focus.Focus(from)
+		m.afterFocusChange()
+		m = stepModel(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		if m.focus.Index() != panelLog {
+			t.Errorf("tab from panel %d should return to the Log panel, got index %d", from, m.focus.Index())
 		}
 	}
 }

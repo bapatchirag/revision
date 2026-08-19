@@ -7,28 +7,33 @@ import AppScreen from '../../../components/AppScreen.astro';
 import DemoVideo from '../../../components/DemoVideo.astro';
 import KeyCap from '../../../components/KeyCap.astro';
 
-The screen is a left column of Status, Files and Log, beside a Main detail view with a
-Command Log beneath it.
+The screen is a left column of Status, Files, Log and Shelf, beside a Main detail view with
+a Command Log beneath it.
 
 <AppScreen golden="TestModelGoldenLayout" />
 
 Each panel carries its number in the top border — `[2] Files` — and the focused one is
-drawn in the accent colour. The frame also carries a position and count in the bottom
+drawn in the accent colour. The Command Log has no number; it is reached with
+<KeyCap key="x" /> and the mouse. The frame also carries a position and count in the bottom
 border (`1 of 3`) where a count makes sense.
 
 | Panel | Key | What it shows |
 |-------|-----|---------------|
 | Status | <KeyCap key="1" /> | The working-copy root, the source path `revision` is operating on, the current directory, the branch, and the checked-out revision against HEAD. |
 | Files | <KeyCap key="2" /> | Pending changes, as a directory tree, grouped by changelist, or as saved patches. |
-| Log | <KeyCap key="3" /> | Revision history, newest first. An asterisk marks the revision the working copy sits at. |
-| Command Log | <KeyCap key="4" /> | The `svn` actions `revision` has run on your behalf, newest first, each marked ✓ or ✗. |
+| Log | <KeyCap key="3" /> | Revision history, newest first. An asterisk marks the revision the working copy sits at, and a dot any picked to be compared. |
+| Shelf | <KeyCap key="4" /> | Change sets set aside with [shelving](/workflows/shelving/), newest first. |
+| Command Log | <KeyCap key="x" /> | The `svn` actions `revision` has run on your behalf, newest first, each marked ✓ or ✗. |
 | Main | <KeyCap key="0" /> | Detail for whatever is selected: a diff for a file or directory, metadata and changed paths for a revision. |
 
 ## Moving between panels
 
-- <KeyCap key="1" /> … <KeyCap key="4" />, <KeyCap key="0" /> — focus a panel directly.
-- <KeyCap key="tab" /> / <KeyCap key="shift+tab" /> — cycle forwards and backwards.
-- <KeyCap key="x" /> — show or hide the Command Log.
+- <KeyCap key="1" />, <KeyCap key="2" />, <KeyCap key="3" />, <KeyCap key="4" />, <KeyCap key="0" /> — focus a panel directly.
+- <KeyCap key="tab" /> / <KeyCap key="shift+tab" /> — cycle forwards and backwards through the
+  side panels: Status, Files, Log and Shelf. Main and the Command Log are outside the cycle,
+  so <KeyCap key="tab" /> pressed on either returns to the side panel driving Main.
+- <KeyCap key="x" /> — show or hide the Command Log. It has no number of its own, so
+  clicking it is the only way to focus and scroll it.
 
 With [`allowMouse`](/reference/configuration/#allowmouse) on, clicking a panel focuses it.
 
@@ -120,14 +125,16 @@ the mouse on.
 ### Changes
 
 Pending changes as a collapsible directory tree, each change grouped under its folder.
-<KeyCap key="enter" /> expands or collapses a directory. Each row is a marker, the SVN
-status code (`A`, `M`, `D`, `?` …) and the file name. A green `●` marks a staged file and
-a cyan `●` a file in a [named changelist](/workflows/changelists/); an unstaged file has no
-marker.
+<KeyCap key="enter" /> expands or collapses a directory. Each row is a pick cell, a marker,
+the SVN status code (`A`, `M`, `D`, `?` …) and the file name. A green `●` marks a staged
+file and a cyan `●` a file in a [named changelist](/workflows/changelists/); an unstaged
+file has no marker. A `✓` in the leading cell marks a file [held for
+shelving](/workflows/shelving/).
 
 The footer counts the position and the number of files in view. When a
-[filter](/workflows/filtering-and-searching/) or
-[`hideUntracked`](/reference/configuration/#hideuntracked) hides some, the full count
+[filter](/workflows/filtering-and-searching/),
+[`hideUntracked`](/reference/configuration/#hideuntracked) or a
+[hide rule](/reference/configuration/#hiderules) hides some, the full count
 follows in brackets — `1 of 16 (29)`.
 
 A row waiting on a revert, a delete or a commit is dimmed and tailed with `…`, and the
@@ -179,14 +186,36 @@ Selecting a revision shows its date, full message and changed paths in Main.
 <KeyCap key="space" /> [updates the working copy](/workflows/updating/) to the selected
 revision.
 
+<KeyCap key="v" /> picks a revision to compare, up to two at a time, and
+<KeyCap key="enter" /> diffs them: the panel becomes a tree of the files they touched and
+Main follows it like the Changes view. <KeyCap key="esc" /> comes back out. See
+[Comparing revisions](/workflows/diffs/#comparing-revisions).
+
 A page holds [`logLimit`](/reference/configuration/#loglimit) revisions — 100 by default.
 <KeyCap key="n" /> loads the next page and <KeyCap key="p" /> the previous one. The footer
 shows where the cursor sits within the page and which page you are on, so `12 of 100 · 3`
 is the twelfth revision of the third page.
 
 Filtering with <KeyCap key="/" /> searches the page on screen, not the whole history; the
-filter stays applied as you turn pages. Committing returns the panel to the first page, so
-the new revision is in view.
+filter stays applied as you turn pages. Drilled into a comparison it narrows the files
+instead, and the revisions get their own filter back on the way out. Committing returns
+the panel to the first page, so the new revision is in view.
+
+## Shelf
+
+Change sets [taken out of the working copy](/workflows/shelving/), newest first, each row
+naming the entry, how many files it holds and when it was shelved. Selecting one shows its
+patch in Main.
+
+<AppScreen golden="TestShelfPanelGolden" />
+
+The panel shows only its newest row until it is focused, then grows to its whole list —
+taking the room from the Log panel above it, so the Files panel never moves. It stays open
+while you read an entry's patch in Main, and collapses when another side panel takes over.
+
+<KeyCap key="enter" /> merges an entry back and keeps it, <KeyCap key="p" /> merges it back
+and takes it off the shelf, <KeyCap key="d" /> drops it and <KeyCap key="n" /> renames it.
+<KeyCap key="z" /> shelves from here as it does from the Files panel.
 
 ## Command Log
 
@@ -194,7 +223,8 @@ Every `svn` command `revision` ran on your behalf, newest first, each marked ✓
 Read-only queries — the status and log refreshes that happen constantly, including the
 background ones — are left out, so the list stays a record of what actually changed.
 
-Toggle the panel with <KeyCap key="x" />.
+Toggle the panel with <KeyCap key="x" />. It has no number and is not in the
+<KeyCap key="tab" /> cycle, so click it to focus and scroll it.
 
 ## Main
 
@@ -209,6 +239,7 @@ Detail for the current selection, and the target of the
 | A changelist | The combined diff of its members. |
 | A saved patch | The patch file's contents. |
 | A revision | Date, author, full message, and changed paths. |
+| A file in a compared range | That file's section of the range's diff. |
 | The Status panel | Project links and version information. |
 
 A diff is fetched once and reused for the rest of the session, so stepping back to a file

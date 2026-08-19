@@ -146,6 +146,76 @@ func TestIntegrationLogAndDiff(t *testing.T) {
 	}
 }
 
+// TestIntegrationRevisionDiff pins the two properties the Log panel's diff is
+// built on: an added or deleted file is marked by "(nonexistent)" on the side it
+// is missing from, and a range is literal — the state at one revision against
+// the state at another, not the sum of the commits between them.
+func TestIntegrationRevisionDiff(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	// r1 adds a.txt, r2 adds b.txt, r3 modifies a.txt, r4 deletes b.txt.
+	writeFile(t, filepath.Join(wc, "a.txt"), "a1\n")
+	mustRun(t, wc, "svn", "add", "a.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "r1")
+	mustRun(t, wc, "svn", "update")
+
+	writeFile(t, filepath.Join(wc, "b.txt"), "b1\n")
+	mustRun(t, wc, "svn", "add", "b.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "r2")
+	mustRun(t, wc, "svn", "update")
+
+	writeFile(t, filepath.Join(wc, "a.txt"), "a1\na2\n")
+	mustRun(t, wc, "svn", "commit", "-m", "r3")
+	mustRun(t, wc, "svn", "update")
+
+	mustRun(t, wc, "svn", "rm", "b.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "r4")
+	mustRun(t, wc, "svn", "update")
+
+	added, err := c.DiffRevision(ctx, "2")
+	if err != nil {
+		t.Fatalf("DiffRevision(2): %v", err)
+	}
+	if !strings.Contains(added, "--- b.txt\t(nonexistent)") {
+		t.Errorf("an added file should be missing from the left side:\n%s", added)
+	}
+
+	deleted, err := c.DiffRevision(ctx, "4")
+	if err != nil {
+		t.Fatalf("DiffRevision(4): %v", err)
+	}
+	if !strings.Contains(deleted, "+++ b.txt\t(nonexistent)") {
+		t.Errorf("a deleted file should be missing from the right side:\n%s", deleted)
+	}
+
+	// r2 is the left-hand endpoint, so b.txt is already present there: the range
+	// records it being deleted, never added. That is what makes the range literal.
+	rng, err := c.DiffRevisions(ctx, "2", "4")
+	if err != nil {
+		t.Fatalf("DiffRevisions(2, 4): %v", err)
+	}
+	if !strings.Contains(rng, "+++ b.txt\t(nonexistent)") {
+		t.Errorf("the range should delete b.txt:\n%s", rng)
+	}
+	if strings.Contains(rng, "--- b.txt\t(nonexistent)") {
+		t.Errorf("a literal range must not replay the left endpoint's own change:\n%s", rng)
+	}
+	if !strings.Contains(rng, "+a2") {
+		t.Errorf("the range should carry r3's modification:\n%s", rng)
+	}
+
+	// Picked the other way round, the same pair must still read forwards.
+	reversed, err := c.DiffRevisions(ctx, "4", "2")
+	if err != nil {
+		t.Fatalf("DiffRevisions(4, 2): %v", err)
+	}
+	if reversed != rng {
+		t.Errorf("a range picked newest-first should match the same range picked oldest-first:\n%s\n---\n%s", reversed, rng)
+	}
+}
+
 func TestIntegrationLogPaging(t *testing.T) {
 	wc := setupWC(t)
 	ctx := context.Background()
@@ -607,5 +677,112 @@ func TestIntegrationPatchPartiallyApplies(t *testing.T) {
 	rejects, _ := filepath.Glob(filepath.Join(wc, "f.txt*.rej"))
 	if len(rejects) == 0 {
 		t.Error("svn should have written the rejected hunk out beside f.txt")
+	}
+}
+
+// TestIntegrationDiffForPatchingCarriesAMovedFile pins the reason
+// DiffPathsForPatching exists: a plain diff describes a move as a deletion and
+// an empty section, so putting one back would lose the file outright.
+func TestIntegrationDiffForPatchingCarriesAMovedFile(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	writeFile(t, filepath.Join(wc, "moved.txt"), "old\n")
+	mustRun(t, wc, "svn", "add", "moved.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "seed")
+	mustRun(t, wc, "svn", "move", "moved.txt", "renamed.txt")
+
+	plain, err := c.DiffPaths(ctx, nil)
+	if err != nil {
+		t.Fatalf("DiffPaths: %v", err)
+	}
+	if strings.Contains(plain, "+old") {
+		t.Errorf("a plain diff is expected to leave a moved file's content out:\n%s", plain)
+	}
+
+	full, err := c.DiffPathsForPatching(ctx, nil)
+	if err != nil {
+		t.Fatalf("DiffPathsForPatching: %v", err)
+	}
+	if !strings.Contains(full, "+old") {
+		t.Fatalf("DiffPathsForPatching left the moved file's content out:\n%s", full)
+	}
+
+	// The patch has to be able to put the move back with nothing else to go on.
+	if err := c.RevertPaths(ctx, []string{"."}); err != nil {
+		t.Fatalf("RevertPaths: %v", err)
+	}
+	patch := filepath.Join(t.TempDir(), "move.patch")
+	writeFile(t, patch, full)
+	if _, err := c.Patch(ctx, patch, false); err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	if got := readString(t, filepath.Join(wc, "renamed.txt")); got != "old\n" {
+		t.Errorf("renamed.txt = %q, want %q put back by the patch", got, "old\n")
+	}
+	if _, err := os.Stat(filepath.Join(wc, "moved.txt")); err == nil {
+		t.Error("moved.txt should have been taken away again by the patch")
+	}
+}
+
+// TestIntegrationDiffLeavesBinaryContentOut pins what BinarySkips is for: svn
+// will not express a binary file as text, so a diff names it and carries none
+// of it.
+func TestIntegrationDiffLeavesBinaryContentOut(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	bin := filepath.Join(wc, "logo.bin")
+	writeFile(t, bin, "\x00\x01\x02BEFORE\xff\xfe")
+	mustRun(t, wc, "svn", "add", "logo.bin")
+	mustRun(t, wc, "svn", "commit", "-m", "seed")
+	writeFile(t, bin, "\x00\x01\x02AFTER\xff\xfe\xfd")
+
+	patch, err := c.DiffPathsForPatching(ctx, nil)
+	if err != nil {
+		t.Fatalf("DiffPathsForPatching: %v", err)
+	}
+	if strings.Contains(patch, "AFTER") {
+		t.Errorf("svn is not expected to carry a binary file's content:\n%s", patch)
+	}
+	got := BinarySkips(patch)
+	if len(got) != 1 || got[0] != "logo.bin" {
+		t.Errorf("BinarySkips = %v, want [logo.bin] — what the patch cannot put back has to be named", got)
+	}
+}
+
+// TestIntegrationRevertPathsLeavesAScheduledAddOnDisk pins the trace a revert
+// leaves: the add is un-scheduled, but the file stays, so a caller clearing a
+// working copy has to remove it itself.
+func TestIntegrationRevertPathsLeavesAScheduledAddOnDisk(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	writeFile(t, filepath.Join(wc, "tracked.txt"), "committed\n")
+	mustRun(t, wc, "svn", "add", "tracked.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "seed")
+
+	writeFile(t, filepath.Join(wc, "tracked.txt"), "modified\n")
+	writeFile(t, filepath.Join(wc, "added.txt"), "brand new\n")
+	mustRun(t, wc, "svn", "add", "added.txt")
+
+	if err := c.RevertPaths(ctx, []string{"."}); err != nil {
+		t.Fatalf("RevertPaths: %v", err)
+	}
+	if got := readString(t, filepath.Join(wc, "tracked.txt")); got != "committed\n" {
+		t.Errorf("tracked.txt = %q, want the committed content back", got)
+	}
+	if _, err := os.Stat(filepath.Join(wc, "added.txt")); err != nil {
+		t.Errorf("added.txt should still be on disk after a revert: %v", err)
+	}
+	items, err := c.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if len(items) != 1 || items[0].Path != "added.txt" || items[0].State != StateUnversioned {
+		t.Errorf("Status = %+v, want added.txt left behind unversioned", items)
 	}
 }

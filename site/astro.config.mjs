@@ -59,6 +59,7 @@ export default defineConfig({
 						{ label: 'Staging & commit', link: '/workflows/staging-and-commit/' },
 						{ label: 'Changelists', link: '/workflows/changelists/' },
 						{ label: 'Working with diffs', link: '/workflows/diffs/' },
+						{ label: 'Shelving', link: '/workflows/shelving/' },
 						{ label: 'Updating the working copy', link: '/workflows/updating/' },
 						{ label: 'Resolving conflicts & rejects', link: '/workflows/conflicts/' },
 						{ label: 'Filtering & searching', link: '/workflows/filtering-and-searching/' },

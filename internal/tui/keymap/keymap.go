@@ -169,6 +169,20 @@ func HelpSections() []Section {
 				Description: "Resolve the selection side by side. Which view you are in decides what it resolves, and the two are never mixed: in the Changes view (or an expanded changelist) it reads the conflict markers in the selected `C` file, and in the Rejects view it reads the selected `.rej` against the file it was written for. A patch that leaves a file both conflicted and with a reject beside it is therefore two pieces of work, one in each view. Each conflict, or each rejected hunk that still fits, is a page: `1` takes the left side, `2` the right, `3` both and `0` clears the choice. Once every page has been decided, `w` writes the file back out and clears what marked it — `svn resolve` for a conflict, removing the reject for a reject. `e` opens the file in your editor to merge it by hand instead.",
 			},
 		}},
+		{Title: "Shelf", Bindings: []Binding{
+			{
+				Action: "Pick / shelve", Keys: []string{"v", "z"}, Context: "Files",
+				Description: "Hold the selection for the next shelve, or take what is held out of the working copy. `v` works on a file, on a directory — everything shelvable beneath it — and on a changelist row, so changes already filed under one are shelved without drilling in; pressed again it lets them go, as does `esc`. A pick is held by path rather than by row, so it survives a reload, a filter and a rebuild. `z` opens a prompt for a name and then takes what is held; with nothing held it means the whole working copy, and asks first.",
+			},
+			{
+				Action: "Apply / pop", Keys: []string{"enter", "p"}, Context: "Shelf",
+				Description: "Merge the highlighted entry back into the working copy. `enter` leaves it on the shelf, `p` takes it off — but only when the whole of it went back, since while a hunk is sitting in a `.rej` or an unversioned file could not be placed, the shelf is the only remaining copy of what did not make it. Both ask first, and say so when the entry was shelved at a revision the working copy has since moved off.",
+			},
+			{
+				Action: "Drop / rename", Keys: []string{"d", "n"}, Context: "Shelf",
+				Description: "Delete the highlighted entry, after asking — nothing else has a copy of what it holds — or relabel it, from a prompt that opens on the name it has now.",
+			},
+		}},
 		{Title: "Working copy", Bindings: []Binding{
 			{
 				Action: "Update working copy", Keys: []string{"u"}, Context: "Global",
@@ -202,11 +216,11 @@ func HelpSections() []Section {
 		{Title: "Navigation", Bindings: []Binding{
 			{
 				Action: "Jump to panel", Keys: []string{"1", "2", "3", "4", "0"}, sep: " ", Context: "Global",
-				Description: "Focus the Status, Files, Log, Command Log or Main panel.",
+				Description: "Focus the Status, Files, Log, Shelf or Main panel. The Command Log has no number: `x` shows it and a click focuses it.",
 			},
 			{
 				Action: "Cycle panels", Keys: []string{"tab", "shift+tab"}, Context: "Global",
-				Description: "Move focus to the next or previous panel.",
+				Description: "Move focus to the next or previous side panel — Status, Files, Log, Shelf. Main and the Command Log are outside the cycle, so `tab` pressed on either returns to the side panel driving Main.",
 			},
 			{
 				Action: "Move up / down", Keys: []string{"k", "j"}, Context: "Any panel",
@@ -240,11 +254,19 @@ func HelpSections() []Section {
 		{Title: "View", Bindings: []Binding{
 			{
 				Action: "Switch file view", Keys: []string{"[", "]"}, Context: "Files",
-				Description: "Turn the Files panel between the Changes, Changelists and Diffs views.",
+				Description: "Turn the Files panel between the Changes, Changelists, Diffs and Rejects views.",
 			},
 			{
 				Action: "Side-by-side / save", Keys: []string{"s", "w"}, Context: "Main",
-				Description: "Open the diff on screen side by side in an overlay, or save it to a file in `diffOutputDir`.",
+				Description: "Open the diff on screen side by side in an overlay, or save it to a file in `diffOutputDir`. `w` saves a range of history too, down to the single file the drilled-in tree points at; that patch has already been read, so it is written as it stands rather than asked of svn a second time.",
+			},
+			{
+				Action: "Pick revisions", Keys: []string{"v"}, Context: "Log",
+				Description: "Pick the selected revision to be diffed, or unpick it. Two can be held at once, and picking a third drops whichever was picked first, so the far end of a comparison can be moved without unpicking it each time. `esc` lets them go. A pick is held by revision rather than by row, so it survives paging and filtering — the two ends need not be on the same page.",
+			},
+			{
+				Action: "Diff picked revisions", Keys: []string{"enter"}, Context: "Log",
+				Description: "Diff whatever is picked, and open the files it touched as a tree in place of the revisions. One revision on its own is compared with the one before it, so what that commit changed is what you see. Two are compared with each other as they stand: the diff runs from the older to the newer, which is the state at one against the state at the other rather than the sum of the commits between them — the older revision's own change is already on the left-hand side and is not part of it. The tree reads like the Changes view: a file shows its own patch, a directory everything beneath it, and `enter` folds a directory away. It covers the directory `displayFrom` roots the views at. `esc` comes back out to the revisions, leaving the picks held for another look.",
 			},
 			{
 				Action: "Dir diff / untracked", Keys: []string{"D", "U"}, Context: "Files",
@@ -252,7 +274,7 @@ func HelpSections() []Section {
 			},
 			{
 				Action: "Toggle command log", Keys: []string{"x"}, Context: "Global",
-				Description: "Show or hide the Command Log panel.",
+				Description: "Show or hide the Command Log panel. It sits outside the panel cycle and has no number, so clicking it is the only way to focus and scroll it.",
 			},
 		}},
 		{Title: "General", Bindings: []Binding{

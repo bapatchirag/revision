@@ -1,0 +1,151 @@
+---
+title: Shelving
+description: Set changes aside, clear the working copy, and put them back later.
+---
+
+import AppScreen from '../../../components/AppScreen.astro';
+import DemoVideo from '../../../components/DemoVideo.astro';
+import KeyCap from '../../../components/KeyCap.astro';
+
+Subversion has no `git stash`. Shelving exists in `svn` only as an experimental feature
+that standard builds are compiled without, so `revision` provides its own: a **shelf** of
+change sets taken out of the working copy and kept beside it, ready to be put back.
+
+A shelf entry holds the patch that reproduces a set of changes, verbatim copies of the
+unversioned files no patch can describe, and the base revision, file states and changelist
+memberships needed to restore them faithfully.
+
+## Picking what to shelve
+
+<KeyCap key="v" /> in the Files panel holds the selection for the next shelve. A tick
+appears beside each held row, and the hint bar counts what is held.
+
+<AppScreen golden="TestShelvePicksGolden" />
+
+| Where you press it | What is held |
+|---|---|
+| A file in the Changes tree | that file |
+| A directory row | everything shelvable beneath it |
+| A changelist row, in the Changelists view | every file in that changelist |
+| A file inside a drilled-in changelist | that file |
+
+Pressing <KeyCap key="v" /> again lets the selection go, and <KeyCap key="esc" /> releases
+everything. Picks are held by path rather than by row, so they survive a reload, a filter
+and a rebuild — and a pick whose file has since been committed simply drops out.
+
+:::note
+Inside a drilled-in changelist, <KeyCap key="esc" /> steps back out to the overview and
+**keeps** what you picked. Picking inside a list and coming back out is how a shelve of
+part of one is built, so the drill unwinds first; a second <KeyCap key="esc" />, now on the
+overview, releases the picks.
+:::
+
+## Shelving
+
+<KeyCap key="z" /> takes what is held. A prompt asks what to call the entry; leaving it
+blank names it after the set it came from.
+
+With **nothing** held, <KeyCap key="z" /> means the whole working copy, and asks before
+taking it.
+
+Once the entry is written, `revision` reverts the files it captured and removes those that
+were only scheduled additions — a revert un-schedules an add but leaves the file where it
+was. The Changes view empties, and the entry appears in the Shelf panel.
+
+:::caution[The order is deliberate]
+The patch is produced and the entry written to disk **before** anything is reverted. A
+shelve that fails part way through leaves the working copy as it was rather than with the
+changes gone and nowhere left to find them.
+:::
+
+### What a shelf cannot carry
+
+Two things are left in the working copy rather than lost, and named in the toast that
+follows:
+
+- **Binary files.** `svn diff` will not express one as text — it prints
+  `Cannot display: file marked as a binary type.` and no content — so a shelf that
+  reverted them would destroy them. They stay put.
+- **Unversioned directories and symlinks.** Neither has bytes of its own to copy.
+
+**Conflicted files** are not offered for shelving at all. A conflict needs deciding rather
+than setting aside, and reverting one throws the merge away — [resolve
+it](/workflows/conflicts/) first.
+
+A **move** is carried as a deletion and an addition. The content survives in full, but
+svn's record that one came from the other does not.
+
+## The Shelf panel
+
+The Shelf panel is the fourth numbered panel, below Log. <KeyCap key="4" /> focuses it,
+and it grows to show its whole list while it has focus, taking the room from the Log panel
+above it — the Files panel does not move. It stays open while you read an entry's patch in
+Main, and collapses again when another side panel takes over.
+
+Each row is the entry's name, how many files it holds, and when it was shelved. Selecting
+one shows its patch in Main. <KeyCap key="/" /> filters the list by name.
+
+<AppScreen golden="TestShelfPanelGolden" />
+
+| Key | Action |
+|---|---|
+| <KeyCap key="enter" /> | Apply — merge back, keep the entry |
+| <KeyCap key="p" /> | Pop — merge back and take the entry off the shelf |
+| <KeyCap key="d" /> | Drop the entry |
+| <KeyCap key="n" /> | Rename the entry |
+
+## Restoring
+
+Both <KeyCap key="enter" /> and <KeyCap key="p" /> ask first, and put the entry's patch
+through the same checks a [saved patch](/workflows/diffs/#applying-a-saved-patch) goes
+through: a shelf whose files are not in this directory is refused, as is one svn says
+would land nothing at all.
+
+Unversioned files are copied back from the bytes the entry holds. A path that is already
+taken is **reported rather than written over** — what is sitting there is your current
+work — and the entry keeps its copy either way.
+
+Changelist membership is replayed afterwards, since no patch records it: files return to
+the changelists they were shelved from.
+
+**Pop only drops the entry when the whole of it went back.** While a hunk is sitting in a
+`.rej` file or an unversioned file could not be placed, the shelf is the only remaining
+copy of what did not make it, so it is kept and the toast says so.
+
+<DemoVideo
+	name="shelving"
+	width={1600}
+	height={900}
+	label="Picking two files with v, shelving them as wip refactor, opening the Shelf panel to read the entry's patch, and popping it back into the working copy"
+/>
+
+:::caution[Shelving across an update]
+An entry remembers the revision it was shelved at. If the working copy has moved on, the
+confirmation says so — hunks that no longer fit are left beside their file as `.rej`
+files, browsable in the [Rejects view](/workflows/conflicts/).
+:::
+
+## Where shelves are kept
+
+In `.#revision-shelves/` at the root of the working copy — one directory per entry, holding
+`meta.json`, `changes.patch` and any unversioned files it carries.
+
+The name is doing real work. `.#*` is one of Subversion's built-in `global-ignores`
+patterns, so the store stays out of `svn status`, `svn diff` and `svn add` without a
+property being set on your working copy and without a line of configuration. There is
+nothing to configure, and nothing to add to an ignore list.
+
+`svn update`, `svn cleanup`, `svn revert`, `svn switch` and even
+`svn cleanup --remove-unversioned` all leave it alone.
+
+:::danger[`svn cleanup --remove-ignored` deletes your shelves]
+The store hides by being ignored, so a command that sweeps ignored files sweeps it too.
+Restore anything you still need before running it.
+:::
+
+:::note
+If you have set `global-ignores` in your own `~/.subversion/config`, that value **replaces**
+Subversion's built-in list rather than adding to it — including the `.#*` rule. `revision`
+notices, keeps the store out of its own views regardless, and tells you once, because your
+other `svn` tools will start reporting it as an unversioned directory.
+:::

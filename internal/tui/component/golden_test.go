@@ -290,6 +290,46 @@ func TestGoldenForm(t *testing.T) {
 	golden.RequireEqual(t, []byte(f.View()))
 }
 
+func TestGoldenFormAction(t *testing.T) {
+	f := component.NewForm("settings", "Settings", []component.Field{
+		{Label: "Log limit", Kind: component.FieldInt, Value: "100"},
+		{Label: "Apply hide rules", Kind: component.FieldBool, Value: "true"},
+		{Label: "Hide rules", Kind: component.FieldAction, Value: "3 rules · 2 on"},
+	}, testTheme(), testKeys())
+	f.SetSize(56, 0)
+	f.Focus()
+	// Park the cursor on the action row: its summary is muted and the hint says
+	// what enter does there.
+	f.Update(keyDown())
+	f.Update(keyDown())
+	golden.RequireEqual(t, []byte(f.View()))
+}
+
+func TestGoldenEditList(t *testing.T) {
+	el := newRuleList(t)
+	el.SetSize(72, 8)
+	el.Focus()
+	golden.RequireEqual(t, []byte(el.View()))
+}
+
+func TestGoldenEditListEditing(t *testing.T) {
+	el := newRuleList(t)
+	el.SetSize(72, 8)
+	el.Focus()
+	// Open the second row: it shows an edit cursor and the hint switches to the
+	// editing variant.
+	el.Update(keyDown())
+	el.Update(runes("e"))
+	golden.RequireEqual(t, []byte(el.View()))
+}
+
+func TestGoldenEditListEmpty(t *testing.T) {
+	el := component.NewEditList("rules", "Hide rules", "No rules yet — press a to add one.", testTheme(), testKeys())
+	el.SetSize(72, 6)
+	el.Focus()
+	golden.RequireEqual(t, []byte(el.View()))
+}
+
 func TestGoldenSplitView(t *testing.T) {
 	sv := component.NewSplitView("split", "Side-by-side", testTheme(), testKeys())
 	sv.SetLabels("before", "after")

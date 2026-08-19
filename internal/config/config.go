@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 )
 
@@ -68,6 +69,14 @@ const (
 // them.
 func EditorValues() []string { return []string{EditorNative, EditorVim, EditorNvim, EditorNano} }
 
+// HideRule is one path-hiding rule: a regular expression matched against a
+// file's path, and whether the rule is in force. A disabled rule is kept as
+// written, so it can be turned off without being lost.
+type HideRule struct {
+	Pattern string `json:"pattern"`
+	Enabled bool   `json:"enabled"`
+}
+
 // Config holds revision's persisted user settings. Every field maps to a JSON
 // key; unknown keys in an on-disk file are ignored, and any key omitted from
 // the file falls back to its Default value when loaded.
@@ -92,6 +101,13 @@ type Config struct {
 	// are shown; when true they are hidden globally and can be revealed on demand
 	// with a runtime toggle.
 	HideUntracked bool `json:"hideUntracked"`
+	// HideRules lists the regular expressions that hide matching files from the
+	// Changes view. Each pattern is matched, unanchored, against a file's path
+	// relative to the displayed root, so "^build/" hides a directory and
+	// "\.class$" an extension. A pattern that does not compile is dropped when the
+	// configuration is loaded, and a rule that is turned off is kept but not
+	// applied — with every rule off, nothing is hidden.
+	HideRules []HideRule `json:"hideRules"`
 	// SSHKeyPath is the SSH private key used to authenticate against a remote
 	// repository over svn+ssh. A blank value is normalized to the default key
 	// location, ~/.ssh/id_rsa, so the setting always names a concrete key. A
@@ -132,6 +148,7 @@ func Default() Config {
 		Theme:             "auto",
 		DirectoryDiff:     true,
 		HideUntracked:     false,
+		HideRules:         []HideRule{},
 		SSHKeyPath:        "~/.ssh/id_rsa",
 		DisplayFrom:       DisplayFromCWD,
 		DiffOutputDir:     "",
@@ -169,6 +186,13 @@ func validDisplayFrom(v string) bool {
 		return true
 	}
 	return false
+}
+
+// validHidePattern reports whether v compiles as a regular expression, ignoring
+// surrounding whitespace.
+func validHidePattern(v string) bool {
+	_, err := regexp.Compile(strings.TrimSpace(v))
+	return err == nil
 }
 
 // canonicalEditor resolves v to the editor name the schema stores, ignoring
@@ -363,6 +387,19 @@ func (c *Config) normalize() {
 	if !validDisplayFrom(c.DisplayFrom) {
 		c.DisplayFrom = def.DisplayFrom
 	}
+	// A blank or uncompilable pattern can never hide anything, so drop it rather
+	// than fail the load. An absent rule set stays absent.
+	if len(c.HideRules) > 0 {
+		rules := make([]HideRule, 0, len(c.HideRules))
+		for _, r := range c.HideRules {
+			r.Pattern = strings.TrimSpace(r.Pattern)
+			if r.Pattern == "" || !validHidePattern(r.Pattern) {
+				continue
+			}
+			rules = append(rules, r)
+		}
+		c.HideRules = rules
+	}
 	// A blank directory is meaningful: it selects the display root.
 	c.DiffOutputDir = strings.TrimSpace(c.DiffOutputDir)
 }
@@ -398,6 +435,17 @@ func (c *Config) reconcileValues(present map[string]json.RawMessage, validate Va
 		if _, valid := canonicalEditor(c.Editor); !valid {
 			conflicts = append(conflicts,
 				fmt.Sprintf("editor %q is invalid; reset to %q", c.Editor, def.Editor))
+		}
+	}
+
+	// A rule whose pattern does not compile hides nothing and cannot be repaired,
+	// so name each one before normalize drops it.
+	if _, ok := present["hideRules"]; ok {
+		for _, r := range c.HideRules {
+			if p := strings.TrimSpace(r.Pattern); p != "" && !validHidePattern(p) {
+				conflicts = append(conflicts,
+					fmt.Sprintf("hideRules pattern %q is invalid; dropped", p))
+			}
 		}
 	}
 

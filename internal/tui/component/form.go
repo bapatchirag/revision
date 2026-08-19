@@ -21,6 +21,7 @@ const (
 	formHint       = "ctrl+s save · ↑↓ move · esc cancel"
 	formToggleHint = "space toggle · ↑↓ move · ctrl+s save · esc cancel"
 	formChoiceHint = "←→ change · ↑↓ move · ctrl+s save · esc cancel"
+	formActionHint = "enter open · ↑↓ move · ctrl+s save · esc cancel"
 )
 
 // FieldKind classifies how a Form field is edited and rendered.
@@ -35,6 +36,10 @@ const (
 	FieldBool
 	// FieldChoice is one of a fixed set of Options cycled with ←/→.
 	FieldChoice
+	// FieldAction is not edited in the form at all: its Value is a read-only
+	// summary of a setting edited elsewhere, and activating the row (enter or
+	// space) emits msg.ActivatedMsg so the caller can open that editor.
+	FieldAction
 )
 
 // Field is one editable row in a Form. Value always holds the current contents
@@ -116,6 +121,18 @@ func (f *Form) Value(i int) string {
 	return f.fields[i].Value
 }
 
+// SetValue replaces the value of the field at i, ignoring an index out of
+// range. It is how a caller refreshes the summary an action field displays.
+func (f *Form) SetValue(i int, v string) {
+	if i < 0 || i >= len(f.fields) {
+		return
+	}
+	f.fields[i].Value = v
+	if i == f.cursor {
+		f.col = f.valueLen(i)
+	}
+}
+
 // SetSize implements tui.Sizeable; only the width is used (the height follows
 // the field count).
 func (f *Form) SetSize(width, _ int) { f.width = width }
@@ -134,7 +151,8 @@ func (f *Form) SetTheme(th theme.Theme) { f.theme = th }
 
 // Update edits the active field while focused. Submit (ctrl+s) emits SubmitMsg
 // and cancel (esc) emits DismissMsg; ↑/↓ and tab/shift+tab move between fields;
-// every other editing key is dispatched to the active field by its kind.
+// every other editing key is dispatched to the active field by its kind, which
+// is where an action field emits ActivatedMsg.
 func (f *Form) Update(m tea.Msg) tea.Cmd {
 	if !f.focused {
 		return nil
@@ -156,16 +174,17 @@ func (f *Form) Update(m tea.Msg) tea.Cmd {
 	case tea.KeyDown, tea.KeyTab:
 		f.moveField(1)
 	default:
-		f.editActive(km)
+		return f.editActive(km)
 	}
 	return nil
 }
 
 // editActive applies an editing key to the active field according to its kind: a
-// bool toggles, a choice cycles, and a text/int field edits its value inline.
-func (f *Form) editActive(km tea.KeyMsg) {
+// bool toggles, a choice cycles, an action reports that it was activated, and a
+// text/int field edits its value inline.
+func (f *Form) editActive(km tea.KeyMsg) tea.Cmd {
 	if len(f.fields) == 0 {
-		return
+		return nil
 	}
 	fld := &f.fields[f.cursor]
 	switch fld.Kind {
@@ -181,9 +200,16 @@ func (f *Form) editActive(km tea.KeyMsg) {
 		case tea.KeyRight, tea.KeySpace, tea.KeyEnter:
 			f.cycleChoice(fld, 1)
 		}
+	case FieldAction:
+		switch km.Type {
+		case tea.KeySpace, tea.KeyEnter:
+			id, idx := f.id, f.cursor
+			return func() tea.Msg { return msg.ActivatedMsg{ID: id, Index: idx} }
+		}
 	default: // FieldText, FieldInt
 		f.editText(fld, km)
 	}
+	return nil
 }
 
 // editText edits a text or integer field inline: ←/→/home/end move the cursor,
@@ -379,14 +405,17 @@ func (f *Form) fieldBody(fld *Field, active bool, labelW, width int) string {
 }
 
 // valueText renders a field's value: an on/off word for a bool, the selected
-// option for a choice, or the editable text (with a reverse-video cursor while
-// the field is active and focused) for a text/int field.
+// option for a choice, the muted summary of an action, or the editable text
+// (with a reverse-video cursor while the field is active and focused) for a
+// text/int field.
 func (f *Form) valueText(fld *Field, active bool, width int) string {
 	switch fld.Kind {
 	case FieldBool:
 		return boolWord(fld.Value)
 	case FieldChoice:
 		return fld.Value
+	case FieldAction:
+		return lipgloss.NewStyle().Foreground(f.theme.Muted).Render(fld.Value)
 	default:
 		return f.textValue(fld, active, width)
 	}
@@ -423,6 +452,8 @@ func (f *Form) hint() string {
 		return formToggleHint
 	case FieldChoice:
 		return formChoiceHint
+	case FieldAction:
+		return formActionHint
 	default:
 		return formHint
 	}
@@ -452,8 +483,10 @@ func (f *Form) intrinsicWidth() int {
 			w = row
 		}
 	}
-	if n := ansi.StringWidth(formChoiceHint) + 2; n > w {
-		w = n
+	for _, hint := range []string{formChoiceHint, formActionHint} {
+		if n := ansi.StringWidth(hint) + 2; n > w {
+			w = n
+		}
 	}
 	if w < 32 {
 		w = 32

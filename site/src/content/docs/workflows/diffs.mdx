@@ -7,8 +7,9 @@ import DemoVideo from '../../../components/DemoVideo.astro';
 import DiffBlock from '../../../components/DiffBlock.astro';
 import KeyCap from '../../../components/KeyCap.astro';
 
-The Main panel always shows a diff for whatever is selected in the Files panel. Everything
-on this page acts on *that* diff — the one currently on screen.
+The Main panel always shows a diff for whatever is selected in the Files panel — or, once
+you [compare revisions](#comparing-revisions), in the Log panel. Everything on this page
+acts on *that* diff, the one currently on screen.
 
 ## Reading a diff
 
@@ -103,6 +104,76 @@ if it does not exist. Empty — the default — means the working copy's root, a
 	height={900}
 	label="Writing a directory's combined diff to a file with w, accepting the suggested name, and finding the saved patch in the Diffs view"
 />
+
+## Comparing revisions
+
+Everything above reads the working copy. The Log panel compares what is already committed.
+
+<KeyCap key="v" /> picks the highlighted revision, and a second press lets it go. Two can
+be held at once; picking a third drops whichever was picked first, so the far end of a
+comparison can be moved without unpicking it each time. A dot marks each pick, and the
+status bar names them.
+
+A pick is held by revision rather than by row, so it survives paging and filtering — the
+two ends of a comparison need not be on the same page. <KeyCap key="esc" /> lets them go.
+
+<KeyCap key="enter" /> then compares them:
+
+| Picked | What you see |
+|---|---|
+| One revision | What that commit changed, against the revision before it |
+| Two revisions | The state at the older against the state at the newer |
+
+Those two are not the same rule, and the difference matters. A range compares two
+*snapshots*, so it does not replay the older revision's own change — that change is
+already in the left-hand side. Picking r10 alone shows what r10 did; picking r10 and r12
+shows what r11 and r12 did to the tree r10 left behind. Pick r9 and r12 to include r10.
+
+The order you pick them in does not matter: the diff always runs from the older revision
+to the newer.
+
+### Browsing the result
+
+The Log panel becomes a tree of the files the range touched, titled with the range, and
+Main follows the cursor through it exactly as it does the Changes view:
+
+| Row | Main shows |
+|---|---|
+| The root `/` | The whole range as one patch |
+| A directory | Everything beneath it |
+| A file | That file's section alone |
+
+<KeyCap key="enter" /> folds a directory away, <KeyCap key="/" /> filters the tree, and
+<KeyCap key="w" /> saves whatever is on screen — down to a single file's section — under a
+name built from the range, such as `r120-r400-src-parser.go.diff`. The patch has already
+been read, so saving it costs no `svn` call however large the range.
+
+The status code beside each row is read from the diff itself, so it says what the *range*
+did to the file — added, modified, deleted — rather than what the working copy holds now.
+
+<KeyCap key="esc" /> comes back out to the revisions, leaving the picks held for another
+look.
+
+<DemoVideo
+	name="revision-diff"
+	width={1600}
+	height={900}
+	label="Picking two revisions in the Log panel with v, diffing them with enter, and walking the tree of files the range touched while Main follows the cursor"
+/>
+
+### What is compared
+
+The diff covers the directory [`displayFrom`](/reference/configuration/#displayfrom) roots
+the views at, so a file changed in the range but outside that directory does not appear.
+Widen the scope with `displayFrom: root`, or point `revision` somewhere else with
+<KeyCap key="P" />.
+
+Because these files are history rather than the working copy, the keys that act on a
+working-copy file do nothing here — no staging, reverting, committing, updating or opening
+in an editor. <KeyCap key="w" /> is the exception.
+
+A comparison is remembered for the session. Revisions cannot change, so looking at one
+again is instant and costs no `svn` call.
 
 ## The Diffs view
 
