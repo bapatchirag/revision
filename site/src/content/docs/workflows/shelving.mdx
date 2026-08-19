@@ -3,6 +3,7 @@ title: Shelving
 description: Set changes aside, clear the working copy, and put them back later.
 ---
 
+import AppScreen from '../../../components/AppScreen.astro';
 import DemoVideo from '../../../components/DemoVideo.astro';
 import KeyCap from '../../../components/KeyCap.astro';
 
@@ -18,6 +19,8 @@ memberships needed to restore them faithfully.
 
 <KeyCap key="v" /> in the Files panel holds the selection for the next shelve. A tick
 appears beside each held row, and the hint bar counts what is held.
+
+<AppScreen golden="TestShelvePicksGolden" />
 
 | Where you press it | What is held |
 |---|---|
@@ -81,6 +84,8 @@ Main, and collapses again when another side panel takes over.
 
 Each row is the entry's name, how many files it holds, and when it was shelved. Selecting
 one shows its patch in Main. <KeyCap key="/" /> filters the list by name.
+
+<AppScreen golden="TestShelfPanelGolden" />
 
 | Key | Action |
 |---|---|

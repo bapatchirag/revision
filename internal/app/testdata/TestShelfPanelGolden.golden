@@ -1,0 +1,24 @@
+╭─ [1] Status ─────────────────╮╭─ [0] Shelved diff ───────────────────────────╮
+│Root      /home/alice/work/wc ││Index: cmd/main.go                            │
+│Source    /home/alice/work/wc ││@@ -1,3 +1,4 @@                               │
+│CWD       /home/alice/work/wc ││ func main() {                                │
+│Branch    trunk               ││+    setup()                                  │
+│Revision  r42                 ││     run()                                    │
+│                              ││ }                                            │
+╰──────────────────────────────╯│                                              │
+╭─ [2] ─ Changes ─── Changelist╮│                                              │
+│   ▾ /                        ││                                              │
+│       M loose.txt            ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+╰────────────────── 1 of 1 ────╯│                                              │
+╭─ [3] Log ────────────────────╮│                                              │
+│  Rev Author Message          ││                                              │
+╰──────────────────────────────╯╰──────────────────────────────────────────────╯
+╭─ [4] Shelf ──────────────────╮╭─ Command Log ────────────────────────────────╮
+│> ▣ wip refactor (3 files · 20││No svn commands run yet.                      │
+│  ▣ spike (1 file · 2026-08-19││                                              │
+│                              ││                                              │
+│━━━━━━━━━━━━━━━━━━━━──────────││                                              │
+╰────────────────── 1 of 2 ────╯╰──────────────────────────────────────────────╯
+enter apply · p pop · d drop · n rename · z shelve · / filter · ? help          

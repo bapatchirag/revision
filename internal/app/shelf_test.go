@@ -7,8 +7,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/bapatchirag/revision/internal/shelf"
+	"github.com/bapatchirag/revision/internal/svn"
 )
 
 // errShelfProbe stands in for a disk failure the panel has to report rather than
@@ -289,4 +291,30 @@ func TestShelfPanelReadableWhileTheWorkingCopyIsLoading(t *testing.T) {
 	if got := m.mainContent(); strings.Contains(got, "Loading working-copy status") {
 		t.Errorf("mainContent = %q, want the shelf shown rather than the loading notice", got)
 	}
+}
+
+func TestShelfPanelGolden(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{{Path: "loose.txt", State: svn.StateModified}})
+	m = seedShelves(t, m, []shelf.Entry{
+		shelfEntry("20260819-142530-a1b2", "wip refactor", 3),
+		shelfEntry("20260819-091500-c3d4", "spike", 1),
+	})
+	m = focusShelf(t, m)
+	next, _ := m.Update(shelfReadMsg{
+		id:   "20260819-142530-a1b2",
+		text: "Index: cmd/main.go\n@@ -1,3 +1,4 @@\n func main() {\n+\tsetup()\n \trun()\n }\n",
+	})
+	golden.RequireEqual(t, []byte(next.(*Model).View()))
+}
+
+func TestShelvePicksGolden(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "cmd/main.go", State: svn.StateModified},
+		{Path: "internal/server/handler.go", State: svn.StateAdded},
+		{Path: "internal/server/server.go", State: svn.StateModified},
+		{Path: "notes.txt", State: svn.StateUnversioned},
+	})
+	selectDirRow(t, m, "internal")
+	m, _ = pressRune(t, m, 'v')
+	golden.RequireEqual(t, []byte(m.View()))
 }
