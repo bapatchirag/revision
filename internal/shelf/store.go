@@ -133,6 +133,49 @@ func UntrackedDir(dir, id string) (string, error) {
 	return filepath.Join(dir, id, untrackedDir), nil
 }
 
+// PatchPath returns the file an entry's patch is stored in, for handing to a
+// tool that reads a patch from disk rather than from memory.
+func PatchPath(dir, id string) (string, error) {
+	if err := validID(id); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, id, patchFile), nil
+}
+
+// Restore copies an entry's unversioned payloads back into a working copy at
+// root, returning what it put back and what it would not.
+//
+// A payload whose path is already taken is reported rather than written: the
+// file there now is somebody's current work, and no shelf is worth overwriting
+// it unasked. The entry keeps its copy either way, so a blocked payload can
+// still be recovered by hand.
+func Restore(dir, id, root string) (restored, blocked []string, err error) {
+	e, err := readMeta(filepath.Join(dir, id))
+	if err != nil {
+		return nil, nil, err
+	}
+	payloads, err := UntrackedDir(dir, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, rel := range e.Untracked {
+		clean, err := safeRel(rel)
+		if err != nil {
+			return restored, blocked, err
+		}
+		dst := filepath.Join(root, filepath.FromSlash(clean))
+		if _, err := os.Lstat(dst); err == nil {
+			blocked = append(blocked, clean)
+			continue
+		}
+		if err := copyFile(filepath.Join(payloads, filepath.FromSlash(clean)), dst); err != nil {
+			return restored, blocked, err
+		}
+		restored = append(restored, clean)
+	}
+	return restored, blocked, nil
+}
+
 // Drop removes an entry and everything it holds.
 func Drop(dir, id string) error {
 	if err := validID(id); err != nil {

@@ -31,6 +31,9 @@ func (m *Model) systemEvent(msg tea.Msg) (tea.Cmd, bool) {
 		if m.shelfNaming {
 			m.sizeShelfName()
 		}
+		if m.shelfRenaming {
+			m.sizeShelfRename()
+		}
 		if m.retargeting {
 			m.sizeSourcePath()
 		}

@@ -53,7 +53,10 @@ func (m *Model) panelHints(p int) []string {
 	case panelFiles:
 		return m.filesHints()
 	case panelShelf:
-		return []string{"z shelve", "/ filter"}
+		if len(m.shelfItems) == 0 {
+			return []string{"z shelve"}
+		}
+		return []string{"enter apply", "p pop", "d drop", "n rename", "z shelve", "/ filter"}
 	case panelLog:
 		if m.inRevDrill() {
 			return []string{"diff " + m.revDiff.label(), "enter expand", "w save", "/ filter", "esc back"}

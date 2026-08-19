@@ -38,9 +38,12 @@ const changelistEditorID = "changelist"
 // diffNameEditorID identifies the save-diff file-name prompt on emitted messages.
 const diffNameEditorID = "diff-name"
 
-// shelfNameEditorID identifies the prompt that names a shelved change set on
-// emitted messages.
-const shelfNameEditorID = "shelf-name"
+// shelfNameEditorID identifies the prompt that names a shelved change set, and
+// shelfRenameID the one that relabels an existing one, on emitted messages.
+const (
+	shelfNameEditorID = "shelf-name"
+	shelfRenameID     = "shelf-rename"
+)
 
 // splitDiffID identifies the side-by-side diff overlay on emitted messages.
 const splitDiffID = "split-diff"

@@ -38,6 +38,9 @@ func (m *Model) routeKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	if m.shelfNaming {
 		return m.shelfEditor.Update(msg), true
 	}
+	if m.shelfRenaming {
+		return m.renameEditor.Update(msg), true
+	}
 	if m.retargeting {
 		// Every edit re-lists the directories under the path being typed, so the
 		// suggestions follow it. Scrolling the list writes the value too, so its
@@ -229,6 +232,9 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		if m.focus.Index() == panelFiles {
 			return m.assignChangelist(), true
 		}
+		if m.focus.Index() == panelShelf {
+			return m.openShelfRename(), true
+		}
 		if m.focus.Index() == panelLog {
 			if m.inRevDrill() {
 				return nil, false
@@ -237,10 +243,14 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		}
 		return nil, false
 	case "p":
-		// In the Diffs view p applies the highlighted patch; everywhere else in the
-		// Files panel it means nothing, so it stays the Log panel's page-back key.
+		// In the Diffs view p applies the highlighted patch and on the Shelf panel it
+		// pops one; elsewhere in the Files panel it means nothing, so it stays the Log
+		// panel's page-back key.
 		if m.focus.Index() == panelFiles && m.filesViewIsDiffs() {
 			return m.requestApplyPatch(), true
+		}
+		if m.focus.Index() == panelShelf {
+			return m.requestRestoreShelf(true), true
 		}
 		if m.focus.Index() == panelLog {
 			if m.inRevDrill() {
@@ -287,6 +297,9 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	case "d":
 		if m.focus.Index() == panelFiles {
 			return m.requestDelete(), true
+		}
+		if m.focus.Index() == panelShelf {
+			return m.requestDropShelf(), true
 		}
 		return nil, false
 	case "u":

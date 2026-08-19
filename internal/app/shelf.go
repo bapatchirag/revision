@@ -373,3 +373,112 @@ func shelveToast(e shelf.Entry, left []string) (string, component.Level) {
 	return text + ", " + fileCount(len(left)) + " left behind (svn cannot put them in a patch)",
 		component.LevelWarning
 }
+
+// requestRestoreShelf asks to put the highlighted entry back, opening a
+// confirmation modal. pop drops the entry afterwards, so what it says differs.
+// Nothing is held pending: a shelf lands on files spread across the tree, most
+// of which the Changes view is not even showing, so the status reload that
+// follows is what says where it went.
+func (m *Model) requestRestoreShelf(pop bool) tea.Cmd {
+	e, ok := m.shelves.Selected()
+	if !ok {
+		m.showToast("no shelf to restore", component.LevelWarning)
+		return nil
+	}
+	m.confirmAction(restoreShelfCmd(m.client, m.shelfDir(), e, pop), nil)
+	title, body := "Apply shelf?", "Merge "+shelfLabel(e)+" back into the working copy, keeping it on the shelf."
+	if pop {
+		title = "Pop shelf?"
+		body = "Merge " + shelfLabel(e) + " back into the working copy and take it off the shelf. " +
+			"It is kept if any of it does not go back cleanly."
+	}
+	m.openConfirm(title, body+m.shelfDriftNote(e))
+	return nil
+}
+
+// shelfDriftNote warns that an entry was shelved at a different revision from
+// the one the working copy is at now, which is when hunks stop fitting.
+func (m *Model) shelfDriftNote(e shelf.Entry) string {
+	if e.BaseRevision == "" || m.wcRevision == "" || e.BaseRevision == m.wcRevision {
+		return ""
+	}
+	return " It was shelved at r" + e.BaseRevision + " and the working copy is at r" + m.wcRevision +
+		"; whatever no longer fits is left beside its file in a .rej."
+}
+
+// requestDropShelf asks to remove the highlighted entry, opening a confirmation
+// modal. Unlike a revert there is nothing behind it: the shelf is the only copy
+// of what it holds.
+func (m *Model) requestDropShelf() tea.Cmd {
+	e, ok := m.shelves.Selected()
+	if !ok {
+		m.showToast("no shelf to drop", component.LevelWarning)
+		return nil
+	}
+	m.confirmAction(dropShelfCmd(m.shelfDir(), e.ID, shelfLabel(e)), nil)
+	m.openConfirm("Drop shelf?",
+		"Permanently delete "+shelfLabel(e)+" and the "+fileCount(shelfSize(e))+
+			" it holds. Nothing else has a copy of them.")
+	return nil
+}
+
+// openShelfRename floats the prompt that relabels the highlighted entry,
+// prefilled with what it is called now.
+func (m *Model) openShelfRename() tea.Cmd {
+	e, ok := m.shelves.Selected()
+	if !ok {
+		m.showToast("no shelf to rename", component.LevelWarning)
+		return nil
+	}
+	m.renameTarget = e.ID
+	m.shelfRenaming = true
+	m.renameEditor.Reset()
+	m.renameEditor.SetValue(shelfLabel(e))
+	m.renameEditor.Focus()
+	m.sizeShelfRename()
+	return nil
+}
+
+// closeShelfRename hides the rename prompt and drops the entry it was editing.
+func (m *Model) closeShelfRename() {
+	m.shelfRenaming = false
+	m.renameTarget = ""
+	m.renameEditor.Blur()
+}
+
+// submitShelfRename relabels the entry the prompt was opened on. A blank name is
+// left alone: an entry with no name of its own is listed by its identifier, and
+// blanking one is more likely a slip than an intent.
+func (m *Model) submitShelfRename(name string) tea.Cmd {
+	id := m.renameTarget
+	m.closeShelfRename()
+	name = strings.TrimSpace(name)
+	if id == "" || name == "" {
+		return nil
+	}
+	return renameShelfCmd(m.shelfDir(), id, name)
+}
+
+// shelfRestoreToast describes a finished restore: the files svn put back, and
+// whatever did not come with them.
+func shelfRestoreToast(msg shelfRestoredMsg) (string, component.Level) {
+	verb := "applied"
+	if msg.dropped {
+		verb = "popped"
+	}
+	text := verb + " " + msg.name + " to " + fileCount(len(msg.res.Applied)+len(msg.restored))
+	var left []string
+	if n := len(msg.res.Conflicted); n > 0 {
+		left = append(left, fmt.Sprintf("%d with rejects (.rej)", n))
+	}
+	if n := len(msg.res.Skipped); n > 0 {
+		left = append(left, fmt.Sprintf("%d not found", n))
+	}
+	if n := len(msg.blocked); n > 0 {
+		left = append(left, fmt.Sprintf("%d already in the way", n))
+	}
+	if len(left) == 0 {
+		return text, component.LevelSuccess
+	}
+	return text + ", " + strings.Join(left, ", ") + " — kept on the shelf", component.LevelWarning
+}

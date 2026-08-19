@@ -40,6 +40,7 @@ func (m *Model) previewTheme(name string) {
 	m.menu.SetTheme(th)
 	m.updateMenu.SetTheme(th)
 	m.shelfEditor.SetTheme(th)
+	m.renameEditor.SetTheme(th)
 	m.form.SetTheme(th)
 	m.rulesEditor.SetTheme(th)
 	m.toast.SetTheme(th)

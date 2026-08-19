@@ -147,6 +147,42 @@ func (m *Model) mutationEvent(msg tea.Msg) (tea.Cmd, bool) {
 		m.openShelveName(shelveScope{label: "all changes", items: items})
 		return nil, true
 
+	case shelfRestoredMsg:
+		if msg.err != nil {
+			m.showToast(failureText("restore "+msg.name, msg.err), component.LevelError)
+			// Part of it may still have landed before the failure, so the working copy
+			// is re-read either way.
+			m.clearDiff()
+			return tea.Batch(m.reloadStatus(), m.reloadShelves(), m.reloadRejectsIfShown()), true
+		}
+		m.showToast(shelfRestoreToast(msg))
+		m.clearDiff()
+		if msg.dropped {
+			// Main was showing the entry that has just gone; drop it so the re-scan
+			// reads whatever the list settles on.
+			m.shelfID, m.shelfText, m.shelfReadErr = "", "", false
+		}
+		return tea.Batch(m.reloadStatus(), m.reloadShelves(), m.reloadRejectsIfShown()), true
+
+	case shelfDroppedMsg:
+		if msg.err != nil {
+			m.showToast(failureText("drop "+msg.name, msg.err), component.LevelError)
+			return nil, true
+		}
+		m.showToast("dropped "+msg.name, component.LevelSuccess)
+		if m.shelfID == msg.id {
+			m.shelfID, m.shelfText, m.shelfReadErr = "", "", false
+		}
+		return m.reloadShelves(), true
+
+	case shelfRenamedMsg:
+		if msg.err != nil {
+			m.showToast(failureText("rename the shelf", msg.err), component.LevelError)
+			return nil, true
+		}
+		m.showToast("renamed to "+msg.name, component.LevelSuccess)
+		return m.reloadShelves(), true
+
 	case rejectDeletedMsg:
 		if msg.err != nil {
 			m.showToast(failureText("delete "+msg.name, msg.err), component.LevelError)

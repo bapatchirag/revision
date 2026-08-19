@@ -52,26 +52,27 @@ type Model struct {
 	cmdLog     *commandLog
 	cmdLogSeen int64
 
-	panels      []*component.Panel
-	bar         *component.StatusBar
-	editor      *component.TextArea
-	nameEditor  *component.Prompt
-	diffEditor  *component.Prompt
-	pathEditor  *component.Prompt
-	repoEditor  *component.Prompt
-	passEditor  *component.Prompt
-	modal       *component.Modal
-	progress    *component.Modal
-	menu        *component.Menu
-	updateMenu  *component.Menu
-	shelfEditor *component.Prompt
-	form        *component.Form
-	rulesEditor *component.EditList
-	toast       *component.Toast
-	searchBar   *component.SearchBar
-	splitDiff   *component.SplitView
-	mergeView   *component.SplitView
-	focus       *focus.Manager
+	panels       []*component.Panel
+	bar          *component.StatusBar
+	editor       *component.TextArea
+	nameEditor   *component.Prompt
+	diffEditor   *component.Prompt
+	pathEditor   *component.Prompt
+	repoEditor   *component.Prompt
+	passEditor   *component.Prompt
+	modal        *component.Modal
+	progress     *component.Modal
+	menu         *component.Menu
+	updateMenu   *component.Menu
+	shelfEditor  *component.Prompt
+	renameEditor *component.Prompt
+	form         *component.Form
+	rulesEditor  *component.EditList
+	toast        *component.Toast
+	searchBar    *component.SearchBar
+	splitDiff    *component.SplitView
+	mergeView    *component.SplitView
+	focus        *focus.Manager
 
 	fileItems        []svn.StatusItem
 	collapsedDirs    map[string]bool
@@ -158,6 +159,9 @@ type Model struct {
 	shelfPicks   map[string]bool
 	shelveTarget shelveScope
 	shelfNaming  bool
+	// renameTarget is the entry the open rename prompt is relabelling.
+	renameTarget  string
+	shelfRenaming bool
 
 	source   mainSource
 	diffPath string
@@ -373,6 +377,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		menu:            component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
 		updateMenu:      component.NewMenu(updateMenuID, "Update available", updateMenuItems(), th, keys),
 		shelfEditor:     component.NewPrompt(shelfNameEditorID, "Shelve as", "e.g. wip refactor", th, keys),
+		renameEditor:    component.NewPrompt(shelfRenameID, "Rename shelf", "e.g. wip refactor", th, keys),
 		form:            component.NewForm(settingsFormID, "Settings", settingsFields(cfg, cfg.DirectoryDiff), th, keys),
 		rulesEditor:     component.NewEditList(hideRulesEditorID, "Hide rules", "No rules yet — press a to add one.", th, keys),
 		toast:           component.NewToast(th),

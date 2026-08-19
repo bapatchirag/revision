@@ -26,6 +26,8 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 			return m.toggleClCollapse(), true
 		case rejectsListID:
 			return m.toggleRejectCollapse(), true
+		case shelfListID:
+			return m.requestRestoreShelf(false), true
 		case "log":
 			return m.showPickedDiff(), true
 		case revFilesListID:
@@ -78,6 +80,8 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 			return m.submitDiffName(msg.Value), true
 		case shelfNameEditorID:
 			return m.submitShelveName(msg.Value), true
+		case shelfRenameID:
+			return m.submitShelfRename(msg.Value), true
 		case sourcePathID:
 			return m.submitSourcePath(msg.Value), true
 		case repoSwitchID:
@@ -130,6 +134,8 @@ func (m *Model) uiEvent(msg tea.Msg) (tea.Cmd, bool) {
 			m.closeDiffName()
 		case shelfNameEditorID:
 			m.closeShelfName()
+		case shelfRenameID:
+			m.closeShelfRename()
 		case sourcePathID:
 			m.closeSourcePath()
 		case repoSwitchID:
