@@ -52,6 +52,11 @@ func (m *Model) panelHints(p int) []string {
 		return []string{"/ search"}
 	case panelFiles:
 		return m.filesHints()
+	case panelShelf:
+		if len(m.shelfItems) == 0 {
+			return []string{"z shelve"}
+		}
+		return []string{"enter apply", "p pop", "d drop", "n rename", "z shelve", "/ filter"}
 	case panelLog:
 		if m.inRevDrill() {
 			return []string{"diff " + m.revDiff.label(), "enter expand", "w save", "/ filter", "esc back"}
@@ -68,19 +73,28 @@ func (m *Model) panelHints(p int) []string {
 
 // filesHints are the Files panel's keys for its active view: the saved-diff
 // browser, the reject browser, a drilled-in changelist, the Changelists
-// overview, or the Changes tree.
+// overview, or the Changes tree. While files are picked for a shelve, what is
+// held leads, since that is what z will act on from any of them.
 func (m *Model) filesHints() []string {
+	hints := m.filesViewHints()
+	if n := len(m.pickedItems()); n > 0 {
+		return append([]string{m.shelfPickLabel(), "z shelve", "esc clear"}, hints...)
+	}
+	return hints
+}
+
+func (m *Model) filesViewHints() []string {
 	switch {
 	case m.filesViewIsDiffs():
 		return []string{"e open", "p apply", "d delete", "/ filter", "[ ] view"}
 	case m.filesViewIsRejects():
 		return []string{"enter expand", "m resolve", "e open", "d delete", "/ filter", "[ ] view"}
 	case m.inChangelistDrill():
-		return []string{"space unstage", "c commit", "esc back", "[ ] view"}
+		return []string{"space unstage", "v pick", "c commit", "esc back", "[ ] view"}
 	case m.filesViewIsChangelists():
-		return []string{"enter expand", "n name", "c commit", "[ ] view"}
+		return []string{"enter expand", "v pick", "n name", "c commit", "[ ] view"}
 	}
-	return []string{"space stage", "n changelist", "c commit", "r revert", "d delete", "[ ] view"}
+	return []string{"space stage", "v pick", "n changelist", "c commit", "r revert", "d delete", "[ ] view"}
 }
 
 // searchHints describe the active search on a Viewport panel: the query, the

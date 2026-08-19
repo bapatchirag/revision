@@ -7,8 +7,8 @@ import AppScreen from '../../../components/AppScreen.astro';
 import DemoVideo from '../../../components/DemoVideo.astro';
 import KeyCap from '../../../components/KeyCap.astro';
 
-The screen is a left column of Status, Files and Log, beside a Main detail view with a
-Command Log beneath it.
+The screen is a left column of Status, Files, Log and Shelf, beside a Main detail view with
+a Command Log beneath it.
 
 <AppScreen golden="TestModelGoldenLayout" />
 
@@ -22,15 +22,16 @@ border (`1 of 3`) where a count makes sense.
 | Status | <KeyCap key="1" /> | The working-copy root, the source path `revision` is operating on, the current directory, the branch, and the checked-out revision against HEAD. |
 | Files | <KeyCap key="2" /> | Pending changes, as a directory tree, grouped by changelist, or as saved patches. |
 | Log | <KeyCap key="3" /> | Revision history, newest first. An asterisk marks the revision the working copy sits at, and a dot any picked to be compared. |
+| Shelf | <KeyCap key="4" /> | Change sets set aside with [shelving](/workflows/shelving/), newest first. |
 | Command Log | <KeyCap key="x" /> | The `svn` actions `revision` has run on your behalf, newest first, each marked ✓ or ✗. |
 | Main | <KeyCap key="0" /> | Detail for whatever is selected: a diff for a file or directory, metadata and changed paths for a revision. |
 
 ## Moving between panels
 
-- <KeyCap key="1" />, <KeyCap key="2" />, <KeyCap key="3" />, <KeyCap key="0" /> — focus a panel directly.
+- <KeyCap key="1" />, <KeyCap key="2" />, <KeyCap key="3" />, <KeyCap key="4" />, <KeyCap key="0" /> — focus a panel directly.
 - <KeyCap key="tab" /> / <KeyCap key="shift+tab" /> — cycle forwards and backwards through the
-  side panels: Status, Files and Log. Main and the Command Log are outside the cycle, so
-  <KeyCap key="tab" /> pressed on either returns to the side panel driving Main.
+  side panels: Status, Files, Log and Shelf. Main and the Command Log are outside the cycle,
+  so <KeyCap key="tab" /> pressed on either returns to the side panel driving Main.
 - <KeyCap key="x" /> — show or hide the Command Log. It has no number of its own, so
   clicking it is the only way to focus and scroll it.
 
@@ -124,10 +125,11 @@ the mouse on.
 ### Changes
 
 Pending changes as a collapsible directory tree, each change grouped under its folder.
-<KeyCap key="enter" /> expands or collapses a directory. Each row is a marker, the SVN
-status code (`A`, `M`, `D`, `?` …) and the file name. A green `●` marks a staged file and
-a cyan `●` a file in a [named changelist](/workflows/changelists/); an unstaged file has no
-marker.
+<KeyCap key="enter" /> expands or collapses a directory. Each row is a pick cell, a marker,
+the SVN status code (`A`, `M`, `D`, `?` …) and the file name. A green `●` marks a staged
+file and a cyan `●` a file in a [named changelist](/workflows/changelists/); an unstaged
+file has no marker. A `✓` in the leading cell marks a file [held for
+shelving](/workflows/shelving/).
 
 The footer counts the position and the number of files in view. When a
 [filter](/workflows/filtering-and-searching/),
@@ -198,6 +200,20 @@ Filtering with <KeyCap key="/" /> searches the page on screen, not the whole his
 filter stays applied as you turn pages. Drilled into a comparison it narrows the files
 instead, and the revisions get their own filter back on the way out. Committing returns
 the panel to the first page, so the new revision is in view.
+
+## Shelf
+
+Change sets [taken out of the working copy](/workflows/shelving/), newest first, each row
+naming the entry, how many files it holds and when it was shelved. Selecting one shows its
+patch in Main.
+
+The panel shows only its newest row until it is focused, then grows to its whole list —
+taking the room from the Log panel above it, so the Files panel never moves. It stays open
+while you read an entry's patch in Main, and collapses when another side panel takes over.
+
+<KeyCap key="enter" /> merges an entry back and keeps it, <KeyCap key="p" /> merges it back
+and takes it off the shelf, <KeyCap key="d" /> drops it and <KeyCap key="n" /> renames it.
+<KeyCap key="z" /> shelves from here as it does from the Files panel.
 
 ## Command Log
 

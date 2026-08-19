@@ -43,7 +43,7 @@ func (m *Model) closeHelp() {
 // screen, so a background event (like the update check completing) knows not to
 // steal focus.
 func (m *Model) overlayActive() bool {
-	return m.aborting || m.unlocking || m.editing || m.naming || m.savingDiff || m.retargeting || m.switchingRepo || m.splitting || m.merging || m.confirming || m.helping || m.updating || m.configuring
+	return m.aborting || m.unlocking || m.editing || m.naming || m.savingDiff || m.retargeting || m.switchingRepo || m.splitting || m.merging || m.confirming || m.helping || m.updating || m.configuring || m.shelfNaming || m.shelfRenaming
 }
 
 // updateHeld reports whether now is the wrong moment to interrupt with the
@@ -222,6 +222,18 @@ func (m *Model) sizeMenu() {
 // only; the height follows the three choices).
 func (m *Model) sizeUpdateMenu() {
 	m.updateMenu.SetSize(clamp(m.width/2, 40, max(m.width-6, 40)), 0)
+}
+
+// sizeShelfName sizes the shelve name prompt like the other name prompts.
+func (m *Model) sizeShelfName() {
+	w := clamp(m.width/2, 30, max(m.width-6, 30))
+	m.shelfEditor.SetSize(w, 0)
+}
+
+// sizeShelfRename sizes the shelf rename prompt like the shelve name prompt.
+func (m *Model) sizeShelfRename() {
+	w := clamp(m.width/2, 30, max(m.width-6, 30))
+	m.renameEditor.SetSize(w, 0)
 }
 
 // sizeForm sizes the settings editor to a centered portion of the screen (only

@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/bapatchirag/revision/internal/shelf"
 	"github.com/bapatchirag/revision/internal/tui/component"
 	"github.com/bapatchirag/revision/internal/tui/theme"
 )
@@ -67,7 +68,7 @@ func scanRejects(dir string) ([]rejectFile, error) {
 			return nil
 		}
 		if d.IsDir() {
-			if d.Name() == ".svn" {
+			if d.Name() == ".svn" || d.Name() == shelf.DirName {
 				return fs.SkipDir
 			}
 			return nil

@@ -49,6 +49,11 @@ func (m *Model) afterFilterChange(p int) tea.Cmd {
 		if m.source == sourceLog {
 			m.updateMain()
 		}
+	case panelShelf:
+		if m.source == sourceShelf {
+			m.updateMain()
+			return m.shelfLoadForSelection()
+		}
 	}
 	return nil
 }
@@ -116,6 +121,8 @@ func (m *Model) setFilter(p int, q string) {
 		m.status.SetSearch(m.filters[panelStatus])
 	case panelMain:
 		m.main.SetSearch(m.filters[panelMain])
+	case panelShelf:
+		m.rebuildShelves()
 	}
 }
 

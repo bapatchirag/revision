@@ -97,6 +97,10 @@ func TestCommandWrappersBuildTheirArgv(t *testing.T) {
 			func(c *Client) error { return c.Revert(context.Background(), "a.txt") },
 			"revert a.txt --non-interactive",
 		},
+		"revert paths": {
+			func(c *Client) error { return c.RevertPaths(context.Background(), []string{"a.txt", "sub"}) },
+			"revert --depth infinity a.txt sub --non-interactive",
+		},
 		"resolve": {
 			func(c *Client) error { return c.Resolve(context.Background(), "a.txt") },
 			"resolve --accept working a.txt --non-interactive",
@@ -197,6 +201,51 @@ func TestDiffPaths(t *testing.T) {
 	bad, _ := stubClient(t, "", 1)
 	if _, err := bad.DiffPaths(context.Background(), []string{"a.txt"}); err == nil {
 		t.Error("a diff svn refused must return an error")
+	}
+}
+
+func TestDiffPathsForPatchingAsksForCopiedContent(t *testing.T) {
+	const patch = "Index: a.txt\n@@ -0,0 +1 @@\n+new\n"
+
+	cases := map[string]struct {
+		paths []string
+		want  string
+	}{
+		"none":   {nil, "diff --show-copies-as-adds --non-interactive"},
+		"single": {[]string{"a.txt"}, "diff --show-copies-as-adds a.txt --non-interactive"},
+		"many":   {[]string{"a.txt", "sub/b.txt"}, "diff --show-copies-as-adds a.txt sub/b.txt --non-interactive"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			c, calls := stubClient(t, patch, 0)
+			got, err := c.DiffPathsForPatching(context.Background(), tc.paths)
+			if err != nil {
+				t.Fatalf("DiffPathsForPatching: %v", err)
+			}
+			if got != patch {
+				t.Errorf("DiffPathsForPatching = %q, want svn's output verbatim", got)
+			}
+			if argv := calls(); len(argv) != 1 || argv[0] != tc.want {
+				t.Errorf("argv = %q, want %q", argv, tc.want)
+			}
+		})
+	}
+
+	bad, _ := stubClient(t, "", 1)
+	if _, err := bad.DiffPathsForPatching(context.Background(), []string{"a.txt"}); err == nil {
+		t.Error("a diff svn refused must return an error")
+	}
+}
+
+func TestRevertPathsWithNothingToRevertRunsNothing(t *testing.T) {
+	// svn refuses an invocation naming no path, so an empty set has to stop here
+	// rather than reach the command line.
+	c, calls := stubClient(t, "", 0)
+	if err := c.RevertPaths(context.Background(), nil); err != nil {
+		t.Fatalf("RevertPaths(nil) = %v, want no error", err)
+	}
+	if got := calls(); len(got) != 0 {
+		t.Errorf("argv = %q, want no svn invocation", got)
 	}
 }
 

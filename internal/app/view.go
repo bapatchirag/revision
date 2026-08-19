@@ -31,6 +31,10 @@ func (m *Model) View() string {
 		view = m.overlayCenter(view, m.nameEditor.View())
 	case m.savingDiff:
 		view = m.overlayCenter(view, m.diffEditor.View())
+	case m.shelfNaming:
+		view = m.overlayCenter(view, m.shelfEditor.View())
+	case m.shelfRenaming:
+		view = m.overlayCenter(view, m.renameEditor.View())
 	case m.retargeting:
 		view = m.overlayCenter(view, m.pathEditor.View())
 	case m.switchingRepo:
@@ -83,16 +87,22 @@ func (m *Model) overlayToast(base string) string {
 func (m *Model) baseView() string {
 	m.panels[panelFiles].SetFooter(m.filesFooter())
 	m.panels[panelLog].SetFooter(m.logFooter())
-	left := lipgloss.JoinVertical(lipgloss.Left,
+	m.panels[panelShelf].SetFooter(m.shelfFooter())
+	left := []string{
 		m.panels[panelStatus].View(),
 		m.panels[panelFiles].View(),
 		m.panels[panelLog].View(),
-	)
+	}
+	// A terminal too short to seat the Shelf panel leaves it out rather than
+	// drawing it at whatever size it last held.
+	if m.panelRects()[panelShelf].h > 0 {
+		left = append(left, m.panels[panelShelf].View())
+	}
 	right := m.panels[panelMain].View()
 	if m.showCmdLog {
 		right = lipgloss.JoinVertical(lipgloss.Left, right, m.panels[panelCmdLog].View())
 	}
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.JoinVertical(lipgloss.Left, left...), right)
 	// While a filter is being typed the search bar takes the status bar's row so
 	// the panel content stays fully visible above it.
 	bottom := m.bar.View()

@@ -11,7 +11,7 @@ import (
 // sidePanels is what Tab cycles through. Main and the command log are left out
 // of it, as in lazygit: Main is reached with 0 or a click, the command log with
 // x or a click, so neither has a second way in.
-var sidePanels = []int{panelStatus, panelFiles, panelLog}
+var sidePanels = []int{panelStatus, panelFiles, panelLog, panelShelf}
 
 // handleSelection re-renders Main when the selection that drives it changes, and
 // loads the diff for a newly selected file.
@@ -45,6 +45,11 @@ func (m *Model) handleSelection(sel uimsg.SelectedMsg) tea.Cmd {
 		if m.source == sourceLog {
 			m.updateMain()
 		}
+	case shelfListID:
+		if m.source == sourceShelf {
+			m.updateMain()
+			return m.shelfLoadForSelection()
+		}
 	}
 	return nil
 }
@@ -59,6 +64,8 @@ func (m *Model) afterFocusChange() tea.Cmd {
 		m.source = sourceLog
 	case panelFiles:
 		m.source = sourceFiles
+	case panelShelf:
+		m.source = sourceShelf
 	case panelMain, panelCmdLog:
 		// Focusing Main or the command log only scrolls it; keep the current source.
 	}
@@ -68,11 +75,17 @@ func (m *Model) afterFocusChange() tea.Cmd {
 	if m.source == sourceLog {
 		cmd = tea.Batch(m.ensureLogPage(), m.revisionDetailForSelection())
 	}
+	// The Shelf panel's height follows which panel has focus, not the terminal
+	// size alone, so the layout is recomputed on every change of focus.
+	m.layout()
 	m.syncMainTitle()
 	m.updateBar()
 	m.updateMain()
 	if m.source == sourceFiles {
 		return m.diffLoadForSelection()
+	}
+	if m.source == sourceShelf {
+		return tea.Batch(cmd, m.shelfLoadForSelection())
 	}
 	return cmd
 }
@@ -105,6 +118,8 @@ func (m *Model) sourcePanel() int {
 		return panelStatus
 	case sourceLog:
 		return panelLog
+	case sourceShelf:
+		return panelShelf
 	default:
 		return panelFiles
 	}
@@ -127,5 +142,7 @@ func (m *Model) syncMainTitle() {
 			return
 		}
 		m.panels[panelMain].SetTitle("Commit message")
+	case panelShelf:
+		m.panels[panelMain].SetTitle("Shelved diff")
 	}
 }

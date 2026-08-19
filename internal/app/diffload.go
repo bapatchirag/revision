@@ -94,6 +94,20 @@ func (m *Model) readSavedDiff(path string) tea.Cmd {
 	return readSavedDiffCmd(path, m.gens.diff.next())
 }
 
+// reloadShelves re-scans the working copy's shelf store. Unlike the Diffs and
+// Rejects views it is not deferred: the Shelf panel is part of the layout, so
+// its list is on screen whether or not it is the focused panel.
+func (m *Model) reloadShelves() tea.Cmd {
+	return loadShelvesCmd(m.shelfDir(), m.gens.shelf.next())
+}
+
+// readShelf reads a shelved change set's patch. It is stamped with the diff
+// generation, which every source feeding Main shares — only one of them is ever
+// on screen.
+func (m *Model) readShelf(id string) tea.Cmd {
+	return readShelfCmd(m.shelfDir(), id, m.gens.diff.next())
+}
+
 // reloadRejects re-walks the source path for the .rej files a patch left behind.
 // They are ignored by svn and so are invisible to the Changes view; the disk is
 // the only place they can be found.

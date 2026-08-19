@@ -48,6 +48,8 @@ func probeMsgs() []tea.Msg {
 		savedDiffReadMsg{err: err},
 		rejectsLoadedMsg{err: err},
 		rejectReadMsg{err: err},
+		shelvesLoadedMsg{err: err},
+		shelfReadMsg{err: err},
 		mergeLoadedMsg{err: err},
 
 		// mutationEvent
@@ -58,6 +60,11 @@ func probeMsgs() []tea.Msg {
 		updatedMsg{err: err},
 		diffSavedMsg{err: err},
 		savedDiffDeletedMsg{err: err},
+		shelvedMsg{err: err},
+		shelveAllMsg{},
+		shelfRestoredMsg{err: err},
+		shelfDroppedMsg{err: err},
+		shelfRenamedMsg{err: err},
 		rejectDeletedMsg{err: err},
 		patchAppliedMsg{err: err},
 		mergeWrittenMsg{err: err},

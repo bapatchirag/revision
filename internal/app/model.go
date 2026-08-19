@@ -11,6 +11,7 @@ import (
 
 	"github.com/bapatchirag/revision/internal/config"
 	"github.com/bapatchirag/revision/internal/selfupdate"
+	"github.com/bapatchirag/revision/internal/shelf"
 	"github.com/bapatchirag/revision/internal/svn"
 	"github.com/bapatchirag/revision/internal/tui/component"
 	"github.com/bapatchirag/revision/internal/tui/focus"
@@ -38,6 +39,7 @@ type Model struct {
 	clFiles     *component.List[fileNode]
 	savedDiffs  *component.List[savedDiff]
 	rejects     *component.List[rejectNode]
+	shelves     *component.List[shelf.Entry]
 	filesViews  *component.Views
 	log         *component.Table[svn.LogEntry]
 	logViews    *component.Views
@@ -50,25 +52,27 @@ type Model struct {
 	cmdLog     *commandLog
 	cmdLogSeen int64
 
-	panels      []*component.Panel
-	bar         *component.StatusBar
-	editor      *component.TextArea
-	nameEditor  *component.Prompt
-	diffEditor  *component.Prompt
-	pathEditor  *component.Prompt
-	repoEditor  *component.Prompt
-	passEditor  *component.Prompt
-	modal       *component.Modal
-	progress    *component.Modal
-	menu        *component.Menu
-	updateMenu  *component.Menu
-	form        *component.Form
-	rulesEditor *component.EditList
-	toast       *component.Toast
-	searchBar   *component.SearchBar
-	splitDiff   *component.SplitView
-	mergeView   *component.SplitView
-	focus       *focus.Manager
+	panels       []*component.Panel
+	bar          *component.StatusBar
+	editor       *component.TextArea
+	nameEditor   *component.Prompt
+	diffEditor   *component.Prompt
+	pathEditor   *component.Prompt
+	repoEditor   *component.Prompt
+	passEditor   *component.Prompt
+	modal        *component.Modal
+	progress     *component.Modal
+	menu         *component.Menu
+	updateMenu   *component.Menu
+	shelfEditor  *component.Prompt
+	renameEditor *component.Prompt
+	form         *component.Form
+	rulesEditor  *component.EditList
+	toast        *component.Toast
+	searchBar    *component.SearchBar
+	splitDiff    *component.SplitView
+	mergeView    *component.SplitView
+	focus        *focus.Manager
 
 	fileItems        []svn.StatusItem
 	collapsedDirs    map[string]bool
@@ -139,6 +143,28 @@ type Model struct {
 	rejectText      string
 	rejectErr       bool
 	rejectCollapsed map[string]bool
+
+	// shelfItems is every change set found in the working copy's shelf store,
+	// before the panel's filter narrows the list; shelfID and shelfText are the
+	// entry whose patch Main is showing.
+	shelfItems   []shelf.Entry
+	shelfErr     error
+	shelfID      string
+	shelfText    string
+	shelfReadErr bool
+	// shelfPicks are the paths held for the next shelve, by path so a pick
+	// outlives the reload, filter and rebuild it was made under. shelveTarget is
+	// the set the open name prompt will take, held so what is shelved cannot drift
+	// with the working copy behind the overlay.
+	shelfPicks   map[string]bool
+	shelveTarget shelveScope
+	shelfNaming  bool
+	// renameTarget is the entry the open rename prompt is relabelling.
+	renameTarget  string
+	shelfRenaming bool
+	// shelfStoreWarned records that the user has already been told svn can see the
+	// shelf store, so the notice is given once rather than on every reload.
+	shelfStoreWarned bool
 
 	source   mainSource
 	diffPath string
@@ -286,9 +312,11 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	// The pending lookup reads through m, which is assigned below before any row
 	// is rendered, so a row marked in flight dims without a rebuild.
 	pending := func(n fileNode) int { return m.pendingCount(n) }
-	files := component.NewList[fileNode]("files", renderFileNode(th, pending), th, keys)
-	changelists := component.NewList[changelistGroup](changelistsListID, renderChangelistGroup(th), th, keys)
-	clFiles := component.NewList[fileNode](changelistFilesID, renderFileNode(th, pending), th, keys)
+	picked := func(n fileNode) bool { return m.nodePicked(n) }
+	groupPicked := func(g changelistGroup) int { return m.groupPicked(g) }
+	files := component.NewList[fileNode]("files", renderFileNode(th, pending, picked), th, keys)
+	changelists := component.NewList[changelistGroup](changelistsListID, renderChangelistGroup(th, groupPicked), th, keys)
+	clFiles := component.NewList[fileNode](changelistFilesID, renderFileNode(th, pending, picked), th, keys)
 	savedDiffs := component.NewList[savedDiff](savedDiffsListID, renderSavedDiff(th), th, keys)
 	rejects := component.NewList[rejectNode](rejectsListID, renderRejectNode(th), th, keys)
 	filesViews := component.NewViews(filesViewsID, []component.View{
@@ -306,11 +334,13 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	logViews := component.NewViews(logViewsID, []component.View{{Name: "Log", Content: logTable}}, th, keys)
 	main := component.NewViewport(th, keys)
 	cmdLogView := component.NewViewport(th, keys)
+	shelves := component.NewList[shelf.Entry](shelfListID, renderShelfEntry(th), th, keys)
 
 	panels := []*component.Panel{
 		component.NewPanel("Status", 1, status, th),
 		component.NewPanel("Files", 2, filesViews, th),
 		component.NewPanel("Log", 3, logViews, th),
+		component.NewPanel("Shelf", 4, shelves, th),
 		component.NewPanel("Main", 0, main, th),
 		// No badge: the command log answers to x and the mouse, never a number.
 		component.NewPanel("Command Log", -1, cmdLogView, th),
@@ -329,6 +359,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		clFiles:         clFiles,
 		savedDiffs:      savedDiffs,
 		rejects:         rejects,
+		shelves:         shelves,
 		filesViews:      filesViews,
 		log:             logTable,
 		logViews:        logViews,
@@ -348,6 +379,8 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		progress:        component.NewModal("update-progress", "", "", th, keys),
 		menu:            component.NewMenu(helpMenuID, "Keybindings", helpMenuItems(), th, keys),
 		updateMenu:      component.NewMenu(updateMenuID, "Update available", updateMenuItems(), th, keys),
+		shelfEditor:     component.NewPrompt(shelfNameEditorID, "Shelve as", "e.g. wip refactor", th, keys),
+		renameEditor:    component.NewPrompt(shelfRenameID, "Rename shelf", "e.g. wip refactor", th, keys),
 		form:            component.NewForm(settingsFormID, "Settings", settingsFields(cfg, cfg.DirectoryDiff), th, keys),
 		rulesEditor:     component.NewEditList(hideRulesEditorID, "Hide rules", "No rules yet — press a to add one.", th, keys),
 		toast:           component.NewToast(th),
@@ -393,7 +426,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		}
 	}
 	m.cmdLogView.SetContent(m.renderCommandLog(nil))
-	m.focus = focus.New(panels[panelStatus], panels[panelFiles], panels[panelLog], panels[panelMain], panels[panelCmdLog])
+	m.focus = focus.New(panels[panelStatus], panels[panelFiles], panels[panelLog], panels[panelShelf], panels[panelMain], panels[panelCmdLog])
 	m.focus.Focus(panelFiles)
 	m.syncMainTitle()
 
@@ -433,7 +466,8 @@ func (m *Model) retargetDisplay(scope string) {
 // the passphrase overlay when the key still needs unlocking.
 //
 // A page of history and the saved-diff scan are not part of startup: neither can
-// be seen until a panel that shows them is looked at, so both are deferred.
+// be seen until a panel that shows them is looked at, so both are deferred. The
+// shelf store is read, its panel being on screen from the first frame.
 func (m *Model) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	if m.needsSSHKey {
@@ -441,6 +475,7 @@ func (m *Model) Init() tea.Cmd {
 	} else {
 		cmds = append(cmds, m.beginInitialLoad())
 	}
+	cmds = append(cmds, m.reloadShelves())
 	if m.build.IsRelease() {
 		cmds = append(cmds, checkUpdateCmd(m.build))
 	}

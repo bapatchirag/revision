@@ -11,14 +11,14 @@
 │ │                                    │  5 +)                               │┃│
 │>│  4                                 │  6                                  │││
 │ │  5  func main() {                  │  7  func main() {                   │││
-│ │@@ -20,3 +21,2 @@                                                         │││
-╰─│ 20      done()                     │ 21      done()                      │││
-╭─│ 21 -    cleanup()                  │                                     │ │
+╰─│@@ -20,3 +21,2 @@                                                         │││
+╭─│ 20      done()                     │ 21      done()                      │││
+│ │ 21 -    cleanup()                  │                                     │ │
 │ │ 22  }                              │ 22  }                               │─╯
 │ │                                    │                                     │─╮
 │ │                                    │                                     │ │
-│ │                                    │                                     │ │
-│ │                                    │                                     │ │
+╰─│                                    │                                     │ │
+╭─│                                    │                                     │ │
 │ ╰────────────────────────── src/a.go · 1-12 of 12 · e edit · esc close ────╯ │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-space stage · n changelist · c commit · r revert · d delete · [ ] view · ? help 
+space stage · v pick · n changelist · c commit · r revert · d delete · …        

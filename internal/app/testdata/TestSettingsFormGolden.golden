@@ -7,18 +7,18 @@
 │               │  Editor             native                   │               │
 ╰───────────────│  Theme              auto                     │               │
 ╭─ [2] ─ Changes│  Directory diff     on                       │               │
-│  ▾ /          │  Hide untracked     off                      │               │
-│>     M modifie│  SSH key            ~/.ssh/id_rsa            │               │
+│   ▾ /         │  Hide untracked     off                      │               │
+│>      M modifi│  SSH key            ~/.ssh/id_rsa            │               │
 │               │  Display from       cwd                      │               │
 │               │  Diff output                                 │               │
-│               │  Optimistic updates on                       │               │
-╰───────────────│  Live refresh       on                       │               │
-╭─ [3] Log ─────│  Allow mouse        off                      │               │
-│  Rev Author Me│  Hide rules         none                     │───────────────╯
+╰───────────────│  Optimistic updates on                       │               │
+╭─ [3] Log ─────│  Live refresh       on                       │               │
+│  Rev Author Me│  Allow mouse        off                      │               │
+│               │  Hide rules         none                     │───────────────╯
 │               │                                              │───────────────╮
 │               │ctrl+s save · ↑↓ move · esc cancel            │               │
-│               ╰──────────────────────────────────────────────╯               │
-│                              ││                                              │
+╰───────────────╰──────────────────────────────────────────────╯               │
+╭─ [4] Shelf ──────────────────╮│                                              │
 │                              ││                                              │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-space stage · n changelist · c commit · r revert · d delete · [ ] view · ? help 
+space stage · v pick · n changelist · c commit · r revert · d delete · …        
