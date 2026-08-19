@@ -11,6 +11,10 @@
 # to show, and points XDG_CONFIG_HOME at the same throwaway directory so the
 # settings demo never touches the real ~/.config/revision/config.json.
 #
+# Everything the tape sets aside it puts back: the shelved change is popped
+# before the staging beat, so the tree the later row counts walk is the one
+# demo-setup.sh built.
+#
 # Unlike the per-feature tapes in docs/tapes, this one keeps a window bar and a
 # margin — it is the poster shot. The palette is Cipher either way: once for the
 # terminal VHS renders into, once for revision itself via docs/tapes/config.json.
@@ -60,8 +64,8 @@ Type 'cd /tmp/revision-demo/wc && cd "$(pwd -P)" && clear' Enter
 Show
 
 # --- launch: the lazygit-style layout ---------------------------------------
-# Status, Files and Log on the left, the Main detail view on the right, and the
-# command log of every svn action underneath it.
+# Status, Files, Log and Shelf on the left, the Main detail view on the right,
+# and the command log of every svn action underneath it.
 Type "revision" Enter
 Wait+Screen /Command Log/
 Sleep 2.5s
@@ -71,9 +75,41 @@ Sleep 2.5s
 Type "1"
 Sleep 2.4s
 
+# --- shelving: set a change aside, then take it back ------------------------
+Type "2"
+Sleep 900ms
+
+# v holds the highlighted file for the next shelve — the tick in the leading
+# cell marks it — and z takes what is held out of the working copy, under a name.
+Type "v"
+Sleep 1.4s
+Type "z"
+Sleep 900ms
+Type "wip refactor"
+Sleep 1.1s
+Enter
+Sleep 2.4s
+
+# The Shelf panel grows to its whole list when it takes focus, and reads the
+# highlighted entry's patch into Main.
+Type "4"
+Sleep 2.6s
+
+# p merges it back into the working copy and takes it off the shelf.
+Type "p"
+Sleep 1.2s
+Enter
+Sleep 2.8s
+
 # --- the diff follows the selection ----------------------------------------
+# Anchor on the root row and walk down to the modified file: the pop above put
+# the tree back, but left the cursor where the shelved file used to be.
 Type "2"
 Sleep 800ms
+Type "g"
+Sleep 500ms
+Type@250ms "jj"
+Sleep 1.2s
 
 # Focus Main and scroll it: down into the body, then sideways along a long
 # line. The +/- gutter stays pinned while the text slides, and the scrollbars
@@ -109,9 +145,9 @@ Sleep 700ms
 # U hides untracked files; the footer keeps count of what is on screen and how
 # much is hidden.
 Type "U"
-Sleep 1.5s
+Sleep 1.4s
 Type "U"
-Sleep 800ms
+Sleep 700ms
 
 # On a list panel '/' filters instead — here, down to the modified files.
 Type "/"
@@ -189,6 +225,30 @@ Space
 Sleep 2s
 Escape
 Sleep 800ms
+
+# --- comparing revisions ----------------------------------------------------
+# v picks a revision to be diffed and a dot marks it; two can be held at once.
+Type "j"
+Sleep 900ms
+Type "v"
+Sleep 1.3s
+Type@250ms "kk"
+Sleep 800ms
+Type "v"
+Sleep 1.7s
+
+# enter diffs them — oldest to newest — and the panel becomes the tree of files
+# the range touched, read exactly like the Changes view.
+Enter
+Sleep 2.4s
+Type@300ms "jj"
+Sleep 1.7s
+Type "j"
+Sleep 1.9s
+
+# esc comes back out to the revisions, with the picks still held.
+Escape
+Sleep 1.2s
 
 # --- every svn action is mirrored in the command log ------------------------
 Sleep 2.2s
