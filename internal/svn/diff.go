@@ -3,6 +3,7 @@ package svn
 import (
 	"context"
 	"strconv"
+	"strings"
 )
 
 // Diff returns the unified diff of local modifications for the given path,
@@ -29,6 +30,47 @@ func (c *Client) DiffPaths(ctx context.Context, paths []string) (string, error) 
 		return "", err
 	}
 	return string(out), nil
+}
+
+// DiffPathsForPatching returns the same diff as DiffPaths, but one that svn
+// patch can put back in full.
+//
+// A copied or moved file is identical to its source, so svn reports it as a
+// header with no hunks under it. Read back as a patch that says to delete the
+// original and create nothing in its place, which loses the file. Asking for
+// copies as adds spells the content out instead, at the cost of recording the
+// move as a delete and an add rather than as a copy.
+func (c *Client) DiffPathsForPatching(ctx context.Context, paths []string) (string, error) {
+	out, err := c.run(ctx, append([]string{"diff", "--show-copies-as-adds"}, paths...)...)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// binaryNotice is what svn prints in place of the hunks of a file it will not
+// express as text.
+const binaryNotice = "Cannot display: file marked as a binary type."
+
+// BinarySkips lists the files a diff names but carries no content for. svn will
+// not render a file it considers binary, so a patch holding one puts every other
+// file back and passes over that one in silence; naming them is what lets a
+// caller say what it could not take.
+func BinarySkips(patch string) []string {
+	var skips []string
+	var current string
+	for _, line := range strings.Split(patch, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if path, ok := strings.CutPrefix(line, "Index: "); ok {
+			current = strings.TrimSpace(path)
+			continue
+		}
+		if current != "" && strings.HasPrefix(line, binaryNotice) {
+			skips = append(skips, current)
+			current = ""
+		}
+	}
+	return skips
 }
 
 // DiffRevision returns the unified diff of what a single revision changed. It
