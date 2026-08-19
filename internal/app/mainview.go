@@ -81,6 +81,9 @@ func (m *Model) mainSelectionKey() string {
 	switch m.source {
 	case sourceStatus:
 		return "status"
+	case sourceShelf:
+		e, _ := m.shelves.Selected()
+		return "shelf:" + e.ID
 	case sourceLog:
 		if m.revDiff.set() {
 			n, _ := m.revFiles.Selected()
@@ -109,6 +112,15 @@ func (m *Model) mainSelectionKey() string {
 func (m *Model) mainContent() string {
 	if m.source == sourceStatus {
 		return m.statusDetail()
+	}
+	// The shelf store is local disk, like the Diffs and Rejects views, so it stays
+	// readable while the working copy is still loading or has failed to load.
+	if m.source == sourceShelf {
+		if m.shelfShowsPatch() {
+			m.main.SetGutter(1)
+			m.main.SetCursorLine(true)
+		}
+		return m.shelfDetail()
 	}
 	// The Diffs and Rejects views browse files on local disk, so they stay
 	// readable while the working copy is still loading or has failed to load.

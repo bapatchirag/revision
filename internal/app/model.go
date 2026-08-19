@@ -11,6 +11,7 @@ import (
 
 	"github.com/bapatchirag/revision/internal/config"
 	"github.com/bapatchirag/revision/internal/selfupdate"
+	"github.com/bapatchirag/revision/internal/shelf"
 	"github.com/bapatchirag/revision/internal/svn"
 	"github.com/bapatchirag/revision/internal/tui/component"
 	"github.com/bapatchirag/revision/internal/tui/focus"
@@ -38,6 +39,7 @@ type Model struct {
 	clFiles     *component.List[fileNode]
 	savedDiffs  *component.List[savedDiff]
 	rejects     *component.List[rejectNode]
+	shelves     *component.List[shelf.Entry]
 	filesViews  *component.Views
 	log         *component.Table[svn.LogEntry]
 	logViews    *component.Views
@@ -139,6 +141,15 @@ type Model struct {
 	rejectText      string
 	rejectErr       bool
 	rejectCollapsed map[string]bool
+
+	// shelfItems is every change set found in the working copy's shelf store,
+	// before the panel's filter narrows the list; shelfID and shelfText are the
+	// entry whose patch Main is showing.
+	shelfItems   []shelf.Entry
+	shelfErr     error
+	shelfID      string
+	shelfText    string
+	shelfReadErr bool
 
 	source   mainSource
 	diffPath string
@@ -306,11 +317,13 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	logViews := component.NewViews(logViewsID, []component.View{{Name: "Log", Content: logTable}}, th, keys)
 	main := component.NewViewport(th, keys)
 	cmdLogView := component.NewViewport(th, keys)
+	shelves := component.NewList[shelf.Entry](shelfListID, renderShelfEntry(th), th, keys)
 
 	panels := []*component.Panel{
 		component.NewPanel("Status", 1, status, th),
 		component.NewPanel("Files", 2, filesViews, th),
 		component.NewPanel("Log", 3, logViews, th),
+		component.NewPanel("Shelf", 4, shelves, th),
 		component.NewPanel("Main", 0, main, th),
 		// No badge: the command log answers to x and the mouse, never a number.
 		component.NewPanel("Command Log", -1, cmdLogView, th),
@@ -329,6 +342,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		clFiles:         clFiles,
 		savedDiffs:      savedDiffs,
 		rejects:         rejects,
+		shelves:         shelves,
 		filesViews:      filesViews,
 		log:             logTable,
 		logViews:        logViews,
@@ -393,7 +407,7 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 		}
 	}
 	m.cmdLogView.SetContent(m.renderCommandLog(nil))
-	m.focus = focus.New(panels[panelStatus], panels[panelFiles], panels[panelLog], panels[panelMain], panels[panelCmdLog])
+	m.focus = focus.New(panels[panelStatus], panels[panelFiles], panels[panelLog], panels[panelShelf], panels[panelMain], panels[panelCmdLog])
 	m.focus.Focus(panelFiles)
 	m.syncMainTitle()
 
@@ -433,7 +447,8 @@ func (m *Model) retargetDisplay(scope string) {
 // the passphrase overlay when the key still needs unlocking.
 //
 // A page of history and the saved-diff scan are not part of startup: neither can
-// be seen until a panel that shows them is looked at, so both are deferred.
+// be seen until a panel that shows them is looked at, so both are deferred. The
+// shelf store is read, its panel being on screen from the first frame.
 func (m *Model) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	if m.needsSSHKey {
@@ -441,6 +456,7 @@ func (m *Model) Init() tea.Cmd {
 	} else {
 		cmds = append(cmds, m.beginInitialLoad())
 	}
+	cmds = append(cmds, m.reloadShelves())
 	if m.build.IsRelease() {
 		cmds = append(cmds, checkUpdateCmd(m.build))
 	}

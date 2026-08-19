@@ -52,6 +52,8 @@ func (m *Model) panelHints(p int) []string {
 		return []string{"/ search"}
 	case panelFiles:
 		return m.filesHints()
+	case panelShelf:
+		return []string{"/ filter"}
 	case panelLog:
 		if m.inRevDrill() {
 			return []string{"diff " + m.revDiff.label(), "enter expand", "w save", "/ filter", "esc back"}

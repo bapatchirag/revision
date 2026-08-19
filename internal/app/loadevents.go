@@ -163,6 +163,35 @@ func (m *Model) loadEvent(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		return nil, true
 
+	case shelvesLoadedMsg:
+		if m.gens.shelf.stale(msg.gen) {
+			return nil, true
+		}
+		m.shelfErr = msg.err
+		m.shelfItems = msg.entries
+		m.rebuildShelves()
+		if m.source == sourceShelf {
+			m.updateMain()
+			return m.shelfLoadForSelection(), true
+		}
+		return nil, true
+
+	case shelfReadMsg:
+		if m.gens.diff.stale(msg.gen) {
+			return nil, true
+		}
+		m.shelfID = msg.id
+		m.shelfReadErr = msg.err != nil
+		if msg.err != nil {
+			m.shelfText = "Unable to read shelf: " + msg.err.Error()
+		} else {
+			m.shelfText = msg.text
+		}
+		if m.source == sourceShelf {
+			m.updateMain()
+		}
+		return nil, true
+
 	case rejectsLoadedMsg:
 		if m.gens.reject.stale(msg.gen) {
 			return nil, true

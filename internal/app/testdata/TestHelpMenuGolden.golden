@@ -11,14 +11,14 @@
 │>     M│Working copy                      Line start / end  home / end│       │
 │       │  Update working copy        u    Filter panel               /│       │
 │       │  Update to rev (Log)    space  View                          │       │
-│       │  Open file in editor        e    Switch file view       [ / ]│       │
-╰───────│  Change source path         P    Side-by-side / save    s / w│       │
-╭─ [3] L│  Switch repository          W    Pick revisions             v│       │
-│  Rev A│  Refresh / settings     R / S    Diff picked revisions  enter│───────╯
+╰───────│  Open file in editor        e    Switch file view       [ / ]│       │
+╭─ [3] L│  Change source path         P    Side-by-side / save    s / w│       │
+│  Rev A│  Switch repository          W    Pick revisions             v│       │
+│       │  Refresh / settings     R / S    Diff picked revisions  enter│───────╯
 │       │  Toggle live refresh        L    Dir diff / untracked   D / U│───────╮
 │       │                                  Toggle command log         x│       │
-│       │                                General                       │       │
-│       │                                  Toggle help                ?│       │
+╰───────│                                General                       │       │
+╭─ [4] S│                                  Toggle help                ?│       │
 │       │                                  Quit                       q│       │
 ╰───────╰──────────────────────────────────────────────────────────────╯───────╯
 space stage · n changelist · c commit · r revert · d delete · [ ] view · ? help 

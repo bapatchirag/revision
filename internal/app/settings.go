@@ -49,6 +49,7 @@ func (m *Model) previewTheme(name string) {
 	m.changelists.SetRender(renderChangelistGroup(th))
 	m.savedDiffs.SetRender(renderSavedDiff(th))
 	m.rejects.SetRender(renderRejectNode(th))
+	m.shelves.SetRender(renderShelfEntry(th))
 	m.refreshChrome()
 }
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/bapatchirag/revision/internal/config"
 	"github.com/bapatchirag/revision/internal/selfupdate"
+	"github.com/bapatchirag/revision/internal/shelf"
 	"github.com/bapatchirag/revision/internal/sshagent"
 	"github.com/bapatchirag/revision/internal/svn"
 )
@@ -75,13 +76,14 @@ type loadGens struct {
 	revDiff loadGen
 	saved   loadGen
 	reject  loadGen
+	shelf   loadGen
 	repos   loadGen
 }
 
 // stopAll abandons every load in flight, releasing the context each holds. A
 // generation added above is abandoned at shutdown by listing it here.
 func (g *loadGens) stopAll() {
-	for _, l := range []*loadGen{&g.diff, &g.status, &g.log, &g.rev, &g.revDiff, &g.saved, &g.reject, &g.repos} {
+	for _, l := range []*loadGen{&g.diff, &g.status, &g.log, &g.rev, &g.revDiff, &g.saved, &g.reject, &g.shelf, &g.repos} {
 		l.stop()
 	}
 }
@@ -160,6 +162,23 @@ type rejectsLoadedMsg struct {
 	files []rejectFile
 	err   error
 	gen   uint64
+}
+
+// shelvesLoadedMsg carries the change sets found in the working copy's shelf
+// store, for the Shelf panel.
+type shelvesLoadedMsg struct {
+	entries []shelf.Entry
+	err     error
+	gen     uint64
+}
+
+// shelfReadMsg carries the patch a shelved change set holds, keyed by the entry
+// it was read from so the current selection can match it.
+type shelfReadMsg struct {
+	id   string
+	text string
+	err  error
+	gen  uint64
 }
 
 // rejectDeletedMsg carries the result of removing a reject file, along with the
@@ -513,6 +532,25 @@ func loadSavedDiffsCmd(dir string, gen uint64) tea.Cmd {
 	return func() tea.Msg {
 		files, err := scanSavedDiffs(dir)
 		return savedDiffsLoadedMsg{files: files, err: err, gen: gen}
+	}
+}
+
+// loadShelvesCmd lists the change sets in the working copy's shelf store, off
+// the UI goroutine, for the Shelf panel to browse.
+func loadShelvesCmd(dir string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		entries, err := shelf.Scan(dir)
+		return shelvesLoadedMsg{entries: entries, err: err, gen: gen}
+	}
+}
+
+// readShelfCmd reads a shelved change set's patch off the UI goroutine so it can
+// be shown in Main. A read failure is carried on the message rather than
+// promoted to a fatal error, so an unreadable entry never tears down the UI.
+func readShelfCmd(dir, id string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		text, err := shelf.ReadPatch(dir, id)
+		return shelfReadMsg{id: id, text: text, err: err, gen: gen}
 	}
 }
 

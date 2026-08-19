@@ -141,7 +141,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		m.session.Purge()
 		m.clearDiff()
 		m.refreshChrome()
-		return tea.Batch(m.reloadStatus(), m.reloadLogPage(), m.reloadRevDiffIfShown(), m.reloadSavedDiffsIfShown(), m.reloadRejectsIfShown()), true
+		return tea.Batch(m.reloadStatus(), m.reloadLogPage(), m.reloadRevDiffIfShown(), m.reloadSavedDiffsIfShown(), m.reloadRejectsIfShown(), m.reloadShelves()), true
 	case key.Matches(k, m.keys.FocusNext):
 		m.focusNextPanel()
 		return m.afterFocusChange(), true
@@ -194,6 +194,9 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return m.afterFocusChange(), true
 	case "3":
 		m.focus.Focus(panelLog)
+		return m.afterFocusChange(), true
+	case "4":
+		m.focus.Focus(panelShelf)
 		return m.afterFocusChange(), true
 	case "0":
 		m.focus.Focus(panelMain)

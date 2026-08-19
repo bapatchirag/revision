@@ -14,17 +14,17 @@
 │                                      ││                                                          │
 │                                      ││Release notes                                             │
 │                                      ││  https://github.com/bapatchirag/revision/releases        │
-│                                      ││                                                          │
-╰────────────────────────── 1 of 1 ────╯│Press S to review the active settings and any overrides.  │
-╭─ [3] Log ────────────────────────────╮│                                                          │
+╰────────────────────────── 1 of 1 ────╯│                                                          │
+╭─ [3] Log ────────────────────────────╮│Press S to review the active settings and any overrides.  │
 │  Rev Author Message                  ││                                                          │
+│                                      ││                                                          │
 │                                      ││                                                          │
 │                                      │╰──────────────────────────────────────────────────────────╯
 │                                      │╭─ Command Log ────────────────────────────────────────────╮
 │                                      ││No svn commands run yet.                                  │
 │                                      ││                                                          │
-│                                      ││                                                          │
-│                                      ││                                                          │
+╰──────────────────────────────────────╯│                                                          │
+╭─ [4] Shelf ──────────────────────────╮│                                                          │
 │                                      ││                                                          │
 ╰──────────────────────────────────────╯╰──────────────────────────────────────────────────────────╯
 / search · P source path · W repository · ? help                                                    

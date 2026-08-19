@@ -4,6 +4,14 @@ package app
 // takes below the panels.
 const barHeight = 1
 
+// shelfCollapsedHeight is the Shelf panel's height while it is not focused: its
+// border plus a single row, enough for the newest entry and the count.
+const shelfCollapsedHeight = 3
+
+// minPanelHeight is the least a panel is squeezed to before the one growing
+// beside it stops taking room.
+const minPanelHeight = 3
+
 // rect is where a panel sits on screen, in terminal cells: (x, y) is its
 // top-left corner, border included.
 type rect struct{ x, y, w, h int }
@@ -29,12 +37,19 @@ func (m *Model) panelRects() [panelCount]rect {
 	// Tall enough for the Status panel's six rows plus its border.
 	statusHeight := clamp(8, 3, max(bodyHeight-6, 3))
 	rest := bodyHeight - statusHeight
-	filesHeight := rest / 2
-	logHeight := rest - filesHeight
+	// The Shelf panel's collapsed height comes off the top, so that focusing it
+	// later moves only its boundary with the Log panel and leaves the Files panel
+	// exactly where it was.
+	shelfBase := clamp(shelfCollapsedHeight, 0, max(rest-2*minPanelHeight, 0))
+	split := rest - shelfBase
+	filesHeight := split / 2
+	logRoom := split - filesHeight
+	grow := m.shelfGrowth(logRoom)
 
 	r[panelStatus] = rect{0, 0, leftWidth, statusHeight}
 	r[panelFiles] = rect{0, statusHeight, leftWidth, filesHeight}
-	r[panelLog] = rect{0, statusHeight + filesHeight, leftWidth, logHeight}
+	r[panelLog] = rect{0, statusHeight + filesHeight, leftWidth, logRoom - grow}
+	r[panelShelf] = rect{0, statusHeight + filesHeight + logRoom - grow, leftWidth, shelfBase + grow}
 
 	// The right column is Main alone, or Main above the command log when it is
 	// shown; the split keeps the two columns the same overall height.
@@ -49,6 +64,33 @@ func (m *Model) panelRects() [panelCount]rect {
 	}
 	r[panelMain] = rect{leftWidth, 0, rightWidth, mainHeight}
 	return r
+}
+
+// shelfGrowth is how many rows the Shelf panel takes from the Log panel. It
+// takes them only as far as leaves the Log panel a panel's worth of rows, so the
+// two never squeeze each other out.
+func (m *Model) shelfGrowth(logRoom int) int {
+	if !m.shelfExpanded() {
+		return 0
+	}
+	return clamp(logRoom/2, 0, max(logRoom-minPanelHeight, 0))
+}
+
+// shelfExpanded reports whether the Shelf panel is showing its whole list. It
+// stays expanded while Main or the command log holds focus and Main is showing a
+// shelved diff: reading a patch there is the other half of browsing the list, so
+// collapsing it out from under the reader would be a step backwards.
+func (m *Model) shelfExpanded() bool {
+	if m.focus == nil {
+		return false
+	}
+	switch m.focus.Index() {
+	case panelShelf:
+		return true
+	case panelMain, panelCmdLog:
+		return m.source == sourceShelf
+	}
+	return false
 }
 
 // layout sizes the panels and bar for the current terminal dimensions.
