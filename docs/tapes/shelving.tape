@@ -11,7 +11,8 @@ Show
 
 Sleep 1200ms
 
-# v holds a file for the next shelve; the tick and the count follow it.
+# v holds the selection for the next shelve; the tick and the count follow it. It
+# works on a file, and on a directory — everything shelvable beneath it.
 Type "g"
 Sleep 700ms
 Type@250ms "jj"
@@ -31,7 +32,7 @@ Sleep 1200ms
 Enter
 Sleep 3s
 
-# The Changes view has emptied and the entry is on the shelf.
+# Every tracked change has left the Changes view, and the entry is on the shelf.
 Type "4"
 Sleep 2500ms
 

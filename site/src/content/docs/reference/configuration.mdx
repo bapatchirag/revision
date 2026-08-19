@@ -4,6 +4,7 @@ description: Where revision keeps its settings, what each one does, and how to e
 ---
 
 import AppScreen from '../../../components/AppScreen.astro';
+import DemoVideo from '../../../components/DemoVideo.astro';
 import KeyCap from '../../../components/KeyCap.astro';
 
 ## Where the file lives
@@ -117,6 +118,13 @@ like any other field.
 
 A pattern that does not compile is refused with a toast rather than saved, and one that
 reaches the file by hand is dropped on the next start and reported.
+
+<DemoVideo
+	name="hide-rules"
+	width={1600}
+	height={900}
+	label="Adding two hide rules from the settings editor, parking one with space, and saving — the matching files leave the Changes tree while the footer still counts them"
+/>
 
 :::note
 Hiding is a **view** setting, and only for the Changes tree. Hidden files are still
