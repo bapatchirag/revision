@@ -1,0 +1,24 @@
+╭─ [1] Status ─────────────────╮╭─ [0] Diff ───────────────────────────────────╮
+│Root      /home/alice/work/wc ││Loading diff…                                 │
+│Source    /home/alice/work/wc ││                                              │
+│CWD       /home/alice/work/wc ││                                              │
+│Branch    trunk               ││                                              │
+│Revision  r42                 ││                                              │
+│                              ││                                              │
+╰──────────────────────────────╯│                                              │
+╭─ [2] ─ Changes ─── Changelist╮│                                              │
+│   ▾ /                       ┃││                                              │
+│     ▾ cmd/                  ┃││                                              │
+│         M main.go           │││                                              │
+│>   ✓▾ internal/             │││                                              │
+╰────────────────── 1 of 4 ────╯│                                              │
+╭─ [3] Log ────────────────────╮│                                              │
+│  Rev Author Message          ││                                              │
+│                              │╰──────────────────────────────────────────────╯
+│                              │╭─ Command Log ────────────────────────────────╮
+│                              ││No svn commands run yet.                      │
+╰──────────────────────────────╯│                                              │
+╭─ [4] Shelf ──────────────────╮│                                              │
+│                              ││                                              │
+╰──────────────────────────────╯╰──────────────────────────────────────────────╯
+2 files picked · z shelve · esc clear · space stage · v pick · n changelist · … 
