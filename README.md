@@ -35,11 +35,12 @@ SVN's command line is powerful but verbose for day-to-day work. `revision` wraps
 
 ## Features
 
-- **lazygit-style layout** — Status, Files and Log panels down the left, a Main detail view beside them, and the `svn` command log beneath; switch with the number keys or `Tab`
+- **lazygit-style layout** — Status, Files, Log and Shelf panels down the left, a Main detail view beside them, and the `svn` command log beneath; switch with the number keys or `Tab`
 - **Changed files as a collapsible directory tree**, grouped under their folders, with the visible count in the panel footer
 - **Colour-coded diffs** that follow your selection — read one side by side with `s`, save it to a file with `w`, or highlight a directory for the combined diff of everything beneath it
 - **Staging** built on a native SVN changelist — `space` stages a file or a whole subtree, `c` commits the set through an inline message editor
 - **Named changelists** — group the staged set into real SVN changelists, drill into one in a tabbed view, and commit it on its own
+- **Shelving** — the `git stash` SVN never shipped: pick files with `v`, set them aside with `z`, and merge them back with `enter` or `p`. Shelves live in an ignored directory beside the working copy, so there is nothing to configure
 - **Update** to HEAD with `u`, or to any revision picked in the Log panel — conflicts are spelled out before you confirm
 - **Resolve conflicts side by side** with `m` — each conflict, or each hunk a patch could not place, laid out two panes wide with a key to take either side, both, or your editor
 - **Add, revert and delete** a single file or every change beneath a directory, with confirmation prompts
