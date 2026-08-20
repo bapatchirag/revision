@@ -1143,24 +1143,25 @@ func revertCmd(client *svn.Client, path string, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		return revertedMsg{path: path, token: token, err: client.Revert(ctx, path)}
+		return revertedMsg{path: path, token: token, err: client.RevertPaths(ctx, []string{path})}
 	}
 }
 
-// revertManyCmd discards local modifications to several paths in one pass off the
-// UI goroutine, stopping on the first error. Success rides on a single
-// revertedMsg carrying an "N files" summary, mirroring how acting on one file
-// reports a single path.
+// revertManyCmd discards local modifications to several paths off the UI
+// goroutine. It takes one invocation for the lot rather than one per path,
+// since reverting a directory takes its children with it and a later target
+// under one already reverted fails. Result rides on a single revertedMsg
+// carrying an "N files" summary, mirroring how acting on one file reports a
+// single path.
 func revertManyCmd(client *svn.Client, paths []string, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		for _, p := range paths {
-			if err := client.Revert(ctx, p); err != nil {
-				return revertedMsg{path: p, token: token, err: err}
-			}
+		return revertedMsg{
+			path:  batchLabel(len(paths), paths[0]),
+			token: token,
+			err:   client.RevertPaths(ctx, paths),
 		}
-		return revertedMsg{path: batchLabel(len(paths), paths[0]), token: token}
 	}
 }
 

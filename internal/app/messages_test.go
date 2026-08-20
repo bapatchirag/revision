@@ -651,8 +651,8 @@ func TestRevertCmds(t *testing.T) {
 	}
 
 	failedMany := msgOf[revertedMsg](t, revertManyCmd(cmdClient(t, "", 1), []string{"a.txt", "b.txt"}, 55))
-	if failedMany.err == nil || failedMany.path != "a.txt" {
-		t.Errorf("msg = %+v, want the run to stop on the first failure", failedMany)
+	if failedMany.err == nil || failedMany.path != "2 files" {
+		t.Errorf("msg = %+v, want the whole batch reported as failed", failedMany)
 	}
 }
 

@@ -124,6 +124,30 @@ func TestDirectoryRevertPathsSelectsDirtyFiles(t *testing.T) {
 	}
 }
 
+// TestDirectoryRevertPathsIncludesTheDirectoryItself covers an added directory:
+// svn tracks it as a change of its own, but the tree renders it as the directory
+// row rather than a leaf, so it has to come along with its children or the
+// revert strands it.
+func TestDirectoryRevertPathsIncludesTheDirectoryItself(t *testing.T) {
+	items := []svn.StatusItem{
+		{Path: "mpte", State: svn.StateAdded},
+		{Path: "mpte/Makefile", State: svn.StateAdded},
+		{Path: "mpte/rust-crate/src/lib.rs", State: svn.StateAdded},
+		{Path: "mpte-compute/notes.md", State: svn.StateModified},
+	}
+	paths := directoryRevertPaths(fileNode{Name: "mpte", Path: "mpte"}, items)
+
+	want := []string{"mpte", "mpte/Makefile", "mpte/rust-crate/src/lib.rs"}
+	if len(paths) != len(want) {
+		t.Fatalf("paths = %v, want %v", paths, want)
+	}
+	for i := range want {
+		if paths[i] != want[i] {
+			t.Fatalf("paths = %v, want %v (the row's own path first)", paths, want)
+		}
+	}
+}
+
 func TestRevertDirectoryNothingToRevert(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "src/new.txt", State: svn.StateUnversioned},

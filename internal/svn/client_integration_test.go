@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -398,8 +399,8 @@ func TestIntegrationRevert(t *testing.T) {
 	if got := statusByPath(t, c, ctx)["file.txt"].State; got != StateModified {
 		t.Fatalf("file.txt state = %s, want modified", got)
 	}
-	if err := c.Revert(ctx, "file.txt"); err != nil {
-		t.Fatalf("Revert: %v", err)
+	if err := c.RevertPaths(ctx, []string{"file.txt"}); err != nil {
+		t.Fatalf("RevertPaths: %v", err)
 	}
 	if _, ok := statusByPath(t, c, ctx)["file.txt"]; ok {
 		t.Error("file.txt should be clean after revert (absent from status)")
@@ -410,6 +411,56 @@ func TestIntegrationRevert(t *testing.T) {
 	}
 	if string(data) != "one\n" {
 		t.Errorf("file.txt = %q after revert, want %q", string(data), "one\n")
+	}
+}
+
+// TestIntegrationRevertPathsClearsAnAddedDirectory pins the case that a revert
+// naming one path at a time cannot do. svn refuses to revert a directory
+// scheduled for addition at the default depth (E155038), and once the recursive
+// revert has taken the directory, every path still queued beneath it is gone
+// too: reverting those in turn fails with E155010 more than one level down.
+func TestIntegrationRevertPathsClearsAnAddedDirectory(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	if err := os.MkdirAll(filepath.Join(wc, "mpte", "rust-crate", "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(wc, "mpte", "Makefile"), "all:\n")
+	writeFile(t, filepath.Join(wc, "mpte", "rust-crate", "src", "lib.rs"), "fn main() {}\n")
+	mustRun(t, wc, "svn", "add", "mpte")
+
+	var added []string
+	for p, it := range statusByPath(t, c, ctx) {
+		if it.State == StateAdded {
+			added = append(added, p)
+		}
+	}
+	sort.Strings(added)
+	want := []string{"mpte", "mpte/Makefile", "mpte/rust-crate", "mpte/rust-crate/src", "mpte/rust-crate/src/lib.rs"}
+	if !equalPaths(added, want) {
+		t.Fatalf("added = %v, want %v", added, want)
+	}
+
+	// The whole set in status order is what a directory-level revert in the app
+	// hands over, parent first.
+	if err := c.RevertPaths(ctx, added); err != nil {
+		t.Fatalf("RevertPaths: %v", err)
+	}
+
+	after := statusByPath(t, c, ctx)
+	for p, it := range after {
+		if it.State == StateAdded {
+			t.Errorf("%s is still scheduled for addition after the revert", p)
+		}
+	}
+	if got := after["mpte"].State; got != StateUnversioned {
+		t.Errorf("mpte state = %s after the revert, want unversioned", got)
+	}
+	// The revert un-schedules the add but leaves the tree where it was.
+	if _, err := os.Stat(filepath.Join(wc, "mpte", "rust-crate", "src", "lib.rs")); err != nil {
+		t.Errorf("the added tree should still be on disk after a revert: %v", err)
 	}
 }
 
