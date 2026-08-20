@@ -50,11 +50,11 @@ func TestWithUserActionRidesOnTheRecord(t *testing.T) {
 	var got []CommandRecord
 	c.Recorder = func(r CommandRecord) { got = append(got, r) }
 
-	if err := c.Revert(context.Background(), "a.txt"); err != nil {
-		t.Fatalf("Revert: %v", err)
+	if err := c.Add(context.Background(), "a.txt"); err != nil {
+		t.Fatalf("Add: %v", err)
 	}
-	if err := c.Revert(WithUserAction(context.Background()), "a.txt"); err != nil {
-		t.Fatalf("Revert (user action): %v", err)
+	if err := c.Add(WithUserAction(context.Background()), "a.txt"); err != nil {
+		t.Fatalf("Add (user action): %v", err)
 	}
 	if len(got) != 2 {
 		t.Fatalf("recorded %d commands, want 2", len(got))
@@ -65,7 +65,7 @@ func TestWithUserActionRidesOnTheRecord(t *testing.T) {
 	if !got[1].UserAction {
 		t.Error("WithUserAction must mark the record as a user action")
 	}
-	if got[0].Subcommand != "revert" {
+	if got[0].Subcommand != "add" {
 		t.Errorf("Subcommand = %q, want the svn subcommand", got[0].Subcommand)
 	}
 }
@@ -94,8 +94,8 @@ func TestCommandWrappersBuildTheirArgv(t *testing.T) {
 			"delete --force a.txt --non-interactive",
 		},
 		"revert": {
-			func(c *Client) error { return c.Revert(context.Background(), "a.txt") },
-			"revert a.txt --non-interactive",
+			func(c *Client) error { return c.RevertPaths(context.Background(), []string{"a.txt"}) },
+			"revert --depth infinity a.txt --non-interactive",
 		},
 		"revert paths": {
 			func(c *Client) error { return c.RevertPaths(context.Background(), []string{"a.txt", "sub"}) },
@@ -246,6 +246,56 @@ func TestRevertPathsWithNothingToRevertRunsNothing(t *testing.T) {
 	}
 	if got := calls(); len(got) != 0 {
 		t.Errorf("argv = %q, want no svn invocation", got)
+	}
+}
+
+// TestRevertPathsPrunesCoveredPaths pins why RevertPaths does not hand svn every
+// path it is given. The revert recurses, so a directory named alongside
+// something beneath it reverts the descendant on the way past and then fails on
+// it with E155010, sinking the exit code of an invocation that did the work.
+func TestRevertPathsPrunesCoveredPaths(t *testing.T) {
+	cases := map[string]struct {
+		paths []string
+		want  []string
+	}{
+		"a directory swallows its subtree": {
+			[]string{"mpte", "mpte/Makefile", "mpte/rust-crate", "mpte/rust-crate/src/lib.rs"},
+			[]string{"mpte"},
+		},
+		"a sibling sharing a prefix survives": {
+			// "mpte-compute" sorts between "mpte" and "mpte/Makefile" bytewise, so
+			// this is what a prune walking a sorted list gets wrong.
+			[]string{"mpte", "mpte-compute", "mpte/Makefile"},
+			[]string{"mpte", "mpte-compute"},
+		},
+		"a covered path goes even when it comes first": {
+			[]string{"mpte/rust-crate/src/lib.rs", "mpte"},
+			[]string{"mpte"},
+		},
+		"duplicates collapse": {
+			[]string{"a.txt", "a.txt"},
+			[]string{"a.txt"},
+		},
+		"the working-copy root swallows everything": {
+			[]string{".", "a.txt", "sub/b.txt"},
+			[]string{"."},
+		},
+		"unrelated paths all survive": {
+			[]string{"a.txt", "sub/b.txt", "other/c.txt"},
+			[]string{"a.txt", "sub/b.txt", "other/c.txt"},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			c, calls := stubClient(t, "", 0)
+			if err := c.RevertPaths(context.Background(), tc.paths); err != nil {
+				t.Fatalf("RevertPaths: %v", err)
+			}
+			want := "revert --depth infinity " + strings.Join(tc.want, " ") + " --non-interactive"
+			if got := calls(); len(got) != 1 || got[0] != want {
+				t.Errorf("argv = %q, want [%q]", got, want)
+			}
+		})
 	}
 }
 
