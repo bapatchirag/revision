@@ -103,7 +103,7 @@ func TestOptimisticStageSettlesSilentlyOnSuccess(t *testing.T) {
 	m, _ = pressSpace(t, m)
 	token := m.optimisticTok
 
-	next, cmd := m.Update(stagedMsg{path: "a.go", staged: true, token: token})
+	next, cmd := m.Update(stagedMsg{outcome: singleOutcome("a.go", nil), token: token})
 	m = next.(*Model)
 	if cmd == nil {
 		t.Fatal("expected a status reload to reconcile the optimistic change")
@@ -127,7 +127,7 @@ func TestOptimisticStageRollsBackOnFailure(t *testing.T) {
 	m, _ = pressSpace(t, m)
 	token := m.optimisticTok
 
-	next, cmd := m.Update(stagedMsg{path: "a.go", staged: true, token: token, err: errors.New("locked")})
+	next, cmd := m.Update(stagedMsg{outcome: singleOutcome("a.go", errors.New("locked")), token: token})
 	m = next.(*Model)
 	for i, want := range before {
 		if got := itemState(t, m, want.Path); got != want {
@@ -157,7 +157,7 @@ func TestOptimisticStageIgnoresSupersededFailure(t *testing.T) {
 	m = loadItems(t, m, []svn.StatusItem{
 		{Path: "a.go", State: svn.StateModified, Changelist: stagedChangelist},
 	})
-	next, _ := m.Update(stagedMsg{path: "a.go", staged: true, token: token, err: errors.New("locked")})
+	next, _ := m.Update(stagedMsg{outcome: singleOutcome("a.go", errors.New("locked")), token: token})
 	m = next.(*Model)
 
 	if got := itemState(t, m, "a.go"); got.Changelist != stagedChangelist {

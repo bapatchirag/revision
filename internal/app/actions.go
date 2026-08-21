@@ -132,7 +132,9 @@ func (m *Model) requestDeleteDirectory(n fileNode, items []svn.StatusItem) tea.C
 // directoryDeleteActions builds the delete actions for the files beneath a
 // directory row: each versioned file is scheduled for deletion (svn delete) and
 // each unversioned one is removed from disk, skipping ignored files the same way
-// the single-file delete does.
+// the single-file delete does. It names every file, including any a directory in
+// the set already covers, so the confirmation counts what will go rather than
+// how few commands it takes to shift them.
 func directoryDeleteActions(n fileNode, items []svn.StatusItem) []deleteAction {
 	var acts []deleteAction
 	for _, it := range filesUnder(n, items) {

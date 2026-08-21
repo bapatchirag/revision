@@ -64,6 +64,44 @@ func TestCommitEditorOpensAndSubmits(t *testing.T) {
 	}
 }
 
+// TestCommitRefusesAChangelistSvnWillNotTake pins the guard in front of the one
+// operation that really is all-or-nothing: svn commits a changelist in a single
+// transaction, so one conflicted or missing member sinks every other file in it.
+// Catching that before the editor opens is the only place it can be caught.
+func TestCommitRefusesAChangelistSvnWillNotTake(t *testing.T) {
+	for _, state := range []svn.FileState{svn.StateConflicted, svn.StateMissing} {
+		m := loadItems(t, sizedModel(t), []svn.StatusItem{
+			{Path: "ok.go", State: svn.StateModified, Changelist: "revision:staged"},
+			{Path: "bad.go", State: state, Changelist: "revision:staged"},
+		})
+		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+		m = next.(*Model)
+		if cmd != nil {
+			t.Errorf("%s: a commit svn would refuse should run no command", state)
+		}
+		if m.editing {
+			t.Errorf("%s: the editor should not open for a commit svn would refuse", state)
+		}
+		if view := stripANSI(m.View()); !strings.Contains(view, "bad.go") {
+			t.Errorf("%s: expected the blocking file named, got:\n%s", state, view)
+		}
+	}
+}
+
+// TestCommitAllowsAConflictOutsideTheChangelist pins that the guard is about the
+// files being committed, not the working copy at large: svn commits a changelist
+// without minding what is wrong elsewhere.
+func TestCommitAllowsAConflictOutsideTheChangelist(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "ok.go", State: svn.StateModified, Changelist: "revision:staged"},
+		{Path: "elsewhere.go", State: svn.StateConflicted},
+	})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	if !next.(*Model).editing {
+		t.Error("a conflict outside the changelist has no bearing on committing it")
+	}
+}
+
 func TestCommitEditorCancels(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "modified.go", State: svn.StateModified, Changelist: "revision:staged"},

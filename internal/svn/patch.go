@@ -72,11 +72,7 @@ func skippedTarget(line string) (string, bool) {
 	if !strings.HasPrefix(line, "Skipped") {
 		return "", false
 	}
-	first, last := strings.Index(line, "'"), strings.LastIndex(line, "'")
-	if first < 0 || last <= first {
-		return "", false
-	}
-	return line[first+1 : last], true
+	return quotedPath(line)
 }
 
 // patchedTarget reads a target line: two status columns, then the path. A 'C' in

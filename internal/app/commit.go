@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/bapatchirag/revision/internal/svn"
 	"github.com/bapatchirag/revision/internal/tui/component"
 )
 
@@ -25,12 +26,57 @@ func (m *Model) openCommit() tea.Cmd {
 		m.showToast("nothing staged in "+label+" — press space to stage files", component.LevelWarning)
 		return nil
 	}
+	if blockers := m.uncommittable(target); len(blockers) > 0 {
+		m.showToast(uncommittableText(blockers), component.LevelWarning)
+		return nil
+	}
 	m.commitCL = target
 	m.editing = true
 	m.editor.Reset()
 	m.editor.Focus()
 	m.sizeEditor()
 	return nil
+}
+
+// uncommittable returns the staged files svn will not commit, from the
+// last-loaded status. A commit is one transaction: svn refuses the whole thing
+// over a single conflicted or missing member, so the message the user has just
+// written would be typed for nothing. Naming them before the editor opens is the
+// only place this can be caught — there is no partial commit to fall back on.
+func (m *Model) uncommittable(changelist string) []svn.StatusItem {
+	var out []svn.StatusItem
+	for _, it := range m.fileItems {
+		if it.Changelist != changelist {
+			continue
+		}
+		if it.State == svn.StateConflicted || it.State == svn.StateMissing {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// uncommittableText says which staged files svn will refuse a commit over, and
+// what to do about each: a conflict has to be resolved, a missing file scheduled
+// for deletion or brought back.
+func uncommittableText(blockers []svn.StatusItem) string {
+	if len(blockers) == 1 {
+		return "can't commit: " + blockers[0].Path + " is " + uncommittableReason(blockers[0].State)
+	}
+	names := make([]string, 0, len(blockers))
+	for _, it := range blockers {
+		names = append(names, it.Path)
+	}
+	return "can't commit: svn refuses the whole changelist over " +
+		fileCount(len(blockers)) + " — " + strings.Join(names, ", ")
+}
+
+// uncommittableReason names what stands between a file and a commit.
+func uncommittableReason(s svn.FileState) string {
+	if s == svn.StateMissing {
+		return "missing — delete it or restore it first"
+	}
+	return "still in conflict — resolve it first"
 }
 
 // commitTarget resolves which changelist a commit would target. In the

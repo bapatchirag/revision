@@ -53,10 +53,10 @@ func probeMsgs() []tea.Msg {
 		mergeLoadedMsg{err: err},
 
 		// mutationEvent
-		stagedMsg{err: err},
+		stagedMsg{outcome: singleOutcome("a.txt", err)},
 		committedMsg{err: err},
-		revertedMsg{err: err},
-		deletedMsg{err: err},
+		revertedMsg{outcome: singleOutcome("a.txt", err)},
+		deletedMsg{outcome: singleOutcome("a.txt", err)},
 		updatedMsg{err: err},
 		diffSavedMsg{err: err},
 		savedDiffDeletedMsg{err: err},

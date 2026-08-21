@@ -214,6 +214,73 @@ func TestSaveLeavesNoEntryBehindWhenAPayloadFails(t *testing.T) {
 	}
 }
 
+// TestRestorePutsBackWhatItCanPastAFailure pins that one payload the shelf
+// cannot write does not strand the ones listed after it. The blocked path is
+// named, the rest are put back, and the entry keeps its copy of both.
+func TestRestorePutsBackWhatItCanPastAFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the directory permission this test relies on")
+	}
+	wc, dir := t.TempDir(), t.TempDir()
+	for _, rel := range []string{"a.txt", "sub/wedged.txt", "c.txt"} {
+		seedFile(t, wc, rel, rel, 0o644)
+	}
+	e := savedEntry(t, dir, Entry{ID: "entry"}, "", []Payload{
+		{Rel: "a.txt", Src: filepath.Join(wc, "a.txt")},
+		{Rel: "sub/wedged.txt", Src: filepath.Join(wc, "sub", "wedged.txt")},
+		{Rel: "c.txt", Src: filepath.Join(wc, "c.txt")},
+	})
+
+	// A destination whose parent cannot be written to: nothing is in the way, so
+	// the payload is attempted and the write is what fails.
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sub, 0o700) })
+
+	restored, blocked, err := Restore(dir, e.ID, root)
+	if err == nil {
+		t.Fatal("a payload that could not be written has to be reported")
+	}
+	if len(restored) != 2 {
+		t.Errorf("restored = %v, want the two payloads either side of it", restored)
+	}
+	if len(blocked) != 1 || blocked[0] != "sub/wedged.txt" {
+		t.Errorf("blocked = %v, want only the payload that would not go", blocked)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "c.txt")); statErr != nil {
+		t.Errorf("c.txt was never written — the earlier failure blocked it: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, e.ID, untrackedDir, "sub", "wedged.txt")); statErr != nil {
+		t.Errorf("the entry must keep its copy of a blocked payload: %v", statErr)
+	}
+}
+
+// TestRestoreLeavesAnOccupiedPathAlone pins that a payload whose destination is
+// already taken is reported rather than written over: the file there now is
+// somebody's current work.
+func TestRestoreLeavesAnOccupiedPathAlone(t *testing.T) {
+	wc, dir := t.TempDir(), t.TempDir()
+	seedFile(t, wc, "a.txt", "shelved", 0o644)
+	e := savedEntry(t, dir, Entry{ID: "entry"}, "", []Payload{{Rel: "a.txt", Src: filepath.Join(wc, "a.txt")}})
+
+	root := t.TempDir()
+	seedFile(t, root, "a.txt", "current work", 0o644)
+
+	restored, blocked, err := Restore(dir, e.ID, root)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if len(restored) != 0 || len(blocked) != 1 || blocked[0] != "a.txt" {
+		t.Errorf("restored = %v, blocked = %v, want the occupied path blocked", restored, blocked)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "a.txt")); string(got) != "current work" {
+		t.Errorf("a.txt = %q, want the file already there left alone", got)
+	}
+}
+
 func TestScanOnAMissingStoreIsEmpty(t *testing.T) {
 	got, err := Scan(filepath.Join(t.TempDir(), "never-shelved"))
 	if err != nil {

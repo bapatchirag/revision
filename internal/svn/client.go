@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -79,11 +80,14 @@ func (c *Client) binary() string {
 // returns stdout. On failure it returns an error that includes svn's stderr, or
 // the deadline it overran when ctx timed out (see failureText).
 // --non-interactive is always appended so svn never blocks on a credential prompt.
+// The command runs under LC_ALL=C, since revision reads svn's own words back —
+// "Reverted", "Skipped" — and svn translates them under any other locale.
 // When a Recorder is set it receives one CommandRecord per invocation.
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 	full := append(append([]string{}, args...), "--non-interactive")
 	cmd := exec.CommandContext(ctx, c.binary(), full...)
 	cmd.Dir = c.Dir
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -131,4 +135,15 @@ func failureText(ctx context.Context, stderr string, runErr error, elapsed time.
 		return msg
 	}
 	return runErr.Error()
+}
+
+// quotedPath pulls the path out of a line svn wrote about one, which it always
+// names in quotes: "Reverted 'a.txt'", "Skipped missing target: 'a.txt'". It
+// reports false for a line naming none, which is most of them.
+func quotedPath(line string) (string, bool) {
+	first, last := strings.Index(line, "'"), strings.LastIndex(line, "'")
+	if first < 0 || last <= first {
+		return "", false
+	}
+	return line[first+1 : last], true
 }

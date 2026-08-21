@@ -18,7 +18,7 @@ import (
 // right edge, which the terminal would wrap and the border break.
 func TestLongErrorToastStaysOnScreen(t *testing.T) {
 	m := sizedModel(t)
-	err := errors.New("svn: E155007: '/home/alice/work/wc/some/deeply/nested/path/to/a/file.go' is not a working copy; run 'svn cleanup' and try again")
+	err := errors.New("svn: E155007: '/home/alice/work/wc/some/deeply/nested/path/to/a/file.go' is not a working copy; it is not under the root the command was run from")
 	next, _ := m.Update(committedMsg{err: err})
 	m = next.(*Model)
 

@@ -399,8 +399,8 @@ func TestIntegrationRevert(t *testing.T) {
 	if got := statusByPath(t, c, ctx)["file.txt"].State; got != StateModified {
 		t.Fatalf("file.txt state = %s, want modified", got)
 	}
-	if err := c.RevertPaths(ctx, []string{"file.txt"}); err != nil {
-		t.Fatalf("RevertPaths: %v", err)
+	if res := c.RevertPaths(ctx, []string{"file.txt"}); res.Err() != nil {
+		t.Fatalf("RevertPaths: %v", res.Err())
 	}
 	if _, ok := statusByPath(t, c, ctx)["file.txt"]; ok {
 		t.Error("file.txt should be clean after revert (absent from status)")
@@ -445,8 +445,16 @@ func TestIntegrationRevertPathsClearsAnAddedDirectory(t *testing.T) {
 
 	// The whole set in status order is what a directory-level revert in the app
 	// hands over, parent first.
-	if err := c.RevertPaths(ctx, added); err != nil {
-		t.Fatalf("RevertPaths: %v", err)
+	res := c.RevertPaths(ctx, added)
+	if res.Err() != nil {
+		t.Fatalf("RevertPaths: %v", res.Err())
+	}
+	// Every path asked for is accounted for, including the ones the recursive
+	// revert of their parent took with it.
+	reverted := append([]string(nil), res.Reverted...)
+	sort.Strings(reverted)
+	if !equalPaths(reverted, want) {
+		t.Errorf("Reverted = %v, want every path asked for: %v", reverted, want)
 	}
 
 	after := statusByPath(t, c, ctx)
@@ -761,8 +769,8 @@ func TestIntegrationDiffForPatchingCarriesAMovedFile(t *testing.T) {
 	}
 
 	// The patch has to be able to put the move back with nothing else to go on.
-	if err := c.RevertPaths(ctx, []string{"."}); err != nil {
-		t.Fatalf("RevertPaths: %v", err)
+	if res := c.RevertPaths(ctx, []string{"."}); res.Err() != nil {
+		t.Fatalf("RevertPaths: %v", res.Err())
 	}
 	patch := filepath.Join(t.TempDir(), "move.patch")
 	writeFile(t, patch, full)
@@ -804,6 +812,39 @@ func TestIntegrationDiffLeavesBinaryContentOut(t *testing.T) {
 	}
 }
 
+// TestIntegrationRevertPathsCarriesOnPastARefusal is the failure this whole
+// mechanism exists for, against a real svn: it walks a multi-target revert in
+// order and abandons the process at the first target it refuses, so every target
+// after it is never looked at. Retrying a path at a time is what gets the rest
+// reverted.
+func TestIntegrationRevertPathsCarriesOnPastARefusal(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	writeFile(t, filepath.Join(wc, "tracked.txt"), "committed\n")
+	mustRun(t, wc, "svn", "add", "tracked.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "seed")
+	writeFile(t, filepath.Join(wc, "tracked.txt"), "edited\n")
+
+	// A path outside the working copy is refused outright (E155007), and it is
+	// named first, so the whole invocation dies before reaching tracked.txt.
+	outside := filepath.Join(t.TempDir(), "elsewhere.txt")
+	writeFile(t, outside, "not ours\n")
+
+	res := c.RevertPaths(ctx, []string{outside, "tracked.txt"})
+
+	if got := readString(t, filepath.Join(wc, "tracked.txt")); got != "committed\n" {
+		t.Errorf("tracked.txt = %q, want the committed content back — the earlier refusal blocked it", got)
+	}
+	if !equalPaths(res.Reverted, []string{"tracked.txt"}) {
+		t.Errorf("Reverted = %v, want the path svn did take", res.Reverted)
+	}
+	if len(res.Failed) != 1 || res.Failed[0].Path != outside {
+		t.Errorf("Failed = %v, want only the path svn refused", res.Failed)
+	}
+}
+
 // TestIntegrationRevertPathsLeavesAScheduledAddOnDisk pins the trace a revert
 // leaves: the add is un-scheduled, but the file stays, so a caller clearing a
 // working copy has to remove it itself.
@@ -820,8 +861,8 @@ func TestIntegrationRevertPathsLeavesAScheduledAddOnDisk(t *testing.T) {
 	writeFile(t, filepath.Join(wc, "added.txt"), "brand new\n")
 	mustRun(t, wc, "svn", "add", "added.txt")
 
-	if err := c.RevertPaths(ctx, []string{"."}); err != nil {
-		t.Fatalf("RevertPaths: %v", err)
+	if res := c.RevertPaths(ctx, []string{"."}); res.Err() != nil {
+		t.Fatalf("RevertPaths: %v", res.Err())
 	}
 	if got := readString(t, filepath.Join(wc, "tracked.txt")); got != "committed\n" {
 		t.Errorf("tracked.txt = %q, want the committed content back", got)
