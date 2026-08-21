@@ -240,6 +240,106 @@ func TestShelveLeavesAnUntrackedDirectoryAlone(t *testing.T) {
 	}
 }
 
+// TestShelveClearsUntrackedFilesEvenWhenTheRevertRefuses pins that the two
+// halves of clearing a working copy are independent: a versioned file svn will
+// not revert used to abandon the whole clean-up, leaving the unversioned files
+// sitting in the working copy as well as on the shelf.
+func TestShelveClearsUntrackedFilesEvenWhenTheRevertRefuses(t *testing.T) {
+	wc := t.TempDir()
+	store := filepath.Join(wc, shelf.DirName)
+	wcFile(t, wc, "a.txt", "changed\n")
+	wcFile(t, wc, "new.txt", "brand new\n")
+	c, _ := shelveStub(t, wc, "Index: a.txt\n+changed\n", 1)
+
+	msg := capture(t, c, store, shelveRequest{
+		name: "wip",
+		items: []svn.StatusItem{
+			{Path: "a.txt", State: svn.StateModified},
+			{Path: "new.txt", State: svn.StateUnversioned},
+		},
+	})
+
+	if msg.err == nil {
+		t.Fatal("a revert svn refused must still be reported")
+	}
+	if !strings.Contains(msg.err.Error(), "a.txt") {
+		t.Errorf("err = %v, want the file that would not revert named", msg.err)
+	}
+	if _, err := os.Stat(filepath.Join(wc, "new.txt")); !os.IsNotExist(err) {
+		t.Errorf("new.txt is on the shelf, so it must be cleared regardless of the revert (%v)", err)
+	}
+	if _, err := os.Stat(filepath.Join(wc, "a.txt")); err != nil {
+		t.Errorf("a.txt did not revert, so it must be left where it was: %v", err)
+	}
+}
+
+// TestShelveDropsAFileSvnWillNotDiff pins that one file svn cannot express as a
+// patch no longer costs the capture: svn diffs its targets in one pass and gives
+// up on all of them at the first it chokes on, so the paths are asked for again
+// one at a time and the offender is left behind by name.
+func TestShelveDropsAFileSvnWillNotDiff(t *testing.T) {
+	wc := t.TempDir()
+	store := filepath.Join(wc, shelf.DirName)
+	c := diffPickyStub(t, wc, "bad.txt")
+
+	msg := capture(t, c, store, shelveRequest{
+		name: "wip",
+		items: []svn.StatusItem{
+			{Path: "a.txt", State: svn.StateModified},
+			{Path: "bad.txt", State: svn.StateModified},
+			{Path: "c.txt", State: svn.StateModified},
+		},
+	})
+
+	if msg.err != nil {
+		t.Fatalf("shelve: %v", msg.err)
+	}
+	if !slices.Contains(msg.left, "bad.txt") {
+		t.Errorf("left = %v, want the undiffable file reported", msg.left)
+	}
+	var shelved []string
+	for _, f := range msg.entry.Files {
+		shelved = append(shelved, f.Path)
+	}
+	if len(shelved) != 2 || !slices.Contains(shelved, "a.txt") || !slices.Contains(shelved, "c.txt") {
+		t.Errorf("entry holds %v, want the two files svn could diff", shelved)
+	}
+	patch, err := shelf.ReadPatch(store, msg.entry.ID)
+	if err != nil {
+		t.Fatalf("ReadPatch: %v", err)
+	}
+	if !strings.Contains(patch, "Index: a.txt") || !strings.Contains(patch, "Index: c.txt") {
+		t.Errorf("patch = %q, want both diffable files in it", patch)
+	}
+}
+
+// diffPickyStub answers `diff` with one Index block per path it was given,
+// refusing outright any invocation that names one of bad — which is how svn
+// behaves when a single target defeats it.
+func diffPickyStub(t *testing.T, dir string, bad ...string) *svn.Client {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "svn-stub")
+	script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" != diff ]; then exit 0; fi
+for a in "$@"; do
+  case "$a" in
+  %s) echo "svn: E200009: '$a' cannot be diffed" >&2; exit 1 ;;
+  esac
+done
+for a in "$@"; do
+  case "$a" in
+  diff|--show-copies-as-adds|--non-interactive) ;;
+  *) echo "Index: $a" ;;
+  esac
+done
+exit 0
+`, strings.Join(bad, "|"))
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub binary: %v", err)
+	}
+	return &svn.Client{Dir: dir, Bin: bin}
+}
+
 func TestShelveRefusesWhenNothingCanBeCarried(t *testing.T) {
 	wc := t.TempDir()
 	store := filepath.Join(wc, shelf.DirName)

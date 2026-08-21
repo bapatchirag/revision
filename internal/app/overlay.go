@@ -131,12 +131,12 @@ func (m *Model) showToast(text string, level component.Level) {
 // dismissToast hides the current toast.
 func (m *Model) dismissToast() { m.showingToast = false }
 
-// failureText renders an action failure for a toast. An svn authentication
-// failure collapses to a short, actionable hint instead of a raw multi-line svn
-// error dump.
+// failureText renders an action failure for a toast. A failure revision knows a
+// way out of — svn cannot authenticate, or the working copy is still locked —
+// collapses to that short, actionable hint instead of a raw multi-line svn dump.
 func failureText(action string, err error) string {
-	if svn.IsAuthError(err) {
-		return action + " failed: " + svn.AuthHint
+	if hint, ok := svn.Hint(err); ok {
+		return action + " failed: " + hint
 	}
 	return action + " failed: " + err.Error()
 }

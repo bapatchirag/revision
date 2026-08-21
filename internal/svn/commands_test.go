@@ -93,14 +93,6 @@ func TestCommandWrappersBuildTheirArgv(t *testing.T) {
 			func(c *Client) error { return c.Delete(context.Background(), "a.txt") },
 			"delete --force a.txt --non-interactive",
 		},
-		"revert": {
-			func(c *Client) error { return c.RevertPaths(context.Background(), []string{"a.txt"}) },
-			"revert --depth infinity a.txt --non-interactive",
-		},
-		"revert paths": {
-			func(c *Client) error { return c.RevertPaths(context.Background(), []string{"a.txt", "sub"}) },
-			"revert --depth infinity a.txt sub --non-interactive",
-		},
 		"resolve": {
 			func(c *Client) error { return c.Resolve(context.Background(), "a.txt") },
 			"resolve --accept working a.txt --non-interactive",
@@ -241,11 +233,26 @@ func TestRevertPathsWithNothingToRevertRunsNothing(t *testing.T) {
 	// svn refuses an invocation naming no path, so an empty set has to stop here
 	// rather than reach the command line.
 	c, calls := stubClient(t, "", 0)
-	if err := c.RevertPaths(context.Background(), nil); err != nil {
-		t.Fatalf("RevertPaths(nil) = %v, want no error", err)
+	if res := c.RevertPaths(context.Background(), nil); res.Err() != nil {
+		t.Fatalf("RevertPaths(nil) = %v, want no error", res.Err())
 	}
 	if got := calls(); len(got) != 0 {
 		t.Errorf("argv = %q, want no svn invocation", got)
+	}
+}
+
+func TestRevertPathsBuildsTheInvocation(t *testing.T) {
+	c, calls := stubClient(t, "Reverted 'a.txt'\nReverted 'sub'\n", 0)
+	res := c.RevertPaths(context.Background(), []string{"a.txt", "sub"})
+	if res.Err() != nil {
+		t.Fatalf("RevertPaths: %v", res.Err())
+	}
+	const want = "revert --depth infinity a.txt sub --non-interactive"
+	if got := calls(); len(got) != 1 || got[0] != want {
+		t.Errorf("argv = %q, want [%q]", got, want)
+	}
+	if len(res.Reverted) != 2 {
+		t.Errorf("Reverted = %q, want both paths", res.Reverted)
 	}
 }
 
@@ -288,8 +295,8 @@ func TestRevertPathsPrunesCoveredPaths(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			c, calls := stubClient(t, "", 0)
-			if err := c.RevertPaths(context.Background(), tc.paths); err != nil {
-				t.Fatalf("RevertPaths: %v", err)
+			if res := c.RevertPaths(context.Background(), tc.paths); res.Err() != nil {
+				t.Fatalf("RevertPaths: %v", res.Err())
 			}
 			want := "revert --depth infinity " + strings.Join(tc.want, " ") + " --non-interactive"
 			if got := calls(); len(got) != 1 || got[0] != want {

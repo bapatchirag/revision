@@ -336,15 +336,14 @@ type revDiffLoadedMsg struct {
 	gen  uint64
 }
 
-// stagedMsg carries the result of staging or unstaging a single path. token
-// identifies the optimistic change the model applied ahead of this reply, so a
-// failure can be undone; it is zero when the change was not shown in advance.
+// stagedMsg carries the result of staging or unstaging, for one path or for a
+// set of them: outcome names what landed and what svn refused. token identifies
+// the optimistic change the model applied ahead of this reply, so a failure can
+// be undone; it is zero when the change was not shown in advance.
 type stagedMsg struct {
-	path       string
-	staged     bool
+	outcome    batchOutcome
 	changelist string // non-empty when a named changelist was assigned
 	token      uint64
-	err        error
 }
 
 // committedMsg carries the result of a commit. token identifies the rows the
@@ -356,20 +355,20 @@ type committedMsg struct {
 	err      error
 }
 
-// revertedMsg carries the result of reverting a single path. token identifies
+// revertedMsg carries the result of reverting, for one path or for a set of
+// them: outcome names what was discarded and what svn refused. token identifies
 // the rows marked as in flight for it, as on committedMsg.
 type revertedMsg struct {
-	path  string
-	token uint64
-	err   error
+	outcome batchOutcome
+	token   uint64
 }
 
-// deletedMsg carries the result of deleting a single path. token identifies the
-// rows marked as in flight for it, as on committedMsg.
+// deletedMsg carries the result of deleting, for one path or for a set of them:
+// outcome names what went and what would not. token identifies the rows marked
+// as in flight for it, as on committedMsg.
 type deletedMsg struct {
-	path  string
-	token uint64
-	err   error
+	outcome batchOutcome
+	token   uint64
 }
 
 // updatedMsg carries the result of an `svn update`. toRevision distinguishes an
@@ -607,7 +606,7 @@ func readShelfCmd(dir, id string, gen uint64) tea.Cmd {
 // goroutine.
 func shelveCmd(client *svn.Client, dir string, req shelveRequest) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(svn.WithUserAction(context.Background()), 60*time.Second)
+		ctx, cancel := context.WithTimeout(svn.WithUserAction(context.Background()), batchTimeout(len(req.items)))
 		defer cancel()
 		entry, left, err := captureShelf(ctx, client, dir, req)
 		return shelvedMsg{entry: entry, left: left, err: err}
@@ -623,9 +622,11 @@ func shelveCmd(client *svn.Client, dir string, req shelveRequest) tea.Cmd {
 // changes gone and nowhere left to find them.
 //
 // What svn will not put in a patch is left alone rather than lost: a binary
-// file's content never reaches a diff, and an unversioned directory or symlink
-// has no bytes of its own to copy. None of those are reverted or removed, and
-// all are named in the returned list so the caller can say what stayed behind.
+// file's content never reaches a diff, an unversioned directory or symlink has
+// no bytes of its own to copy, and a file svn refuses to diff at all is dropped
+// from the capture rather than allowed to sink it. None of those are reverted or
+// removed, and all are named in the returned list so the caller can say what
+// stayed behind.
 func captureShelf(ctx context.Context, client *svn.Client, dir string, req shelveRequest) (shelf.Entry, []string, error) {
 	var versioned, untracked []svn.StatusItem
 	for _, it := range req.items {
@@ -637,24 +638,27 @@ func captureShelf(ctx context.Context, client *svn.Client, dir string, req shelv
 	}
 
 	var patch string
+	var undiffable []string
 	if len(versioned) > 0 {
 		var err error
-		if patch, err = client.DiffPathsForPatching(ctx, itemPaths(versioned)); err != nil {
+		if patch, undiffable, err = patchFor(ctx, client, itemPaths(versioned)); err != nil {
 			return shelf.Entry{}, nil, err
 		}
 	}
 
-	binaries := svn.BinarySkips(patch)
-	isBinary := make(map[string]bool, len(binaries))
-	for _, p := range binaries {
-		isBinary[p] = true
+	skip := make(map[string]bool, len(undiffable))
+	for _, p := range undiffable {
+		skip[p] = true
 	}
-	left := append([]string{}, binaries...)
+	binaries := svn.BinarySkips(patch)
+	for _, p := range binaries {
+		skip[p] = true
+	}
+	left := append(append([]string{}, binaries...), undiffable...)
 
 	entry := shelf.Entry{Name: req.name, BaseRevision: req.baseRev, SkippedBinary: binaries}
-	var revert []string
 	for _, it := range versioned {
-		if isBinary[it.Path] {
+		if skip[it.Path] {
 			continue
 		}
 		entry.Files = append(entry.Files, shelf.FileRec{
@@ -662,7 +666,6 @@ func captureShelf(ctx context.Context, client *svn.Client, dir string, req shelv
 			State:      string(it.State),
 			Changelist: it.Changelist,
 		})
-		revert = append(revert, it.Path)
 	}
 
 	var payloads []shelf.Payload
@@ -686,13 +689,69 @@ func captureShelf(ctx context.Context, client *svn.Client, dir string, req shelv
 
 	// The entry is on disk from here, so anything that fails below has left the
 	// changes recoverable rather than lost.
-	if err := client.RevertPaths(ctx, revert); err != nil {
-		return saved, left, err
+	return saved, left, clearWorkingCopy(ctx, client, versioned, payloads, skip)
+}
+
+// patchFor produces the patch a shelf entry carries, and names the paths that
+// could not go into it.
+//
+// svn diffs its targets in one pass and gives up on all of them at the first it
+// cannot read, so a single unreadable file would otherwise cost the whole
+// capture. When that happens the paths are asked for one at a time and the ones
+// svn still refuses are dropped — a per-file diff concatenates into a patch just
+// as svn would have written it. A failure that is about the working copy rather
+// than any one file is passed straight back: nothing here would fare better.
+func patchFor(ctx context.Context, client *svn.Client, paths []string) (string, []string, error) {
+	patch, err := client.DiffPathsForPatching(ctx, paths)
+	if err == nil {
+		return patch, nil, nil
 	}
+	if svn.BlocksEveryPath(err) {
+		return "", nil, err
+	}
+	var b strings.Builder
+	var dropped []string
+	for _, p := range paths {
+		one, oneErr := client.DiffPathsForPatching(ctx, []string{p})
+		if oneErr != nil {
+			dropped = append(dropped, p)
+			continue
+		}
+		b.WriteString(one)
+	}
+	if len(dropped) == len(paths) {
+		return "", nil, err
+	}
+	return b.String(), dropped, nil
+}
+
+// clearWorkingCopy takes the captured changes back out of the working copy, once
+// the shelf entry holding them is safely on disk.
+//
+// Every part of it is attempted. A file the revert would not discard no longer
+// stops the unversioned payloads from being cleared, and a payload that will not
+// go no longer hides the rest — what did not come away is named instead, all of
+// it, since those files are what the working copy still holds.
+func clearWorkingCopy(
+	ctx context.Context, client *svn.Client,
+	versioned []svn.StatusItem, payloads []shelf.Payload, skip map[string]bool,
+) error {
+	var revert []string
+	for _, it := range versioned {
+		if !skip[it.Path] {
+			revert = append(revert, it.Path)
+		}
+	}
+	out := revertOutcome(client.RevertPaths(ctx, revert))
+	reverted := make(map[string]bool, len(out.done))
+	for _, p := range out.done {
+		reverted[p] = true
+	}
+
 	var stuck []string
 	for _, it := range versioned {
 		// A revert un-schedules an add but leaves the file where it was.
-		if it.State == svn.StateAdded && !isBinary[it.Path] {
+		if it.State == svn.StateAdded && reverted[it.Path] {
 			if err := client.RemoveUnversioned(it.Path); err != nil {
 				stuck = append(stuck, it.Path)
 			}
@@ -703,10 +762,18 @@ func captureShelf(ctx context.Context, client *svn.Client, dir string, req shelv
 			stuck = append(stuck, p.Rel)
 		}
 	}
-	if len(stuck) > 0 {
-		return saved, left, fmt.Errorf("could not clear %s", strings.Join(stuck, ", "))
+
+	var parts []string
+	if err := out.err(); err != nil {
+		parts = append(parts, err.Error())
 	}
-	return saved, left, nil
+	if len(stuck) > 0 {
+		parts = append(parts, "could not clear "+strings.Join(stuck, ", "))
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(parts, "; "))
 }
 
 // readSavedDiffCmd reads a saved patch file off the UI goroutine so it can be
@@ -723,29 +790,29 @@ func readSavedDiffCmd(path string, gen uint64) tea.Cmd {
 // UI goroutine, and pops the entry off the shelf when pop is set.
 //
 // The patch goes through the same gate a saved one does — was it taken from
-// here, and does svn say any of it would land — before anything is written. Only
-// a restore that came back whole drops the entry: while a hunk is still sitting
-// in a .rej file, or an unversioned file could not be put back, the shelf is the
-// only remaining copy of what did not make it.
+// here, and does svn say any of it would land — before anything is written. A
+// patch that does not pass does not stop the unversioned files from going back:
+// the two halves of an entry are independent, and one that svn will not apply
+// says nothing about files it never sees. Only a restore that came back whole
+// drops the entry: while a hunk is still sitting in a .rej file, or an
+// unversioned file could not be put back, the shelf is the only remaining copy
+// of what did not make it.
 func restoreShelfCmd(client *svn.Client, dir string, e shelf.Entry, pop bool) tea.Cmd {
 	return func() tea.Msg {
 		name := shelfLabel(e)
-		res, err := applyShelfPatch(client, dir, e)
-		if err != nil {
-			return shelfRestoredMsg{name: name, err: err}
-		}
+		res, patchErr := applyShelfPatch(client, dir, e)
 		restored, blocked, err := shelf.Restore(dir, e.ID, client.Dir)
-		if err != nil {
-			return shelfRestoredMsg{name: name, res: res, restored: restored, blocked: blocked, err: err}
-		}
-
-		ctx, cancel := context.WithTimeout(svn.WithUserAction(context.Background()), 60*time.Second)
-		defer cancel()
-		if err := replayChangelists(ctx, client, e.Files); err != nil {
-			return shelfRestoredMsg{name: name, res: res, restored: restored, blocked: blocked, err: err}
-		}
-
 		msg := shelfRestoredMsg{name: name, res: res, restored: restored, blocked: blocked}
+		if msg.err = errors.Join(patchErr, err); msg.err != nil {
+			return msg
+		}
+
+		ctx, cancel := context.WithTimeout(svn.WithUserAction(context.Background()), batchTimeout(len(e.Files)))
+		defer cancel()
+		if msg.err = replayChangelists(ctx, client, e.Files); msg.err != nil {
+			return msg
+		}
+
 		if pop && len(res.Conflicted) == 0 && len(res.Skipped) == 0 && len(blocked) == 0 {
 			if err := shelf.Drop(dir, e.ID); err != nil {
 				msg.err = err
@@ -790,8 +857,11 @@ func applyShelfPatch(client *svn.Client, dir string, e shelf.Entry) (svn.PatchRe
 // replayChangelists puts the restored files back into the changelists they were
 // shelved from, which no patch records. A file the patch did not bring back —
 // one shelved as a deletion, or one svn could not place — is passed over rather
-// than named to svn, which would only reject a path that is not there.
+// than named to svn, which would only reject a path that is not there. Every
+// other file is attempted, so one changelist svn will not assign does not leave
+// the files after it unassigned as well.
 func replayChangelists(ctx context.Context, client *svn.Client, files []shelf.FileRec) error {
+	var out batchOutcome
 	for _, f := range files {
 		if f.Changelist == "" {
 			continue
@@ -799,11 +869,9 @@ func replayChangelists(ctx context.Context, client *svn.Client, files []shelf.Fi
 		if _, err := os.Lstat(filepath.Join(client.Dir, filepath.FromSlash(f.Path))); err != nil {
 			continue
 		}
-		if err := client.AddToChangelist(ctx, f.Changelist, f.Path); err != nil {
-			return err
-		}
+		out.add(f.Path, client.AddToChangelist(ctx, f.Changelist, f.Path))
 	}
-	return nil
+	return out.err()
 }
 
 // dropShelfCmd removes a shelved change set off the UI goroutine. The store is
@@ -1035,56 +1103,42 @@ func loadRevDiffCmd(ctx context.Context, client *svn.Client, r revRange, gen uin
 	}
 }
 
-// stageCmd applies a stage action off the UI goroutine: it optionally runs
-// `svn add` first (for a previously unversioned file), then adds the path to, or
-// removes it from, the staged changelist.
+// stageCmd applies a single stage action off the UI goroutine.
 func stageCmd(client *svn.Client, changelist string, act stageAction, token uint64) tea.Cmd {
+	return stageManyCmd(client, changelist, []stageAction{act}, token)
+}
+
+// stageManyCmd applies stage actions off the UI goroutine: for each action it
+// optionally runs `svn add` first (for a previously unversioned file), then adds
+// the path to (stage) or removes it from (unstage) the staged changelist.
+//
+// Every action is attempted. A file svn refuses is recorded and the rest go on
+// without it, so one path that cannot be staged no longer decides how far down
+// the list the keypress got.
+func stageManyCmd(client *svn.Client, changelist string, acts []stageAction, token uint64) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), batchTimeout(len(acts)))
 		defer cancel()
-		if act.add {
-			if err := client.Add(ctx, act.path); err != nil {
-				return stagedMsg{path: act.path, staged: act.stage, token: token, err: err}
-			}
+		var out batchOutcome
+		for _, act := range acts {
+			out.add(act.path, applyStage(ctx, client, changelist, act))
 		}
-		var err error
-		if act.stage {
-			err = client.AddToChangelist(ctx, changelist, act.path)
-		} else {
-			err = client.RemoveFromChangelist(ctx, act.path)
-		}
-		return stagedMsg{path: act.path, staged: act.stage, token: token, err: err}
+		return stagedMsg{outcome: out, token: token}
 	}
 }
 
-// stageManyCmd applies several stage actions in one pass off the UI goroutine:
-// for each action it optionally runs `svn add` first (for a previously
-// unversioned file), then adds the path to (stage) or removes it from (unstage)
-// the staged changelist. It stops on the first error. Success rides on a single
-// stagedMsg with no changelist name, so — like acting on a single file — it shows
-// no toast; the follow-up status reload makes the change visible.
-func stageManyCmd(client *svn.Client, changelist string, acts []stageAction, token uint64) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		for _, act := range acts {
-			if act.add {
-				if err := client.Add(ctx, act.path); err != nil {
-					return stagedMsg{path: act.path, staged: act.stage, token: token, err: err}
-				}
-			}
-			var err error
-			if act.stage {
-				err = client.AddToChangelist(ctx, changelist, act.path)
-			} else {
-				err = client.RemoveFromChangelist(ctx, act.path)
-			}
-			if err != nil {
-				return stagedMsg{path: act.path, staged: act.stage, token: token, err: err}
-			}
+// applyStage carries out one stage action: `svn add` first when the file was not
+// versioned yet, then the changelist assignment or removal.
+func applyStage(ctx context.Context, client *svn.Client, changelist string, act stageAction) error {
+	if act.add {
+		if err := client.Add(ctx, act.path); err != nil {
+			return err
 		}
-		return stagedMsg{staged: true, token: token}
 	}
+	if act.stage {
+		return client.AddToChangelist(ctx, changelist, act.path)
+	}
+	return client.RemoveFromChangelist(ctx, act.path)
 }
 
 // commitCmd commits the staged changelist off the UI goroutine.
@@ -1098,35 +1152,20 @@ func commitCmd(client *svn.Client, message, changelist string, token uint64) tea
 }
 
 // assignChangelistCmd moves every target into the named changelist off the UI
-// goroutine, running `svn add` first for any previously unversioned file. The
-// result rides on stagedMsg (carrying the changelist name so the app can confirm
-// the assignment); the reported path is the sole file when one was named, or an
-// "N files" count when several were named together.
+// goroutine, running `svn add` first for any previously unversioned file. Every
+// target is attempted, and the result rides on stagedMsg carrying the changelist
+// name so the app can confirm the assignment.
 func assignChangelistCmd(client *svn.Client, name string, targets []changelistTarget, token uint64) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), batchTimeout(len(targets)))
 		defer cancel()
+		var out batchOutcome
 		for _, t := range targets {
-			if t.add {
-				if err := client.Add(ctx, t.path); err != nil {
-					return stagedMsg{path: t.path, staged: true, changelist: name, token: token, err: err}
-				}
-			}
-			if err := client.AddToChangelist(ctx, name, t.path); err != nil {
-				return stagedMsg{path: t.path, staged: true, changelist: name, token: token, err: err}
-			}
+			act := stageAction{path: t.path, add: t.add, stage: true}
+			out.add(t.path, applyStage(ctx, client, name, act))
 		}
-		return stagedMsg{path: assignedLabel(targets), staged: true, changelist: name, token: token}
+		return stagedMsg{outcome: out, changelist: name, token: token}
 	}
-}
-
-// assignedLabel summarizes which files an assign touched for the success toast:
-// the sole path when one file was named, otherwise an "N files" count.
-func assignedLabel(targets []changelistTarget) string {
-	if len(targets) == 1 {
-		return targets[0].path
-	}
-	return fmt.Sprintf("%d files", len(targets))
 }
 
 // batchLabel summarizes a fan-out for a success toast: the sole path when one
@@ -1138,69 +1177,61 @@ func batchLabel(n int, first string) string {
 	return fmt.Sprintf("%d files", n)
 }
 
-// revertCmd discards local modifications to path off the UI goroutine.
+// revertCmd discards local modifications to a single path off the UI goroutine.
 func revertCmd(client *svn.Client, path string, token uint64) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		return revertedMsg{path: path, token: token, err: client.RevertPaths(ctx, []string{path})}
-	}
+	return revertManyCmd(client, []string{path}, token)
 }
 
 // revertManyCmd discards local modifications to several paths off the UI
-// goroutine. It takes one invocation for the lot rather than one per path,
-// since reverting a directory takes its children with it and a later target
-// under one already reverted fails. Result rides on a single revertedMsg
-// carrying an "N files" summary, mirroring how acting on one file reports a
-// single path.
+// goroutine. It takes one invocation for the lot rather than one per path, since
+// reverting a directory takes its children with it and a later target under one
+// already reverted fails; RevertPaths falls back to a path at a time when that
+// invocation aborts, so what one path is refused for never costs the others.
 func revertManyCmd(client *svn.Client, paths []string, token uint64) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), batchTimeout(len(paths)))
 		defer cancel()
-		return revertedMsg{
-			path:  batchLabel(len(paths), paths[0]),
-			token: token,
-			err:   client.RevertPaths(ctx, paths),
-		}
+		return revertedMsg{outcome: revertOutcome(client.RevertPaths(ctx, paths)), token: token}
 	}
 }
 
-// deleteCmd deletes a path off the UI goroutine: a versioned path is scheduled
-// for removal (svn delete), an unversioned one is removed from disk.
+// deleteCmd deletes a single path off the UI goroutine.
 func deleteCmd(client *svn.Client, act deleteAction, token uint64) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		var err error
-		if act.unversioned {
-			err = client.RemoveUnversioned(act.path)
-		} else {
-			err = client.Delete(ctx, act.path)
-		}
-		return deletedMsg{path: act.path, token: token, err: err}
-	}
+	return deleteManyCmd(client, []deleteAction{act}, token)
 }
 
-// deleteManyCmd deletes several paths in one pass off the UI goroutine: each
-// versioned path is scheduled for removal (svn delete) and each unversioned one
-// is removed from disk. It stops on the first error; success rides on a single
-// deletedMsg carrying an "N files" summary.
+// deleteManyCmd deletes paths off the UI goroutine: each versioned path is
+// scheduled for removal (svn delete) and each unversioned one is removed from
+// disk. Every path is attempted, so one svn refuses does not strand the rest.
+//
+// Both ways of deleting recurse, so a path a directory in the same set already
+// covers is not named again: the directory took it, and asking for it a second
+// time fails with E155007 for something that is already gone. It still counts
+// towards what the delete achieved, since the directory's verdict is its own.
 func deleteManyCmd(client *svn.Client, acts []deleteAction, token uint64) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), batchTimeout(len(acts)))
 		defer cancel()
+		lead := make(map[string]deleteAction, len(acts))
+		paths := make([]string, 0, len(acts))
 		for _, act := range acts {
+			lead[act.path] = act
+			paths = append(paths, act.path)
+		}
+		var out batchOutcome
+		for _, cv := range svn.CoverPaths(paths) {
+			act := lead[cv.Lead]
 			var err error
 			if act.unversioned {
 				err = client.RemoveUnversioned(act.path)
 			} else {
 				err = client.Delete(ctx, act.path)
 			}
-			if err != nil {
-				return deletedMsg{path: act.path, token: token, err: err}
+			for _, p := range cv.Paths {
+				out.add(p, err)
 			}
 		}
-		return deletedMsg{path: batchLabel(len(acts), acts[0].path), token: token}
+		return deletedMsg{outcome: out, token: token}
 	}
 }
 

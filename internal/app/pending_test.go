@@ -160,9 +160,9 @@ func TestPendingClearsWhenSvnAnswers(t *testing.T) {
 		name  string
 		reply func(token uint64) tea.Msg
 	}{
-		{"success", func(token uint64) tea.Msg { return revertedMsg{path: "src/a.go", token: token} }},
+		{"success", func(token uint64) tea.Msg { return revertedMsg{outcome: singleOutcome("src/a.go", nil), token: token} }},
 		{"failure", func(token uint64) tea.Msg {
-			return revertedMsg{path: "src/a.go", token: token, err: errors.New("svn: E155007")}
+			return revertedMsg{outcome: singleOutcome("src/a.go", errors.New("svn: E155007")), token: token}
 		}},
 	}
 
@@ -196,7 +196,7 @@ func TestPendingSurvivesAnotherActionsReply(t *testing.T) {
 	selectFileRow(t, m, "src/b.go")
 	m, _ = requestAndConfirm(t, m, 'r')
 
-	next, _ := m.Update(revertedMsg{path: "src/a.go", token: first})
+	next, _ := m.Update(revertedMsg{outcome: singleOutcome("src/a.go", nil), token: first})
 	m = next.(*Model)
 	if want := []string{"src/b.go"}; strings.Join(pendingPaths(m), ",") != strings.Join(want, ",") {
 		t.Errorf("pending rows = %v, want %v still in flight", pendingPaths(m), want)
