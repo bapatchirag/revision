@@ -11,6 +11,7 @@ import (
 	"github.com/bapatchirag/revision/internal/shelf"
 	"github.com/bapatchirag/revision/internal/svn"
 	uimsg "github.com/bapatchirag/revision/internal/tui/msg"
+	"github.com/bapatchirag/revision/internal/tui/theme"
 )
 
 // click is a left button press at a screen cell.
@@ -432,6 +433,132 @@ func TestDoubleClickingAShelvedDiffOpensNoFile(t *testing.T) {
 	}
 	if view := stripANSI(m.View()); !strings.Contains(view, "no file to open here") {
 		t.Errorf("expected the open to be refused, got:\n%s", view)
+	}
+}
+
+// settingsModel is a mouse-reading model with the settings editor open.
+func settingsModel(t *testing.T) *Model {
+	t.Helper()
+	m, _ := pressRune(t, mouseModel(t), 'S')
+	if !m.configuring {
+		t.Fatal("S should open the settings editor")
+	}
+	return m
+}
+
+// settingIndex is the position of the row labeled label in the settings editor.
+func settingIndex(t *testing.T, m *Model, label string) int {
+	t.Helper()
+	for i, f := range m.form.Fields() {
+		if f.Label == label {
+			return i
+		}
+	}
+	t.Fatalf("the settings editor has no %q row", label)
+	return 0
+}
+
+// settingCell is a screen cell inside the row the settings editor draws field i
+// on. The editor is centered on whatever the terminal is, so it is read off the
+// same placement the view uses rather than hard-coded.
+func settingCell(m *Model, i int) (x, y int) {
+	r := m.overlayRect(m.form.View())
+	return r.x + 2, r.y + 1 + i
+}
+
+func TestClickingASettingHighlightsIt(t *testing.T) {
+	m := settingsModel(t)
+
+	x, y := settingCell(m, themeFieldIndex)
+	next, _ := m.Update(click(x, y))
+	m = next.(*Model)
+
+	if view := stripANSI(m.View()); !strings.Contains(view, "> Theme") {
+		t.Errorf("expected the clicked row to be the active one, got:\n%s", view)
+	}
+	// Moving between fields is not picking one, so the palette must sit still.
+	if m.theme != theme.Auto() {
+		t.Error("clicking a row should not preview a theme")
+	}
+}
+
+func TestClickingOutsideTheSettingsEditorIsIgnored(t *testing.T) {
+	m := settingsModel(t)
+	before := m.focus.Index()
+
+	next, _ := m.Update(click(0, 0))
+	m = next.(*Model)
+
+	if !m.configuring {
+		t.Error("a click beside the editor should not close it")
+	}
+	if got := m.focus.Index(); got != before {
+		t.Errorf("focus moved to %d, want the layout under the editor left alone", got)
+	}
+}
+
+func TestDoubleClickingAChoiceSettingCyclesIt(t *testing.T) {
+	m := settingsModel(t)
+	before := m.form.Value(themeFieldIndex)
+
+	x, y := settingCell(m, themeFieldIndex)
+	m, _ = doubleClick(t, m, x, y)
+
+	if got := m.form.Value(themeFieldIndex); got == before {
+		t.Fatalf("the Theme row still reads %q, want the next option", got)
+	}
+	// The palette follows the row as it is cycled, exactly as →/space leaves it.
+	if m.theme != theme.Everforest() {
+		t.Error("the cycled theme should be previewed live")
+	}
+	if m.cfg.Theme != before {
+		t.Errorf("cfg.Theme = %q, want the choice unsaved until ctrl+s", m.cfg.Theme)
+	}
+}
+
+func TestDoubleClickingAToggleSettingFlipsIt(t *testing.T) {
+	m := settingsModel(t)
+	i := settingIndex(t, m, "Directory diff")
+	before := m.form.Value(i)
+
+	x, y := settingCell(m, i)
+	m, _ = doubleClick(t, m, x, y)
+
+	if got := m.form.Value(i); got == before {
+		t.Errorf("the Directory diff row still reads %q, want it flipped", got)
+	}
+}
+
+func TestDoubleClickingATextSettingOnlyMovesToIt(t *testing.T) {
+	m := settingsModel(t)
+	i := settingIndex(t, m, "SSH key")
+	before := m.form.Value(i)
+
+	x, y := settingCell(m, i)
+	m, _ = doubleClick(t, m, x, y)
+
+	if got := m.form.Value(i); got != before {
+		t.Errorf("the SSH key row reads %q, want a text field typed into rather than acted on (%q)", got, before)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "> SSH key") {
+		t.Errorf("expected the row to still be the active one, got:\n%s", view)
+	}
+}
+
+func TestDoubleClickingTheHideRulesRowOpensItsEditor(t *testing.T) {
+	m := settingsModel(t)
+	i := settingIndex(t, m, "Hide rules")
+
+	x, y := settingCell(m, i)
+	m, cmd := doubleClick(t, m, x, y)
+	if cmd == nil {
+		t.Fatal("a double click on the rules row should report it activated")
+	}
+	next, _ := m.Update(cmd())
+	m = next.(*Model)
+
+	if !m.editingRules {
+		t.Error("the rules editor should have opened over the settings editor")
 	}
 }
 

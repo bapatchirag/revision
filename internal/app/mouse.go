@@ -10,6 +10,11 @@ import (
 // still reads as a double click.
 const doubleClickWindow = 500 * time.Millisecond
 
+// formPanel stands in for the settings editor in the double-click record, which
+// is otherwise kept per panel. It is outside the panel range, so a click in the
+// editor can never pair with one on the layout it floats over.
+const formPanel = -1
+
 // clickAt is where and when a left click landed, so the next one can be judged
 // against it. The place is the panel and the cell inside it rather than the
 // screen cell: focusing a panel can move it — the Shelf panel grows into the Log
@@ -45,7 +50,12 @@ func (m *Model) routeMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 	// An overlay, the update progress modal or the filter bar owns the screen or
-	// the keyboard; the panels below are not what is being pointed at.
+	// the keyboard; the panels below are not what is being pointed at. The
+	// settings editor is the exception: its rows are acted on rather than read,
+	// so the pointer has somewhere to land in it.
+	if m.configuring && !m.editingRules {
+		return m.settingsClick(msg)
+	}
 	if m.overlayActive() || m.updatingWC || m.filtering {
 		return nil
 	}
@@ -85,6 +95,31 @@ func (m *Model) routeMouse(msg tea.MouseMsg) tea.Cmd {
 		cmds = append(cmds, m.doubleClick(idx))
 	}
 	return tea.Batch(cmds...)
+}
+
+// settingsClick gives the pointer the settings editor's keys: a click on a field
+// row moves the cursor to it, as ↑/↓ do, and a second one acts on that row, as
+// space does — a toggle flips, a choice takes its next option, and the rules row
+// opens its own editor. A text field is written into rather than acted on, so a
+// click only ever moves to it.
+func (m *Model) settingsClick(msg tea.MouseMsg) tea.Cmd {
+	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return nil
+	}
+	r := m.overlayRect(m.form.View())
+	if !r.contains(msg.X, msg.Y) {
+		return nil
+	}
+	x, y := msg.X-r.x, msg.Y-r.y
+	// The box's border carries nothing, and neither do the blank and hint rows
+	// below the fields, which ClickField answers false for.
+	if x < 1 || x >= r.w-1 || !m.form.ClickField(y-1) {
+		return nil
+	}
+	if !m.doubleClicked(formPanel, x, y) {
+		return nil
+	}
+	return m.withThemePreview(m.form.Activate)
 }
 
 // wheelStep turns a wheel event into a scroll step: dy down the content, dx
