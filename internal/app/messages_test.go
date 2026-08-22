@@ -46,6 +46,10 @@ func cmdClientIn(t *testing.T, dir, out string, code int) *svn.Client {
 // refuses any that names one of bad, together with a reader for what it was
 // asked to run. It is what a fan-out is checked against: that the files after
 // the one svn would not take were still attempted.
+//
+// It expands --targets the way svn does, reading the paths out of the file it
+// names, so a batched invocation is judged on the paths it actually carries
+// rather than on the temporary file it carries them in.
 func pickyClient(t *testing.T, bad ...string) (*svn.Client, func() []string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -57,9 +61,21 @@ func pickyClient(t *testing.T, bad ...string) (*svn.Client, func() []string) {
 	if len(bad) > 0 {
 		pattern = strings.Join(bad, "|")
 	}
-	script := fmt.Sprintf(
-		"#!/bin/sh\necho \"$@\" >> %s\nfor a in \"$@\"; do\n  case \"$a\" in\n  %s) echo \"svn: E155007: '$a'\" >&2; exit 1 ;;\n  esac\ndone\nexit 0\n",
-		argv, pattern)
+	script := fmt.Sprintf(`#!/bin/sh
+echo "$@" >> %s
+named=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--targets" ]; then named="$named $(cat "$a")"; fi
+  prev="$a"
+done
+for a in "$@" $named; do
+  case "$a" in
+  %s) echo "svn: E155007: '$a'" >&2; exit 1 ;;
+  esac
+done
+exit 0
+`, argv, pattern)
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatalf("write stub binary: %v", err)
 	}
@@ -638,6 +654,94 @@ func TestStageManyCmdCarriesOnPastARefusal(t *testing.T) {
 	argv := strings.Join(calls(), "\n")
 	if !strings.Contains(argv, "c.txt") {
 		t.Errorf("svn was never asked about c.txt — the refusal blocked it:\n%s", argv)
+	}
+}
+
+// TestStageManyCmdBatchesTheInvocations pins the shape of what runs: a mixed set
+// costs three invocations rather than one or two per file, with the add ahead of
+// the changelist assignment, since svn will not changelist a file it does not
+// yet track.
+func TestStageManyCmdBatchesTheInvocations(t *testing.T) {
+	client, calls := pickyClient(t)
+	acts := []stageAction{
+		{path: "new1.txt", add: true, stage: true},
+		{path: "mod1.txt", stage: true},
+		{path: "new2.txt", add: true, stage: true},
+		{path: "off1.txt"},
+		{path: "mod2.txt", stage: true},
+		{path: "off2.txt"},
+	}
+
+	got := msgOf[stagedMsg](t, stageManyCmd(client, "revision:staged", acts, 51))
+	if got.outcome.err() != nil || len(got.outcome.done) != len(acts) {
+		t.Fatalf("outcome = %+v, want every action landed", got.outcome)
+	}
+	ran := calls()
+	if len(ran) != 3 {
+		t.Fatalf("svn ran %d times, want one invocation per kind:\n%s", len(ran), strings.Join(ran, "\n"))
+	}
+	if !strings.HasPrefix(ran[0], "add --force ") {
+		t.Errorf("first invocation = %q, want the add ahead of the rest", ran[0])
+	}
+	if !strings.HasPrefix(ran[1], "changelist revision:staged ") {
+		t.Errorf("second invocation = %q, want the changelist assignment", ran[1])
+	}
+	if !strings.HasPrefix(ran[2], "changelist --remove ") {
+		t.Errorf("third invocation = %q, want the changelist removal", ran[2])
+	}
+	for _, call := range ran {
+		if !strings.Contains(call, "--targets ") {
+			t.Errorf("invocation %q names its paths inline, want them in a targets file", call)
+		}
+	}
+}
+
+// TestStageManyCmdRunsNothingForAnEmptySet locks the early return: svn refuses an
+// invocation naming no path, so a kind with nothing in it must not be run at all.
+func TestStageManyCmdRunsNothingForAnEmptySet(t *testing.T) {
+	client, calls := pickyClient(t)
+	got := msgOf[stagedMsg](t, stageManyCmd(client, "revision:staged", nil, 52))
+	if got.outcome.err() != nil || len(got.outcome.done) != 0 {
+		t.Errorf("outcome = %+v, want nothing done and nothing refused", got.outcome)
+	}
+	if ran := calls(); len(ran) != 0 {
+		t.Errorf("svn ran %d times for an empty set:\n%s", len(ran), strings.Join(ran, "\n"))
+	}
+}
+
+// TestStageManyCmdKeepsASinglePathReadable pins that staging one file still
+// names it on the command line: it is the common case, and a targets file would
+// leave the command log showing a temporary path instead of the file staged.
+func TestStageManyCmdKeepsASinglePathReadable(t *testing.T) {
+	client, calls := pickyClient(t)
+	msgOf[stagedMsg](t, stageManyCmd(client, "revision:staged", []stageAction{{path: "a.txt", stage: true}}, 53))
+	ran := calls()
+	if len(ran) != 1 || ran[0] != "changelist revision:staged a.txt --non-interactive" {
+		t.Errorf("ran %q, want one invocation naming the file itself", ran)
+	}
+}
+
+// TestStageManyCmdSkipsTheChangelistWhenTheAddIsRefused pins the ordering
+// dependency: a file svn would not add is not then asked to join a changelist,
+// which it is not yet tracked well enough to do.
+func TestStageManyCmdSkipsTheChangelistWhenTheAddIsRefused(t *testing.T) {
+	client, calls := pickyClient(t, "bad.txt")
+	acts := []stageAction{
+		{path: "bad.txt", add: true, stage: true},
+		{path: "good.txt", add: true, stage: true},
+	}
+
+	got := msgOf[stagedMsg](t, stageManyCmd(client, "revision:staged", acts, 54))
+	if len(got.outcome.failed) != 1 || got.outcome.failed[0].path != "bad.txt" {
+		t.Errorf("failed = %+v, want only the file svn would not add", got.outcome.failed)
+	}
+	if len(got.outcome.done) != 1 || got.outcome.done[0] != "good.txt" {
+		t.Errorf("done = %q, want the other file added and staged", got.outcome.done)
+	}
+	for _, call := range calls() {
+		if strings.HasPrefix(call, "changelist ") && strings.Contains(call, "bad.txt") {
+			t.Errorf("a file that could not be added was still changelisted: %q", call)
+		}
 	}
 }
 

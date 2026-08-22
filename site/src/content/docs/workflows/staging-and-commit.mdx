@@ -43,6 +43,10 @@ Files that are ignored or clean are skipped. The root `/` row covers the whole t
 Step 2 removes files from *any* changelist, not just the staged bucket — the same as
 pressing <KeyCap key="space" /> on a single file.
 
+However many files a directory holds, staging it costs at most three `svn` invocations —
+one `svn add`, one `svn changelist`, one `svn changelist --remove` — rather than one per
+file. The [command log](/guides/panels/#command-log) shows them.
+
 <DemoVideo
 	name="staging"
 	width={1600}

@@ -878,3 +878,110 @@ func TestIntegrationRevertPathsLeavesAScheduledAddOnDisk(t *testing.T) {
 		t.Errorf("Status = %+v, want added.txt left behind unversioned", items)
 	}
 }
+
+// TestIntegrationBatchedStaging drives the batched wrappers against real svn:
+// the whole set moves in one invocation each, and svn agrees with what the app
+// then shows.
+func TestIntegrationBatchedStaging(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	// A directory of unversioned files, added and staged as a set.
+	if err := os.MkdirAll(filepath.Join(wc, "src", "deep"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{"src/a.txt", "src/b.txt", "src/deep/c.txt"}
+	for _, p := range paths {
+		writeFile(t, filepath.Join(wc, p), "x\n")
+	}
+
+	if errs := c.AddPaths(ctx, []string{"src"}); len(errs) != 0 {
+		t.Fatalf("AddPaths: %v", errs)
+	}
+	if errs := c.AddToChangelistPaths(ctx, "revision:staged", paths); len(errs) != 0 {
+		t.Fatalf("AddToChangelistPaths: %v", errs)
+	}
+	byPath := statusByPath(t, c, ctx)
+	for _, p := range paths {
+		if got := byPath[p].Changelist; got != "revision:staged" {
+			t.Errorf("%s changelist = %q, want revision:staged", p, got)
+		}
+		if got := byPath[p].State; got != StateAdded {
+			t.Errorf("%s state = %s, want added", p, got)
+		}
+	}
+
+	if errs := c.RemoveFromChangelistPaths(ctx, paths); len(errs) != 0 {
+		t.Fatalf("RemoveFromChangelistPaths: %v", errs)
+	}
+	byPath = statusByPath(t, c, ctx)
+	for _, p := range paths {
+		if got := byPath[p].Changelist; got != "" {
+			t.Errorf("%s changelist = %q after remove, want empty", p, got)
+		}
+	}
+
+	// Naming no path runs no command; svn refuses an invocation without one.
+	if errs := c.AddToChangelistPaths(ctx, "revision:staged", nil); len(errs) != 0 {
+		t.Errorf("AddToChangelistPaths(nil) = %v, want no error and no command", errs)
+	}
+	if errs := c.AddPaths(ctx, nil); len(errs) != 0 {
+		t.Errorf("AddPaths(nil) = %v, want no error and no command", errs)
+	}
+}
+
+// TestIntegrationBatchedStagingIsolatesARefusal is the reason the batch falls
+// back to a path at a time. svn walks its targets in order and abandons the run
+// at the first it will not take, so a set holding one bad path would otherwise
+// leave every path after it untouched.
+func TestIntegrationBatchedStagingIsolatesARefusal(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	for _, p := range []string{"a.txt", "b.txt"} {
+		writeFile(t, filepath.Join(wc, p), "x\n")
+	}
+	mustRun(t, wc, "svn", "add", "a.txt", "b.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "seed")
+
+	// "ghost.txt" is in the set but not in the working copy, and sits between
+	// the two real files so it would strand b.txt.
+	errs := c.AddToChangelistPaths(ctx, "revision:staged", []string{"a.txt", "ghost.txt", "b.txt"})
+	if len(errs) != 1 || errs[0].Path != "ghost.txt" {
+		t.Fatalf("errors = %v, want only the path svn could not find", errs)
+	}
+	byPath := statusByPath(t, c, ctx)
+	for _, p := range []string{"a.txt", "b.txt"} {
+		if got := byPath[p].Changelist; got != "revision:staged" {
+			t.Errorf("%s changelist = %q, want it staged despite the bad path beside it", p, got)
+		}
+	}
+}
+
+// TestIntegrationAddPathsForgivesAVersionedPath pins why the add carries
+// --force: a set can name a directory and something under it, and the recursive
+// add reaches the child first. Without it svn refuses the whole invocation, and
+// the retry a path at a time would fail on everything the first pass added.
+func TestIntegrationAddPathsForgivesAVersionedPath(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	if err := os.MkdirAll(filepath.Join(wc, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(wc, "src", "a.txt"), "x\n")
+
+	if errs := c.AddPaths(ctx, []string{"src", "src/a.txt"}); len(errs) != 0 {
+		t.Fatalf("AddPaths over a directory and its child: %v", errs)
+	}
+	// Naming an already-added path again is equally harmless.
+	if errs := c.AddPaths(ctx, []string{"src", "src/a.txt"}); len(errs) != 0 {
+		t.Errorf("AddPaths repeated: %v", errs)
+	}
+	if got := statusByPath(t, c, ctx)["src/a.txt"].State; got != StateAdded {
+		t.Errorf("src/a.txt state = %s, want added", got)
+	}
+}
