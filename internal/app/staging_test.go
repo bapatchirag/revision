@@ -259,10 +259,10 @@ func pressAdd(t *testing.T, m *Model) (*Model, tea.Cmd) {
 	return next.(*Model), cmd
 }
 
-// TestAddVersionsAnUntrackedFileWithoutStagingIt is the whole point of the key:
-// it must do the add half of space and none of the changelist half, and show it
-// on the same frame as the keypress.
-func TestAddVersionsAnUntrackedFileWithoutStagingIt(t *testing.T) {
+// TestAddVersionsAnUntrackedFileAndNothingElse pins what the key does: it puts
+// the file under version control, leaves its changelist alone, and shows both on
+// the same frame as the keypress.
+func TestAddVersionsAnUntrackedFileAndNothingElse(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "untracked.txt", State: svn.StateUnversioned},
 	})

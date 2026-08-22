@@ -125,13 +125,12 @@ func stageable(s svn.FileState) bool {
 	}
 }
 
-// addSelected puts the current Files-panel selection under version control,
-// without staging it as space would. On a directory row it adds everything
-// untracked beneath; on a file leaf it adds that file — and an untracked
-// directory is one such leaf, since svn status reports it as a single entry
-// with no children of its own, so svn's recursive add takes what is inside it.
-// Anything already versioned, or ignored, is left alone, as is a row already
-// waiting on svn.
+// addSelected puts the current Files-panel selection under version control. On a
+// directory row it adds everything untracked beneath; on a file leaf it adds
+// that file — and an untracked directory is one such leaf, since svn status
+// reports it as a single entry with no children of its own, so svn's recursive
+// add takes what is inside it. Anything already versioned, or ignored, is left
+// alone, as is a row already waiting on svn.
 func (m *Model) addSelected() tea.Cmd {
 	if n, items, ok := m.selectedDirectory(); ok {
 		return m.addDirectory(n, m.withoutPending(items))

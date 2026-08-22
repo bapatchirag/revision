@@ -1,11 +1,31 @@
 ---
 title: Staging & commit
-description: How revision emulates a staging index on top of SVN, and how to commit.
+description: How to put files under version control, how revision emulates a staging index on top of SVN, and how to commit.
 ---
 
 import AppScreen from '../../../components/AppScreen.astro';
 import DemoVideo from '../../../components/DemoVideo.astro';
 import KeyCap from '../../../components/KeyCap.astro';
+
+## Adding a file
+
+<KeyCap key="a" /> puts the selection under version control — `svn add`, nothing more.
+
+- On a file row it adds that file.
+- On a *directory* row it adds everything untracked beneath it.
+- An untracked directory is added with its whole contents, which is how `svn add` reads
+  one.
+
+Only untracked paths can be added: a file SVN already tracks, one it ignores, or a
+directory with nothing untracked under it says so in a toast and nothing runs. However
+many files are involved, the add costs a single `svn add` invocation.
+
+Adding is not destructive, so it neither confirms first nor marks the rows as
+[in flight](#rows-in-flight) — they restyle to `A` on the keypress and
+[come back](#instant-then-confirmed) if `svn` refuses them.
+
+<KeyCap key="r" /> undoes an add: reverting one un-schedules it and leaves the file on
+disk, untracked again.
 
 ## How staging works
 
@@ -26,8 +46,8 @@ Unstage a file before moving it into a [named changelist](/workflows/changelists
 <KeyCap key="n" />, which moves the whole staged set at once.
 :::
 
-An untracked (unversioned) file is `svn add`ed first, then staged, so a new file takes the
-same single keystroke as a modified one.
+An untracked (unversioned) file is [added](#adding-a-file) first, then staged, so a new
+file takes the same single keystroke as a modified one.
 
 ## Staging a directory
 
