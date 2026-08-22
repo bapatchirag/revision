@@ -291,6 +291,13 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 			return m.openMerge(), true
 		}
 		return nil, false
+	case "a":
+		// Adding acts on untracked working-copy paths, which only the Files panel
+		// shows.
+		if m.focus.Index() == panelFiles {
+			return m.addSelected(), true
+		}
+		return nil, false
 	case "r":
 		if m.focus.Index() == panelFiles {
 			return m.requestRevert(), true
