@@ -8,8 +8,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/bapatchirag/revision/internal/config"
+	"github.com/bapatchirag/revision/internal/shelf"
 	"github.com/bapatchirag/revision/internal/svn"
 	uimsg "github.com/bapatchirag/revision/internal/tui/msg"
+	"github.com/bapatchirag/revision/internal/tui/theme"
 )
 
 // click is a left button press at a screen cell.
@@ -303,6 +305,260 @@ func TestDoubleClickingADiffLineAimsTheEditorAtIt(t *testing.T) {
 	}
 	if got := editLine(t, m); got != 201 {
 		t.Errorf("line = %d, want 201 — the hunk the click landed in", got)
+	}
+}
+
+// shelfRow returns the screen row the Shelf panel draws its i'th listed entry
+// on. The panel moves as it grows and shrinks with focus, so it is read off the
+// layout rather than hard-coded like the panels above it.
+func shelfRow(m *Model, i int) int { return m.panelRects()[panelShelf].y + 1 + i }
+
+// shelfModel is a mouse-reading model with entries on the shelf and the panel
+// focused, which is what opens it past the single row it shows collapsed.
+func shelfModel(t *testing.T) *Model {
+	t.Helper()
+	m := focusShelf(t, mouseModel(t))
+	return seedShelves(t, m, []shelf.Entry{
+		shelfEntry("a1", "alpha", 1),
+		shelfEntry("b2", "beta", 2),
+		shelfEntry("c3", "gamma", 3),
+		shelfEntry("d4", "delta", 4),
+	})
+}
+
+func TestClickingAShelfHighlightsIt(t *testing.T) {
+	m := shelfModel(t)
+
+	next, cmd := m.Update(click(4, shelfRow(m, 2)))
+	m = next.(*Model)
+	e, ok := m.shelves.Selected()
+	if !ok || e.ID != "c3" {
+		t.Errorf("selection = %+v (ok=%v), want the clicked entry", e, ok)
+	}
+	sel, ok := cmd().(uimsg.SelectedMsg)
+	if !ok {
+		t.Fatalf("expected the click to report a selection, got %T", cmd())
+	}
+	if sel.ID != shelfListID || sel.Index != 2 {
+		t.Errorf("got %+v, want {shelf 2}", sel)
+	}
+}
+
+func TestClickingTheShelfPanelFocusesItAndDrivesMain(t *testing.T) {
+	m := mouseModel(t)
+	m = seedShelves(t, m, []shelf.Entry{shelfEntry("a1", "alpha", 1)})
+	if m.focus.Index() == panelShelf {
+		t.Fatal("the Files panel starts focused")
+	}
+
+	next, _ := m.Update(click(4, shelfRow(m, 0)))
+	m = next.(*Model)
+	if got := m.focus.Index(); got != panelShelf {
+		t.Errorf("focused panel %d, want the clicked one (%d)", got, panelShelf)
+	}
+	if m.source != sourceShelf {
+		t.Errorf("source = %v, want the Shelf panel driving Main", m.source)
+	}
+}
+
+func TestDoubleClickingAShelfAsksToApplyIt(t *testing.T) {
+	m := shelfModel(t)
+
+	m, _ = doubleClick(t, m, 4, shelfRow(m, 1))
+	if !m.confirming {
+		t.Fatal("a double click on a shelf should ask before merging it back")
+	}
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "Apply shelf?") || !strings.Contains(view, "beta") {
+		t.Errorf("expected the apply prompt to name the double-clicked shelf, got:\n%s", view)
+	}
+	// Applying keeps the entry; popping is p's, and is not what a stray click does.
+	if !strings.Contains(view, "keeping it on the shelf") {
+		t.Errorf("expected the prompt to apply rather than pop, got:\n%s", view)
+	}
+}
+
+// The Shelf panel grows into the Log panel's rows as the first click focuses it,
+// so the second click of a pair lands on a different entry than the cell it
+// repeats. Judging the pair by the row rather than the screen cell is what keeps
+// a double click from applying a shelf nobody pointed at.
+func TestDoubleClickingTheCollapsedShelfActsOnTheRowUnderThePointer(t *testing.T) {
+	m := mouseModel(t)
+	m = seedShelves(t, m, []shelf.Entry{
+		shelfEntry("a1", "alpha", 1),
+		shelfEntry("b2", "beta", 2),
+		shelfEntry("c3", "gamma", 3),
+		shelfEntry("d4", "delta", 4),
+	})
+	cell := shelfRow(m, 0)
+
+	m, _ = doubleClick(t, m, 4, cell)
+	if m.confirming {
+		t.Fatal("the panel moved between the two clicks, so they are not a pair")
+	}
+	e, _ := m.shelves.Selected()
+	moved := e.ID
+
+	next, _ := m.Update(click(4, cell))
+	m = next.(*Model)
+	if !m.confirming {
+		t.Fatal("a second click on the settled row should complete the pair")
+	}
+	e, _ = m.shelves.Selected()
+	if e.ID != moved {
+		t.Errorf("applied %q, want the entry under the pointer (%q)", e.ID, moved)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, shelfLabel(e)) {
+		t.Errorf("expected the prompt to name %q, got:\n%s", shelfLabel(e), view)
+	}
+}
+
+func TestDoubleClickingAShelvedDiffOpensNoFile(t *testing.T) {
+	m := loadItems(t, mouseModel(t), []svn.StatusItem{{Path: "src/a.go", State: svn.StateModified}})
+	m = seedShelves(t, focusShelf(t, m), []shelf.Entry{shelfEntry("20260819-1", "wip", 1)})
+	next, _ := m.Update(shelfReadMsg{id: "20260819-1", text: scrollableDiff()})
+	m = next.(*Model)
+	// Main is focused to scroll the patch, which is where a diff line is clicked.
+	m, _ = pressRune(t, m, '0')
+	if !m.shelfShowsPatch() {
+		t.Fatal("the shelved patch should be what Main is showing")
+	}
+
+	m, _ = doubleClick(t, m, mainLeft+2, 1+8)
+	if got := m.main.Cursor(); got != 8 {
+		t.Fatalf("the diff cursor is on row %d, want the double-clicked one", got)
+	}
+	if path, _, _, ok := m.editTarget(); ok {
+		t.Errorf("a shelved patch named %q to open, want nothing — it describes files the working copy does not hold", path)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "no file to open here") {
+		t.Errorf("expected the open to be refused, got:\n%s", view)
+	}
+}
+
+// settingsModel is a mouse-reading model with the settings editor open.
+func settingsModel(t *testing.T) *Model {
+	t.Helper()
+	m, _ := pressRune(t, mouseModel(t), 'S')
+	if !m.configuring {
+		t.Fatal("S should open the settings editor")
+	}
+	return m
+}
+
+// settingIndex is the position of the row labeled label in the settings editor.
+func settingIndex(t *testing.T, m *Model, label string) int {
+	t.Helper()
+	for i, f := range m.form.Fields() {
+		if f.Label == label {
+			return i
+		}
+	}
+	t.Fatalf("the settings editor has no %q row", label)
+	return 0
+}
+
+// settingCell is a screen cell inside the row the settings editor draws field i
+// on. The editor is centered on whatever the terminal is, so it is read off the
+// same placement the view uses rather than hard-coded.
+func settingCell(m *Model, i int) (x, y int) {
+	r := m.overlayRect(m.form.View())
+	return r.x + 2, r.y + 1 + i
+}
+
+func TestClickingASettingHighlightsIt(t *testing.T) {
+	m := settingsModel(t)
+
+	x, y := settingCell(m, themeFieldIndex)
+	next, _ := m.Update(click(x, y))
+	m = next.(*Model)
+
+	if view := stripANSI(m.View()); !strings.Contains(view, "> Theme") {
+		t.Errorf("expected the clicked row to be the active one, got:\n%s", view)
+	}
+	// Moving between fields is not picking one, so the palette must sit still.
+	if m.theme != theme.Auto() {
+		t.Error("clicking a row should not preview a theme")
+	}
+}
+
+func TestClickingOutsideTheSettingsEditorIsIgnored(t *testing.T) {
+	m := settingsModel(t)
+	before := m.focus.Index()
+
+	next, _ := m.Update(click(0, 0))
+	m = next.(*Model)
+
+	if !m.configuring {
+		t.Error("a click beside the editor should not close it")
+	}
+	if got := m.focus.Index(); got != before {
+		t.Errorf("focus moved to %d, want the layout under the editor left alone", got)
+	}
+}
+
+func TestDoubleClickingAChoiceSettingCyclesIt(t *testing.T) {
+	m := settingsModel(t)
+	before := m.form.Value(themeFieldIndex)
+
+	x, y := settingCell(m, themeFieldIndex)
+	m, _ = doubleClick(t, m, x, y)
+
+	if got := m.form.Value(themeFieldIndex); got == before {
+		t.Fatalf("the Theme row still reads %q, want the next option", got)
+	}
+	// The palette follows the row as it is cycled, exactly as →/space leaves it.
+	if m.theme != theme.Everforest() {
+		t.Error("the cycled theme should be previewed live")
+	}
+	if m.cfg.Theme != before {
+		t.Errorf("cfg.Theme = %q, want the choice unsaved until ctrl+s", m.cfg.Theme)
+	}
+}
+
+func TestDoubleClickingAToggleSettingFlipsIt(t *testing.T) {
+	m := settingsModel(t)
+	i := settingIndex(t, m, "Directory diff")
+	before := m.form.Value(i)
+
+	x, y := settingCell(m, i)
+	m, _ = doubleClick(t, m, x, y)
+
+	if got := m.form.Value(i); got == before {
+		t.Errorf("the Directory diff row still reads %q, want it flipped", got)
+	}
+}
+
+func TestDoubleClickingATextSettingOnlyMovesToIt(t *testing.T) {
+	m := settingsModel(t)
+	i := settingIndex(t, m, "SSH key")
+	before := m.form.Value(i)
+
+	x, y := settingCell(m, i)
+	m, _ = doubleClick(t, m, x, y)
+
+	if got := m.form.Value(i); got != before {
+		t.Errorf("the SSH key row reads %q, want a text field typed into rather than acted on (%q)", got, before)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "> SSH key") {
+		t.Errorf("expected the row to still be the active one, got:\n%s", view)
+	}
+}
+
+func TestDoubleClickingTheHideRulesRowOpensItsEditor(t *testing.T) {
+	m := settingsModel(t)
+	i := settingIndex(t, m, "Hide rules")
+
+	x, y := settingCell(m, i)
+	m, cmd := doubleClick(t, m, x, y)
+	if cmd == nil {
+		t.Fatal("a double click on the rules row should report it activated")
+	}
+	next, _ := m.Update(cmd())
+	m = next.(*Model)
+
+	if !m.editingRules {
+		t.Error("the rules editor should have opened over the settings editor")
 	}
 }
 

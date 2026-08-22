@@ -107,12 +107,7 @@ func (m *Model) routeKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		// The settings editor live-previews the palette while its Theme field
 		// changes, so scrolling that field re-themes the UI immediately. The
 		// choice is only persisted on ctrl+s; esc reverts it via closeSettings.
-		before := m.form.Value(themeFieldIndex)
-		cmd := m.form.Update(msg)
-		if after := m.form.Value(themeFieldIndex); after != before {
-			m.previewTheme(after)
-		}
-		return cmd, true
+		return m.withThemePreview(func() tea.Cmd { return m.form.Update(msg) }), true
 	}
 	if m.confirming {
 		return m.modal.Update(msg), true

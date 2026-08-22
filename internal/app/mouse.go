@@ -10,11 +10,20 @@ import (
 // still reads as a double click.
 const doubleClickWindow = 500 * time.Millisecond
 
+// formPanel stands in for the settings editor in the double-click record, which
+// is otherwise kept per panel. It is outside the panel range, so a click in the
+// editor can never pair with one on the layout it floats over.
+const formPanel = -1
+
 // clickAt is where and when a left click landed, so the next one can be judged
-// against it.
+// against it. The place is the panel and the cell inside it rather than the
+// screen cell: focusing a panel can move it — the Shelf panel grows into the Log
+// panel's rows — and a pair of clicks that never left the row under the pointer
+// is still a pair.
 type clickAt struct {
-	x, y int
-	at   time.Time
+	panel int
+	x, y  int
+	at    time.Time
 }
 
 // mouseReporting asks the terminal to start or stop reporting the pointer.
@@ -41,7 +50,12 @@ func (m *Model) routeMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 	// An overlay, the update progress modal or the filter bar owns the screen or
-	// the keyboard; the panels below are not what is being pointed at.
+	// the keyboard; the panels below are not what is being pointed at. The
+	// settings editor is the exception: its rows are acted on rather than read,
+	// so the pointer has somewhere to land in it.
+	if m.configuring && !m.editingRules {
+		return m.settingsClick(msg)
+	}
 	if m.overlayActive() || m.updatingWC || m.filtering {
 		return nil
 	}
@@ -62,7 +76,7 @@ func (m *Model) routeMouse(msg tea.MouseMsg) tea.Cmd {
 	view, onTab := panel.ClickTab(x, y)
 	row := panel.ClickRow(x, y)
 	// Only a row can be double-clicked; the border carries no action.
-	second := panel.InBody(x, y) && m.doubleClicked(msg.X, msg.Y)
+	second := panel.InBody(x, y) && m.doubleClicked(idx, x, y)
 	focusing := idx != m.focus.Index()
 	if !focusing && !onTab && !second && row == nil {
 		return nil
@@ -81,6 +95,31 @@ func (m *Model) routeMouse(msg tea.MouseMsg) tea.Cmd {
 		cmds = append(cmds, m.doubleClick(idx))
 	}
 	return tea.Batch(cmds...)
+}
+
+// settingsClick gives the pointer the settings editor's keys: a click on a field
+// row moves the cursor to it, as ↑/↓ do, and a second one acts on that row, as
+// space does — a toggle flips, a choice takes its next option, and the rules row
+// opens its own editor. A text field is written into rather than acted on, so a
+// click only ever moves to it.
+func (m *Model) settingsClick(msg tea.MouseMsg) tea.Cmd {
+	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return nil
+	}
+	r := m.overlayRect(m.form.View())
+	if !r.contains(msg.X, msg.Y) {
+		return nil
+	}
+	x, y := msg.X-r.x, msg.Y-r.y
+	// The box's border carries nothing, and neither do the blank and hint rows
+	// below the fields, which ClickField answers false for.
+	if x < 1 || x >= r.w-1 || !m.form.ClickField(y-1) {
+		return nil
+	}
+	if !m.doubleClicked(formPanel, x, y) {
+		return nil
+	}
+	return m.withThemePreview(m.form.Activate)
 }
 
 // wheelStep turns a wheel event into a scroll step: dy down the content, dx
@@ -108,13 +147,14 @@ func wheelStep(msg tea.MouseMsg) (dx, dy int, ok bool) {
 }
 
 // doubleClicked records a click and reports whether it completes a double click:
-// a second press on the same cell within the window. The record is cleared when
-// one completes, so a third press starts a fresh pair rather than firing again.
-func (m *Model) doubleClicked(x, y int) bool {
+// a second press on the same cell of the same panel within the window. The
+// record is cleared when one completes, so a third press starts a fresh pair
+// rather than firing again.
+func (m *Model) doubleClicked(panel, x, y int) bool {
 	prev := m.lastClick
 	now := time.Now()
-	m.lastClick = clickAt{x: x, y: y, at: now}
-	if prev.at.IsZero() || prev.x != x || prev.y != y || now.Sub(prev.at) > doubleClickWindow {
+	m.lastClick = clickAt{panel: panel, x: x, y: y, at: now}
+	if prev.at.IsZero() || prev.panel != panel || prev.x != x || prev.y != y || now.Sub(prev.at) > doubleClickWindow {
 		return false
 	}
 	m.lastClick = clickAt{}
@@ -123,8 +163,8 @@ func (m *Model) doubleClicked(x, y int) bool {
 
 // doubleClick is the second click's own meaning, on top of the selection the
 // first one moved: the row's action in the Files panel, the update-to-revision
-// prompt on a revision, and the editor on a diff line in Main. Nothing else on
-// screen has an action a row can carry.
+// prompt on a revision, the apply prompt on a shelved change set, and the editor
+// on a diff line in Main. Nothing else on screen has an action a row can carry.
 func (m *Model) doubleClick(panel int) tea.Cmd {
 	switch panel {
 	case panelFiles:
@@ -134,6 +174,10 @@ func (m *Model) doubleClick(panel int) tea.Cmd {
 			return nil
 		}
 		return m.requestUpdateToRevision()
+	case panelShelf:
+		// Applying, as enter does: the shelf keeps its copy, so a mis-aimed click
+		// costs a revert rather than the only copy of the change set.
+		return m.requestRestoreShelf(false)
 	case panelMain:
 		// Main carries a line cursor only while it holds a diff, which is the only
 		// thing there an editor can be opened on.
