@@ -94,7 +94,7 @@ func (m *Model) filesViewHints() []string {
 	case m.filesViewIsChangelists():
 		return []string{"enter expand", "v pick", "n name", "c commit", "[ ] view"}
 	}
-	return []string{"space stage", "v pick", "n changelist", "c commit", "r revert", "d delete", "[ ] view"}
+	return []string{"space stage", "a add", "v pick", "n changelist", "c commit", "r revert", "d delete", "[ ] view"}
 }
 
 // searchHints describe the active search on a Viewport panel: the query, the

@@ -10,6 +10,15 @@
   },
   {
     "section": "Changes",
+    "action": "Add to version control",
+    "keys": [
+      "a"
+    ],
+    "context": "Files",
+    "description": "Put the untracked selection under version control with `svn add`, leaving it unstaged — the half of `space` that versions a file, without the changelist it would be filed into. On a directory row it adds everything untracked beneath, and an untracked directory is added with its whole contents, since that is how `svn add` reads one. Anything already versioned, and anything ignored, is left alone. The Files panel restyles on the keypress and puts the rows back if svn refuses them."
+  },
+  {
+    "section": "Changes",
     "action": "Assign changelist",
     "keys": [
       "n"

@@ -32,6 +32,14 @@ func (m *Model) mutationEvent(msg tea.Msg) (tea.Cmd, bool) {
 		// Reload status so the changelist grouping (and staged marker) refresh.
 		return m.reloadStatus(), true
 
+	case addedMsg:
+		err := msg.outcome.err()
+		m.settleOptimistic(msg.token, err)
+		m.showToast(msg.outcome.toast("add", "added"))
+		// Reload either way: the add acts on each path on its own, so a run that
+		// refused one has still versioned the rest.
+		return m.reloadStatus(), true
+
 	case committedMsg:
 		m.clearPending(msg.token)
 		if msg.err != nil {

@@ -346,6 +346,16 @@ type stagedMsg struct {
 	token      uint64
 }
 
+// addedMsg carries the result of putting paths under version control, for one
+// path or for a set of them: outcome names what svn took and what it refused.
+// token identifies the optimistic change the model applied ahead of this reply,
+// so a failure can be undone; it is zero when the change was not shown in
+// advance.
+type addedMsg struct {
+	outcome batchOutcome
+	token   uint64
+}
+
 // committedMsg carries the result of a commit. token identifies the rows the
 // model marked as in flight when the commit was dispatched, so the reply clears
 // exactly those; it is zero when nothing was marked.
@@ -1167,6 +1177,31 @@ func applyStages(ctx context.Context, client *svn.Client, changelist string, act
 		out.add(act.path, refused[act.path])
 	}
 	return out
+}
+
+// addManyCmd puts paths under version control off the UI goroutine, in one
+// invocation rather than one per path. Every path is judged on its own:
+// AddPaths falls back to a path at a time when the batch aborts, so one path
+// svn refuses never decides how far down the set the keypress got.
+//
+// A directory in the set takes everything under it with it, so a path already
+// covered that way is named a second time for nothing — but `svn add --force`
+// passes over what is already versioned rather than refusing it, which is what
+// lets the set be sent as written.
+func addManyCmd(client *svn.Client, paths []string, token uint64) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), batchTimeout(len(paths)))
+		defer cancel()
+		refused := make(map[string]error, len(paths))
+		for _, pe := range client.AddPaths(ctx, paths) {
+			refused[pe.Path] = pe.Err
+		}
+		var out batchOutcome
+		for _, p := range paths {
+			out.add(p, refused[p])
+		}
+		return addedMsg{outcome: out, token: token}
+	}
 }
 
 // commitCmd commits the staged changelist off the UI goroutine.

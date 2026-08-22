@@ -621,6 +621,58 @@ func TestStageCmd(t *testing.T) {
 	}
 }
 
+// TestAddManyCmdBatchesAndCarriesOnPastARefusal pins both halves of the add
+// fan-out: the whole set goes in one invocation, and a path svn will not take
+// is reported without stranding the paths listed after it.
+func TestAddManyCmdBatchesAndCarriesOnPastARefusal(t *testing.T) {
+	client, calls := pickyClient(t, "bad.txt")
+
+	got := msgOf[addedMsg](t, addManyCmd(client, []string{"a.txt", "bad.txt", "c.txt"}, 31))
+	if got.token != 31 {
+		t.Errorf("token = %d, want it carried back so the optimistic change can be settled", got.token)
+	}
+	if len(got.outcome.failed) != 1 || got.outcome.failed[0].path != "bad.txt" {
+		t.Errorf("failed = %+v, want only the path svn refused", got.outcome.failed)
+	}
+	if len(got.outcome.done) != 2 {
+		t.Errorf("done = %q, want the other two versioned regardless", got.outcome.done)
+	}
+	ran := calls()
+	if len(ran) == 0 || !strings.HasPrefix(ran[0], "add --force ") {
+		t.Fatalf("first invocation = %q, want a single forced add over the set", ran)
+	}
+	if !strings.Contains(ran[0], "--targets ") {
+		t.Errorf("invocation %q names its paths inline, want them in a targets file", ran[0])
+	}
+	if !strings.Contains(strings.Join(ran, "\n"), "c.txt") {
+		t.Errorf("svn was never asked about c.txt — the refusal blocked it:\n%s", strings.Join(ran, "\n"))
+	}
+}
+
+// TestAddManyCmdRunsNothingForAnEmptySet locks the early return: svn refuses an
+// invocation naming no path.
+func TestAddManyCmdRunsNothingForAnEmptySet(t *testing.T) {
+	client, calls := pickyClient(t)
+	got := msgOf[addedMsg](t, addManyCmd(client, nil, 32))
+	if got.outcome.err() != nil || len(got.outcome.done) != 0 {
+		t.Errorf("outcome = %+v, want nothing done and nothing refused", got.outcome)
+	}
+	if ran := calls(); len(ran) != 0 {
+		t.Errorf("svn ran %d times for an empty set:\n%s", len(ran), strings.Join(ran, "\n"))
+	}
+}
+
+// TestAddManyCmdKeepsASinglePathReadable pins that adding one file still names
+// it on the command line, so the command log shows the file rather than a
+// temporary targets path.
+func TestAddManyCmdKeepsASinglePathReadable(t *testing.T) {
+	client, calls := pickyClient(t)
+	msgOf[addedMsg](t, addManyCmd(client, []string{"a.txt"}, 33))
+	if ran := calls(); len(ran) != 1 || ran[0] != "add --force a.txt --non-interactive" {
+		t.Errorf("ran %q, want one invocation naming the file itself", ran)
+	}
+}
+
 func TestStageManyCmd(t *testing.T) {
 	acts := []stageAction{
 		{path: "a.txt", add: true, stage: true},
