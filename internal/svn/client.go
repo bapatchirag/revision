@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -88,6 +89,7 @@ func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, c.binary(), full...)
 	cmd.Dir = c.Dir
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	boundCancellation(cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -96,6 +98,12 @@ func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 	start := time.Now()
 	runErr := cmd.Run()
 	elapsed := time.Since(start)
+	if errors.Is(runErr, exec.ErrWaitDelay) {
+		// exec only reports this for a command that exited successfully: svn is
+		// done and its output is complete, and all that overran is a child holding
+		// the pipe open behind it (an ssh ControlMaster, say). Not a failure.
+		runErr = nil
+	}
 
 	var msg string
 	if runErr != nil {
@@ -135,6 +143,31 @@ func failureText(ctx context.Context, stderr string, runErr error, elapsed time.
 		return msg
 	}
 	return runErr.Error()
+}
+
+// runGrace bounds how long a killed command's output pipes are waited on before
+// they are closed from under whatever still holds them.
+const runGrace = 2 * time.Second
+
+// boundCancellation makes a timed-out or abandoned command actually end. exec
+// kills only the process it started, and Wait then blocks until every writer to
+// the output pipes is gone — so the ssh that svn+ssh forks, still stuck on the
+// network, keeps run from ever returning and the reply never reaches the caller.
+// A refresh cannot rescue that: it only starts a second read that hangs the same
+// way. The command therefore gets its own process group, cancellation kills the
+// whole group, and WaitDelay closes the pipes as a backstop.
+func boundCancellation(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+			if errors.Is(err, syscall.ESRCH) {
+				return os.ErrProcessDone
+			}
+			return err
+		}
+		return nil
+	}
+	cmd.WaitDelay = runGrace
 }
 
 // quotedPath pulls the path out of a line svn wrote about one, which it always
