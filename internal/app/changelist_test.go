@@ -65,6 +65,66 @@ func TestChangelistItemsSkipsContainerDirectoryEntries(t *testing.T) {
 	}
 }
 
+// TestChangelistGroupingContainerShapes pins which directory status entries the
+// changelist views drop. A container is any entry the set holds something under,
+// however far below and whether or not the levels between are in the set too; an
+// entry with nothing under it is a row in its own right.
+func TestChangelistGroupingContainerShapes(t *testing.T) {
+	tests := []struct {
+		name  string
+		items []svn.StatusItem
+		want  []string
+	}{
+		{
+			name: "a directory with nothing under it is kept",
+			items: []svn.StatusItem{
+				{Path: "src/empty", State: svn.StateUnversioned, Changelist: stagedChangelist},
+				{Path: "docs/readme.md", State: svn.StateAdded, Changelist: stagedChangelist},
+			},
+			want: []string{"src/empty", "docs/readme.md"},
+		},
+		{
+			name: "a container is dropped however deep its descendant sits",
+			items: []svn.StatusItem{
+				{Path: "usp", State: svn.StateUnversioned, Changelist: stagedChangelist},
+				{Path: "usp/lib/wmi/file.c", State: svn.StateAdded, Changelist: stagedChangelist},
+			},
+			want: []string{"usp/lib/wmi/file.c"},
+		},
+		{
+			name: "every container ancestor is dropped, not just the nearest",
+			items: []svn.StatusItem{
+				{Path: "a", State: svn.StateUnversioned, Changelist: stagedChangelist},
+				{Path: "a/b", State: svn.StateUnversioned, Changelist: stagedChangelist},
+				{Path: "a/b/c", State: svn.StateUnversioned, Changelist: stagedChangelist},
+				{Path: "a/b/c/file.go", State: svn.StateAdded, Changelist: stagedChangelist},
+			},
+			want: []string{"a/b/c/file.go"},
+		},
+		{
+			name: "a sibling sharing a name prefix is not a descendant",
+			items: []svn.StatusItem{
+				{Path: "src", State: svn.StateUnversioned, Changelist: stagedChangelist},
+				{Path: "srclib/file.go", State: svn.StateAdded, Changelist: stagedChangelist},
+			},
+			want: []string{"src", "srclib/file.go"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			for _, g := range groupChangelists(tc.items) {
+				for _, it := range g.Items {
+					got = append(got, it.Path)
+				}
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("grouped %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFilesViewSwitchesToChangelists(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "a.go", State: svn.StateModified, Changelist: "feature"},

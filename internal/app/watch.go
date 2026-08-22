@@ -331,8 +331,16 @@ func (m *Model) settleScan(msg workingCopyChangedMsg) {
 // running, rows are waiting on an action of the user's own, or the first status
 // has not landed yet. The refresh is held rather than dropped, and taken at the
 // next look once the screen is free.
+//
+// Rows wait in two ways: a revert, delete or commit marks them in pendingOps,
+// while a stage moves them ahead of svn and keeps the status they moved from to
+// put back if svn refuses. Both have to hold the poller. A status read taken
+// mid-flight reports the change as not yet made, which flips the rows back under
+// the user — and, since it drops the snapshot behind them, leaves nothing to
+// undo with when the refusal arrives.
 func (m *Model) refreshHeld() bool {
-	return m.overlayActive() || m.updatingWC || m.loading || len(m.pendingOps) > 0
+	return m.overlayActive() || m.updatingWC || m.loading ||
+		len(m.pendingOps) > 0 || m.optimistic != nil
 }
 
 // toggleLiveRefresh flips whether the working copy is watched in the background.

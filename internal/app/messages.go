@@ -1108,37 +1108,65 @@ func stageCmd(client *svn.Client, changelist string, act stageAction, token uint
 	return stageManyCmd(client, changelist, []stageAction{act}, token)
 }
 
-// stageManyCmd applies stage actions off the UI goroutine: for each action it
-// optionally runs `svn add` first (for a previously unversioned file), then adds
-// the path to (stage) or removes it from (unstage) the staged changelist.
+// stageManyCmd applies stage actions off the UI goroutine: `svn add` for the
+// files that must be versioned first, then the changelist assignments and
+// removals.
 //
-// Every action is attempted. A file svn refuses is recorded and the rest go on
-// without it, so one path that cannot be staged no longer decides how far down
-// the list the keypress got.
+// It takes three invocations for the whole set rather than one or two per file.
+// Every action is still attempted and judged on its own: a file svn refuses is
+// recorded and the rest go on without it, so one path that cannot be staged no
+// longer decides how far down the list the keypress got.
 func stageManyCmd(client *svn.Client, changelist string, acts []stageAction, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), batchTimeout(len(acts)))
 		defer cancel()
-		var out batchOutcome
-		for _, act := range acts {
-			out.add(act.path, applyStage(ctx, client, changelist, act))
-		}
-		return stagedMsg{outcome: out, token: token}
+		return stagedMsg{outcome: applyStages(ctx, client, changelist, acts), token: token}
 	}
 }
 
-// applyStage carries out one stage action: `svn add` first when the file was not
-// versioned yet, then the changelist assignment or removal.
-func applyStage(ctx context.Context, client *svn.Client, changelist string, act stageAction) error {
-	if act.add {
-		if err := client.Add(ctx, act.path); err != nil {
-			return err
+// applyStages carries out a set of stage actions in as few invocations as it
+// can: one `svn add` for everything that has to be versioned first, one
+// `svn changelist` for everything joining the changelist, one more for
+// everything leaving it.
+//
+// The add has to go first, and separately: a file being staged straight from
+// unversioned is not something svn will changelist until it is added. A path the
+// add was refused for is left out of the assignment that follows, as it was when
+// each path was taken on its own.
+func applyStages(ctx context.Context, client *svn.Client, changelist string, acts []stageAction) batchOutcome {
+	refused := make(map[string]error, len(acts))
+	record := func(errs []svn.PathError) {
+		for _, pe := range errs {
+			refused[pe.Path] = pe.Err
 		}
 	}
-	if act.stage {
-		return client.AddToChangelist(ctx, changelist, act.path)
+
+	var toAdd []string
+	for _, act := range acts {
+		if act.add {
+			toAdd = append(toAdd, act.path)
+		}
 	}
-	return client.RemoveFromChangelist(ctx, act.path)
+	record(client.AddPaths(ctx, toAdd))
+
+	var toStage, toUnstage []string
+	for _, act := range acts {
+		switch {
+		case refused[act.path] != nil:
+		case act.stage:
+			toStage = append(toStage, act.path)
+		default:
+			toUnstage = append(toUnstage, act.path)
+		}
+	}
+	record(client.AddToChangelistPaths(ctx, changelist, toStage))
+	record(client.RemoveFromChangelistPaths(ctx, toUnstage))
+
+	var out batchOutcome
+	for _, act := range acts {
+		out.add(act.path, refused[act.path])
+	}
+	return out
 }
 
 // commitCmd commits the staged changelist off the UI goroutine.
@@ -1159,12 +1187,11 @@ func assignChangelistCmd(client *svn.Client, name string, targets []changelistTa
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), batchTimeout(len(targets)))
 		defer cancel()
-		var out batchOutcome
+		acts := make([]stageAction, 0, len(targets))
 		for _, t := range targets {
-			act := stageAction{path: t.path, add: t.add, stage: true}
-			out.add(t.path, applyStage(ctx, client, name, act))
+			acts = append(acts, stageAction{path: t.path, add: t.add, stage: true})
 		}
-		return stagedMsg{outcome: out, changelist: name, token: token}
+		return stagedMsg{outcome: applyStages(ctx, client, name, acts), changelist: name, token: token}
 	}
 }
 

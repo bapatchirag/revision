@@ -2,9 +2,11 @@ package app
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/bapatchirag/revision/internal/svn"
 	"github.com/bapatchirag/revision/internal/tui/theme"
@@ -243,4 +245,33 @@ func renderFileNode(th theme.Theme, pending func(fileNode) int, picked func(file
 		}
 		return indent + statusRow(th, *n.Item, n.Name, picked(n))
 	}
+}
+
+// fileNodeWidth is the display width renderFileNode would produce for n, worked
+// out instead of measured. The tree is re-flattened on every status change and
+// every row is measured to find how far the panel can scroll, while only the
+// rows on screen are drawn — so rendering each one to measure it is the bulk of
+// what a keypress costs on a large working copy.
+//
+// The glyphs the row is built from are all one column wide, which leaves the
+// name the only part that has to be measured rather than counted. This is a
+// second description of renderFileNode's layout and would otherwise drift from
+// it; TestFileNodeWidthMatchesRenderedWidth is what holds the two together.
+func fileNodeWidth(n fileNode, pending int) int {
+	w := 2*n.Depth + ansi.StringWidth(n.Name)
+	switch {
+	case n.Item == nil:
+		w += 3 // pick cell, chevron, space
+		if !strings.HasSuffix(n.Name, "/") {
+			w++ // the slash dirLabel appends
+		}
+		if pending > 0 {
+			w += 2 + len(strconv.Itoa(pending)) // pendingLabel: space, count, ellipsis
+		}
+	case pending > 0:
+		w += 7 // lead space, marker, space, code, space, space, ellipsis
+	default:
+		w += 5 // pick cell, marker, space, code, space
+	}
+	return w
 }
