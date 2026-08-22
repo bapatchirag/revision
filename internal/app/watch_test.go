@@ -529,3 +529,60 @@ func TestLiveRefreshDropsScanningItCannotAfford(t *testing.T) {
 		t.Error("a file already on screen should still be watched after scanning is dropped")
 	}
 }
+
+// TestLiveRefreshWaitsForAStageToLand covers the other way a row waits on svn.
+// A stage moves the row before svn has answered for it, and a status read taken
+// in between reports the change as not yet made — so the poller has to hold off
+// exactly as it does for a revert, or the row it flips back is one the user has
+// already watched move.
+func TestLiveRefreshWaitsForAStageToLand(t *testing.T) {
+	before := svn.StatusItem{Path: "alpha.txt", State: svn.StateModified}
+	m, gen := watching(t, loadItems(t, sizedModel(t), []svn.StatusItem{before}))
+	if m.refreshHeld() {
+		t.Fatal("nothing is in flight yet")
+	}
+
+	m, _ = pressSpace(t, m)
+	token := m.optimisticTok
+	if !m.refreshHeld() {
+		t.Fatal("a stage svn has not answered for must hold the live refresh")
+	}
+	loads := m.gens.status.gen
+
+	// The working copy moves while svn is still working: svn's own database
+	// churns as it runs, so this is the ordinary case rather than a corner one.
+	next, _ := m.Update(saw(gen, "t-0", "f-1"))
+	m = next.(*Model)
+
+	// Let any re-read the poller asked for actually land. Scheduling one is
+	// harmless; applying its reply is what undoes the row.
+	m, reloaded := answerPendingReload(t, m, loads, []svn.StatusItem{before})
+	if reloaded {
+		t.Error("the poller re-read the working copy while the stage was in flight")
+	}
+	if got := itemState(t, m, "alpha.txt"); got.Changelist != stagedChangelist {
+		t.Errorf("the staged row flipped back mid-flight: %+v", got)
+	}
+	if m.optimistic == nil {
+		t.Error("the status a rollback would restore was dropped mid-flight")
+	}
+
+	next, _ = m.Update(stagedMsg{outcome: singleOutcome("alpha.txt", nil), token: token})
+	m = next.(*Model)
+	if m.refreshHeld() {
+		t.Error("a settled stage must let the live refresh resume")
+	}
+}
+
+// answerPendingReload delivers the status svn would report for a re-read the
+// model has asked for since gen, and says whether there was one. A test that
+// only hands the poller a look never finds out what its reply would have done:
+// the command carrying it is returned, not run.
+func answerPendingReload(t *testing.T, m *Model, gen uint64, items []svn.StatusItem) (*Model, bool) {
+	t.Helper()
+	if m.gens.status.gen == gen {
+		return m, false
+	}
+	next, _ := m.Update(statusLoadedMsg{items: items, gen: m.gens.status.gen})
+	return next.(*Model), true
+}
