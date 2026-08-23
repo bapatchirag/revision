@@ -24,6 +24,9 @@ func TestParseStatus(t *testing.T) {
 	want := []StatusItem{
 		{Path: "added.txt", State: StateAdded, PropState: StateNone, Revision: "-1", Changelist: "revision:staged"},
 		{Path: "committed.txt", State: StateModified, PropState: StateNone, Revision: "1"},
+		{Path: "sub/a.txt", State: StateDeleted, PropState: StateNone, Revision: "1", MovedTo: "sub/deep/b.txt"},
+		{Path: "sub/deep/b.txt", State: StateAdded, PropState: StateNone, Copied: true, MovedFrom: "sub/a.txt"},
+		{Path: "sub/deep/d.txt", State: StateAdded, PropState: StateNone, Copied: true},
 		{Path: "untracked.txt", State: StateUnversioned, PropState: StateNone},
 	}
 	if len(items) != len(want) {

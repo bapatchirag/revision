@@ -69,6 +69,22 @@ func diffTargets(path string) []string {
 	return []string{path}
 }
 
+// patchIsHeaderOnly reports whether a unified diff names a file but records no
+// change to it. svn writes the "Index:" block for whatever it was asked about,
+// so the diff of a copy or a move with nothing edited after it is non-empty text
+// that describes nothing — an emptiness a blank-text check does not see.
+// Property changes count as content: they are hunks too, headed "##" rather than
+// "@@". Neither marker can begin a line within a hunk, where every line carries a
+// space, "+" or "-" of its own.
+func patchIsHeaderOnly(diff string) bool {
+	for _, marker := range [...]string{"@@", "##"} {
+		if strings.HasPrefix(diff, marker) || strings.Contains(diff, "\n"+marker) {
+			return false
+		}
+	}
+	return true
+}
+
 // saveRevDiff queues a save of the range diff on screen: whichever part of it
 // the drilled-in tree points at, down to a single file's section. The patch is
 // already in hand and is written as it stands rather than asked of svn a second

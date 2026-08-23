@@ -398,3 +398,90 @@ func TestToggleUntrackedDoesNotPersistConfig(t *testing.T) {
 		t.Error("the keybind wrote config.json; it must not persist the toggle")
 	}
 }
+
+// selectPath parks the Files cursor on a file leaf and returns the command the
+// move asked for, so a test can assert what the selection does or does not load.
+func selectPath(t *testing.T, m *Model, path string) tea.Cmd {
+	t.Helper()
+	for i, n := range m.files.Items() {
+		if n.Item != nil && n.Path == path {
+			m.files.SetIndex(i)
+			return m.diffLoadForSelection()
+		}
+	}
+	t.Fatalf("no file leaf for %q", path)
+	return nil
+}
+
+// TestMovedSourceShowsWhereItWentInsteadOfADeletion covers the half of a move
+// svn reports as deleted. Its diff is the whole file as removed lines whatever
+// else is true of it, which reads as the file being destroyed, so Main names the
+// destination instead — and never spends an svn run fetching the diff it drops.
+func TestMovedSourceShowsWhereItWentInsteadOfADeletion(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "src.txt", State: svn.StateDeleted, MovedTo: "sub/dest.txt"},
+	})
+	if cmd := selectPath(t, m, "src.txt"); cmd != nil {
+		t.Error("the source half's diff is never shown, so it must not be loaded")
+	}
+	main := stripANSI(m.main.View())
+	if !strings.Contains(main, "moved to sub/dest.txt") {
+		t.Errorf("main should name where the file went, got:\n%s", main)
+	}
+	if !strings.Contains(main, "the file moved") {
+		t.Errorf("main should say why it is withholding the deletion diff, got:\n%s", main)
+	}
+	if m.filesShowDiff() {
+		t.Error("filesShowDiff() = true for a row showing no diff; the gutter would pin nothing")
+	}
+}
+
+// TestMovedDestinationKeepsItsDiff is the other half. A move the file was edited
+// after diffs against what was copied, and that delta appears nowhere else — the
+// source half shows nothing of it — so it has to survive.
+func TestMovedDestinationKeepsItsDiff(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "dest.txt", State: svn.StateAdded, Copied: true, MovedFrom: "src.txt"},
+	})
+	if cmd := selectPath(t, m, "dest.txt"); cmd == nil {
+		t.Fatal("the destination half's diff carries the post-move edit, so it must be loaded")
+	}
+	next, _ := m.Update(diffLoadedMsg{path: "dest.txt", diff: "@@ -1 +1,2 @@\n old\n+edited"})
+	m = next.(*Model)
+
+	main := stripANSI(m.main.View())
+	if !strings.Contains(main, "moved from src.txt") {
+		t.Errorf("main should name where the file came from, got:\n%s", main)
+	}
+	if !strings.Contains(main, "+edited") {
+		t.Errorf("main should still show the edit made after the move, got:\n%s", main)
+	}
+	if !m.filesShowDiff() {
+		t.Error("filesShowDiff() = false while a diff is on screen; the gutter would not be pinned")
+	}
+}
+
+// TestPureMoveReadsAsUnchangedRatherThanEmpty covers a move with no edit after
+// it. svn still writes the "Index:" block for the file it was asked about, so
+// the diff is non-empty text carrying no change — which a blank-text check would
+// let through to Main as two meaningless header lines.
+func TestPureMoveReadsAsUnchangedRatherThanEmpty(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "dest.txt", State: svn.StateAdded, Copied: true, MovedFrom: "src.txt"},
+	})
+	selectPath(t, m, "dest.txt")
+	headerOnly := "Index: dest.txt\n===================================================================\n"
+	next, _ := m.Update(diffLoadedMsg{path: "dest.txt", diff: headerOnly})
+	m = next.(*Model)
+
+	main := stripANSI(m.main.View())
+	if !strings.Contains(main, "unchanged from src.txt") {
+		t.Errorf("an unedited move should say the content is unchanged, got:\n%s", main)
+	}
+	if strings.Contains(main, "Index: dest.txt") {
+		t.Errorf("the bare header should not be shown as though it were a diff, got:\n%s", main)
+	}
+	if m.filesShowDiff() {
+		t.Error("filesShowDiff() = true for a header-only patch; the gutter would pin nothing")
+	}
+}

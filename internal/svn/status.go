@@ -23,9 +23,12 @@ type statusXML struct {
 type statusEntryXML struct {
 	Path     string `xml:"path,attr"`
 	WCStatus struct {
-		Item     string `xml:"item,attr"`
-		Props    string `xml:"props,attr"`
-		Revision string `xml:"revision,attr"`
+		Item      string `xml:"item,attr"`
+		Props     string `xml:"props,attr"`
+		Revision  string `xml:"revision,attr"`
+		Copied    string `xml:"copied,attr"`
+		MovedFrom string `xml:"moved-from,attr"`
+		MovedTo   string `xml:"moved-to,attr"`
 	} `xml:"wc-status"`
 }
 
@@ -67,5 +70,10 @@ func statusItemFrom(e statusEntryXML, changelist string) StatusItem {
 		PropState:  mapState(e.WCStatus.Props),
 		Revision:   e.WCStatus.Revision,
 		Changelist: changelist,
+		// svn reports the move attributes from 1.9 on; an older client simply
+		// omits them and every move reads as an unrelated add and delete.
+		Copied:    e.WCStatus.Copied == "true",
+		MovedFrom: e.WCStatus.MovedFrom,
+		MovedTo:   e.WCStatus.MovedTo,
 	}
 }
