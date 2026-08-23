@@ -74,7 +74,8 @@ revision --version
 
 Release notes for each version are on the
 [Releases page](https://github.com/bapatchirag/revision/releases). The Status panel's
-About view links there too — focus the Status panel with <kbd>1</kbd>.
+About view reports the version you are running and links there too — focus the Status
+panel with <kbd>1</kbd>.
 
 ## Pinning a version
 
