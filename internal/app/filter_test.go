@@ -119,6 +119,35 @@ func TestMatchStatusItemStateAndPath(t *testing.T) {
 	}
 }
 
+// TestMatchStatusItemHistorySuffix covers the "+" the rows carry: it narrows a
+// state to the paths scheduled with history, which is what makes a move's
+// destination findable.
+func TestMatchStatusItemHistorySuffix(t *testing.T) {
+	moved := svn.StatusItem{Path: "dest.txt", State: svn.StateAdded, Copied: true, MovedFrom: "src.txt"}
+	plain := svn.StatusItem{Path: "fresh.txt", State: svn.StateAdded}
+
+	for _, q := range []string{"state:A+", "state:a+", "state:+"} {
+		if !matchStatusItem(moved, parseFilter(q, fileFilterKeys)) {
+			t.Errorf("%s should match a file scheduled with history", q)
+		}
+		if matchStatusItem(plain, parseFilter(q, fileFilterKeys)) {
+			t.Errorf("%s should not match a plain add", q)
+		}
+	}
+
+	// The suffix narrows rather than replaces: a code that does not match is
+	// still excluded, history or not.
+	if matchStatusItem(moved, parseFilter("state:M+", fileFilterKeys)) {
+		t.Error("state:M+ should not match an added file")
+	}
+	// Without the suffix the code alone still matches both, as it always did.
+	for _, it := range []svn.StatusItem{moved, plain} {
+		if !matchStatusItem(it, parseFilter("state:A", fileFilterKeys)) {
+			t.Errorf("state:A should still match %s", it.Path)
+		}
+	}
+}
+
 func TestMatchStatusItemChangelistLabels(t *testing.T) {
 	staged := svn.StatusItem{Path: "a.txt", State: svn.StateModified, Changelist: stagedChangelist}
 	if !matchStatusItem(staged, parseFilter("cl:staged", fileFilterKeys)) {

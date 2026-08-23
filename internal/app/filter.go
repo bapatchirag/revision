@@ -105,7 +105,7 @@ func matchStatusItem(it svn.StatusItem, q filterQuery) bool {
 	for k, v := range q.params {
 		switch k {
 		case "state":
-			if !stateMatches(it.State, v) {
+			if !itemStateMatches(it, v) {
 				return false
 			}
 		case "cl", "changelist":
@@ -135,6 +135,18 @@ func stateMatches(st svn.FileState, v string) bool {
 		return true
 	}
 	return containsFold(string(st), v)
+}
+
+// itemStateMatches reads a state filter against a working-copy item, extending
+// stateMatches with the "+" history suffix the rows are drawn with: state:A+
+// picks out the destinations of a copy or a move, and state:+ those of any code.
+// The suffix has no counterpart on the file sections of a revision diff, which
+// carry no record of where their content came from.
+func itemStateMatches(it svn.StatusItem, v string) bool {
+	if code, ok := strings.CutSuffix(v, "+"); ok {
+		return it.Copied && stateMatches(it.State, code)
+	}
+	return stateMatches(it.State, v)
 }
 
 // anyPathContains reports whether any changed path contains v (case-insensitive).
