@@ -154,8 +154,9 @@ func (m *Model) diffLoadForSelection() tea.Cmd {
 }
 
 // diffSelection returns the diff the Files selection calls for, or ok=false when
-// it calls for none: no selection, a file with no textual diff, or a directory
-// row while directory diffs are off.
+// it calls for none: no selection, a file with no textual diff, the source half
+// of a move (whose diff Main does not show, so fetching it would cost an svn run
+// for output nothing reads), or a directory row while directory diffs are off.
 func (m *Model) diffSelection() (diffKey, bool) {
 	if n, _, ok := m.selectedTreeNode(); ok && n.Item == nil {
 		if !m.dirDiff {
@@ -164,7 +165,7 @@ func (m *Model) diffSelection() (diffKey, bool) {
 		return diffKey{path: n.Path, dir: true}, true
 	}
 	it, ok := m.selectedFile()
-	if !ok || !it.State.IsDirty() {
+	if !ok || !it.State.IsDirty() || it.MovedTo != "" {
 		return diffKey{}, false
 	}
 	return diffKey{path: it.Path}, true

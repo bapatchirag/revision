@@ -53,7 +53,7 @@ matching.
 |---|---|---|---|
 | Log | filter | `rev:` (exact revision, with or without the leading `r`), `user:` / `author:`, `path:` (a changed path), `date:` (`YYYY-MM-DD`) | The **full** commit message, not just its first line |
 | Log — [a compared range](/workflows/diffs/#comparing-revisions) | filter | `state:` (what the range did to the file: `A`, `M`, `D`, or part of a state name) | The file path |
-| Files — Changes, Changelists, Diffs, Rejects | filter | `state:` (a status code such as `M`, or part of a state name such as `modified`), `cl:` / `changelist:` | The file path |
+| Files — Changes, Changelists, Diffs, Rejects | filter | `state:` (a status code such as `M`, or part of a state name such as `modified`, optionally suffixed `+` for copy history), `cl:` / `changelist:` | The file path |
 | Main / Status | highlight + jump | — | The visible lines |
 
 Anything that is not a recognised `key:value` pair — including an unknown key — is treated
@@ -66,6 +66,15 @@ state:M app.go
 ```
 
 Modified files whose path contains `app.go`.
+
+```text
+state:A+
+```
+
+Files scheduled with history — the `A+` rows, which are where a copy or a move put its
+content. `state:+` drops the code and takes any of them. Note that this finds the
+destination of a move; its source is a separate `D` row, which Main names when either half
+is highlighted.
 
 ```text
 cl:staged

@@ -22,6 +22,47 @@
    props="none">
 </wc-status>
 </entry>
+<entry
+   path="sub/a.txt">
+<wc-status
+   moved-to="sub/deep/b.txt"
+   item="deleted"
+   revision="1"
+   props="none">
+<commit
+   revision="1">
+<author>alice</author>
+<date>2026-01-01T00:00:00.000000Z</date>
+</commit>
+</wc-status>
+</entry>
+<entry
+   path="sub/deep/b.txt">
+<wc-status
+   moved-from="sub/a.txt"
+   item="added"
+   props="none"
+   copied="true">
+<commit
+   revision="1">
+<author>alice</author>
+<date>2026-01-01T00:00:00.000000Z</date>
+</commit>
+</wc-status>
+</entry>
+<entry
+   path="sub/deep/d.txt">
+<wc-status
+   item="added"
+   props="none"
+   copied="true">
+<commit
+   revision="1">
+<author>alice</author>
+<date>2026-01-01T00:00:00.000000Z</date>
+</commit>
+</wc-status>
+</entry>
 </target>
 <changelist
    name="revision:staged">

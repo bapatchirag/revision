@@ -238,3 +238,26 @@ func TestEnterCollapsesDirectory(t *testing.T) {
 		t.Errorf("the collapsed directory row should remain, got:\n%s", view)
 	}
 }
+
+// TestCopyHistoryMarksTheRow pins svn's own "+" on the rows scheduled with
+// history, and pins that it costs no width: an ordinary row is spaced exactly as
+// it was, so marking one cannot shift the rows around it.
+func TestCopyHistoryMarksTheRow(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "dest.txt", State: svn.StateAdded, Copied: true, MovedFrom: "src.txt"},
+		{Path: "plain.txt", State: svn.StateAdded},
+		{Path: "src.txt", State: svn.StateDeleted, MovedTo: "dest.txt"},
+	})
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "A+dest.txt") {
+		t.Errorf("a copied file should carry svn's + history marker, got:\n%s", view)
+	}
+	if !strings.Contains(view, "A plain.txt") {
+		t.Errorf("a plain add should keep the blank marker cell, got:\n%s", view)
+	}
+	// The delete half has no copy history of its own — svn marks only the
+	// destination — so it stays spaced like any other row.
+	if !strings.Contains(view, "D src.txt") {
+		t.Errorf("a move's source half should keep the blank marker cell, got:\n%s", view)
+	}
+}
