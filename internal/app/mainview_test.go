@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 
+	"github.com/bapatchirag/revision/internal/selfupdate"
 	"github.com/bapatchirag/revision/internal/svn"
 	uimsg "github.com/bapatchirag/revision/internal/tui/msg"
 )
@@ -207,10 +208,37 @@ func TestStatusPanelShowsAbout(t *testing.T) {
 		"revision/releases",
 		"Chirag Bapat",
 		"Press S",
+		// The running version, which no other panel reports. Test models carry an
+		// unstamped build, so it reads as a development one.
+		"Version",
+		"dev",
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("about screen missing %q\n---\n%s", want, view)
 		}
+	}
+}
+
+// TestVersionLabel covers what the about screen reports for each kind of build:
+// a release tag, the git-describe or "dev" string a development build is stamped
+// with, and the empty version a plain `go build` leaves behind.
+func TestVersionLabel(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		build selfupdate.Build
+		want  string
+	}{
+		{"release", selfupdate.Build{Version: "1.4.0", Channel: "release"}, "v1.4.0"},
+		{"release already v-prefixed", selfupdate.Build{Version: "v1.4.0", Channel: "release"}, "v1.4.0"},
+		{"development", selfupdate.Build{Version: "v1.4.0-3-gabc123", Channel: "dev"}, "v1.4.0-3-gabc123"},
+		{"unstamped", selfupdate.Build{}, "dev"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &Model{build: tc.build}
+			if got := m.versionLabel(); got != tc.want {
+				t.Errorf("versionLabel() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
