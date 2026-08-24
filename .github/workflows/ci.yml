@@ -44,6 +44,45 @@ jobs:
       - name: Shellcheck
         run: shellcheck install.sh
 
+  # Known advisories against what this build actually reaches. govulncheck is
+  # call-graph aware, so it only fails on vulnerabilities in code paths the
+  # binary can execute, and it covers the standard library as well as the
+  # module graph. "1.26" resolves to the newest patch, which is where most
+  # standard-library advisories are fixed.
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+          cache: true
+
+      # govulncheck reads the module graph, so an untidy go.mod could keep a
+      # dependency out of the scan entirely. -diff reports drift without writing.
+      - name: Module graph is tidy and verified
+        run: |
+          go mod tidy -diff
+          go mod verify
+
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-input: "1.26"
+          go-package: ./...
+          repo-checkout: false
+
+  # govulncheck only sees the module graph after a dependency has landed in
+  # go.mod. This fails the pull request that introduces one, and unlike
+  # govulncheck it also covers the website's npm tree.
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: moderate
+
   site:
     runs-on: ubuntu-latest
     steps:
