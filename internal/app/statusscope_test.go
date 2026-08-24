@@ -291,16 +291,17 @@ func svnRun(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// TestTargetedReloadLandsOnTheSameStatusAsAFullOne is the claim the whole change
-// rests on, checked against a real svn rather than a stub: what a revert leaves
-// behind, read back over the paths it touched and spliced into the status on
-// screen, must be indistinguishable from re-reading the working copy whole.
+// TestRevertRefreshMatchesAFullStatusRead is the claim both halves of the revert
+// refresh rest on, checked against a real svn rather than a stub. Neither the
+// state settled from svn's own per-path verdict nor the one spliced in from a
+// targeted read may differ from re-reading the working copy whole.
 //
-// The fixture holds every shape a revert leaves behind — a file that comes
-// clean and stops being reported, an add that un-schedules to unversioned, a
-// delete that is restored, and a move whose halves are reverted apart — beside
-// changes the revert never touched, which must survive it.
-func TestTargetedReloadLandsOnTheSameStatusAsAFullOne(t *testing.T) {
+// The fixture holds every shape a revert leaves behind: a file that comes clean,
+// a plain add that un-schedules to untracked, an added directory that collapses
+// to the one row at its head, a copy destination svn takes away with the add, a
+// restored deletion, and a move whose halves are reverted apart — beside changes
+// the revert never touches, which must survive it.
+func TestRevertRefreshMatchesAFullStatusRead(t *testing.T) {
 	for _, bin := range []string{"svn", "svnadmin"} {
 		if _, err := exec.LookPath(bin); err != nil {
 			t.Skipf("%s not found on PATH; skipping integration test", bin)
@@ -320,7 +321,7 @@ func TestTargetedReloadLandsOnTheSameStatusAsAFullOne(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, rel := range []string{"src/edited.txt", "src/moved.txt", "src/gone.txt", "other/kept.txt"} {
+	for _, rel := range []string{"src/edited.txt", "src/moved.txt", "src/gone.txt", "src/origin.txt", "other/kept.txt"} {
 		write(rel, "one\n")
 	}
 	svnRun(t, wc, "svn", "add", "src", "other")
@@ -329,10 +330,16 @@ func TestTargetedReloadLandsOnTheSameStatusAsAFullOne(t *testing.T) {
 
 	write("src/edited.txt", "one\ntwo\n")
 	write("src/fresh.txt", "new\n")
+	write("src/tree/a.txt", "a\n")
+	write("src/tree/b.txt", "b\n")
 	write("other/kept.txt", "one\ntwo\n") // untouched by the revert below
-	svnRun(t, wc, "svn", "add", "src/fresh.txt")
+	svnRun(t, wc, "svn", "add", "src/fresh.txt", "src/tree")
 	svnRun(t, wc, "svn", "delete", "src/gone.txt")
 	svnRun(t, wc, "svn", "move", "src/moved.txt", "src/renamed.txt")
+	svnRun(t, wc, "svn", "copy", "src/origin.txt", "src/copied.txt")
+	// A staged add: the changelist goes with the add, svn keeping one only for a
+	// path it still versions.
+	svnRun(t, wc, "svn", "changelist", "revision:staged", "src/fresh.txt")
 
 	ctx := context.Background()
 	c := svn.New(wc)
@@ -341,12 +348,40 @@ func TestTargetedReloadLandsOnTheSameStatusAsAFullOne(t *testing.T) {
 		t.Fatalf("Status: %v", err)
 	}
 
-	reverted := []string{"src/edited.txt", "src/fresh.txt", "src/gone.txt", "src/renamed.txt"}
-	if res := c.RevertPaths(ctx, reverted); res.Err() != nil {
+	attempted := []string{
+		"src/edited.txt", "src/fresh.txt", "src/gone.txt",
+		"src/renamed.txt", "src/copied.txt",
+		"src/tree", "src/tree/a.txt", "src/tree/b.txt",
+	}
+	res := c.RevertPaths(ctx, attempted)
+	if res.Err() != nil {
 		t.Fatalf("RevertPaths: %v", res.Err())
 	}
 
-	scope := statusScope(reverted, before)
+	want, err := c.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status after revert: %v", err)
+	}
+	same := func(label string, got []svn.StatusItem) {
+		t.Helper()
+		if len(got) != len(want) {
+			t.Fatalf("%s has %d rows, a full read has %d:\n got %+v\nwant %+v",
+				label, len(got), len(want), got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("%s row %d = %+v, want %+v", label, i, got[i], want[i])
+			}
+		}
+	}
+
+	settled, changed := revertedStatus(before, res.Reverted)
+	if !changed {
+		t.Error("a revert that discarded eight paths must have changed the status")
+	}
+	same("settled", settled)
+
+	scope := statusScope(attempted, before)
 	if !scopeCovers(scope, "src/moved.txt") {
 		t.Fatalf("scope %v leaves out the other half of the move", scope)
 	}
@@ -354,19 +389,8 @@ func TestTargetedReloadLandsOnTheSameStatusAsAFullOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StatusPaths: %v", err)
 	}
-	got := spliceStatus(before, scope, fresh)
-
-	want, err := c.Status(ctx)
-	if err != nil {
-		t.Fatalf("Status after revert: %v", err)
-	}
-	if len(got) != len(want) {
-		t.Fatalf("spliced status has %d rows, a full read has %d:\n got %+v\nwant %+v",
-			len(got), len(want), got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("row %d = %+v, want %+v", i, got[i], want[i])
-		}
-	}
+	same("spliced", spliceStatus(before, scope, fresh))
+	// The confirming read must land on the settled state too, or the tree would
+	// flicker between the two.
+	same("settled then spliced", spliceStatus(settled, scope, fresh))
 }

@@ -70,6 +70,7 @@ func (m *Model) mutationEvent(msg tea.Msg) (tea.Cmd, bool) {
 		if m.diffTouchedBy(paths) {
 			m.clearDiff()
 		}
+		m.settleRevert(msg.outcome.done)
 		// Reload either way: a revert acts on each path on its own, so a run that
 		// refused one has still discarded the changes to the rest. Only the paths it
 		// attempted can have moved, so only those are re-read.
