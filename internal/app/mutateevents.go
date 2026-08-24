@@ -63,10 +63,17 @@ func (m *Model) mutationEvent(msg tea.Msg) (tea.Cmd, bool) {
 	case revertedMsg:
 		m.clearPending(msg.token)
 		m.showToast(msg.outcome.toast("revert", "reverted"))
-		m.clearDiff()
+		paths := msg.outcome.paths()
+		// Main is showing changes the revert has just discarded: drop them now
+		// rather than leave a diff of content that is gone. A diff of anything else
+		// still stands, and the reload re-derives it.
+		if m.diffTouchedBy(paths) {
+			m.clearDiff()
+		}
 		// Reload either way: a revert acts on each path on its own, so a run that
-		// refused one has still discarded the changes to the rest.
-		return m.reloadStatus(), true
+		// refused one has still discarded the changes to the rest. Only the paths it
+		// attempted can have moved, so only those are re-read.
+		return m.reloadStatusFor(paths), true
 
 	case deletedMsg:
 		m.clearPending(msg.token)

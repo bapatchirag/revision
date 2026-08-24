@@ -985,3 +985,87 @@ func TestIntegrationAddPathsForgivesAVersionedPath(t *testing.T) {
 		t.Errorf("src/a.txt state = %s, want added", got)
 	}
 }
+
+// TestIntegrationStatusPaths pins what a targeted read is relied on for: it
+// recurses into a named directory, reports nothing outside the paths it was
+// given, and groups changelist members exactly as a full read does.
+func TestIntegrationStatusPaths(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	for _, dir := range []string{"src", "src/deep", "other"} {
+		if err := os.MkdirAll(filepath.Join(wc, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, filepath.Join(wc, "src", "a.txt"), "a\n")
+	writeFile(t, filepath.Join(wc, "src", "deep", "b.txt"), "b\n")
+	writeFile(t, filepath.Join(wc, "other", "c.txt"), "c\n")
+	mustRun(t, wc, "svn", "add", "src", "other")
+	mustRun(t, wc, "svn", "commit", "-m", "initial")
+	mustRun(t, wc, "svn", "update")
+
+	writeFile(t, filepath.Join(wc, "src", "a.txt"), "a2\n")
+	writeFile(t, filepath.Join(wc, "src", "deep", "b.txt"), "b2\n")
+	writeFile(t, filepath.Join(wc, "other", "c.txt"), "c2\n")
+	mustRun(t, wc, "svn", "changelist", "mycl", "src/a.txt")
+
+	items, err := c.StatusPaths(ctx, []string{"src"})
+	if err != nil {
+		t.Fatalf("StatusPaths: %v", err)
+	}
+	got := make(map[string]StatusItem, len(items))
+	for _, it := range items {
+		got[it.Path] = it
+	}
+	if len(got) != 2 {
+		t.Fatalf("StatusPaths(src) reported %d paths, want only the two under src: %v", len(got), got)
+	}
+	if _, ok := got["other/c.txt"]; ok {
+		t.Error("a targeted read must not report a path outside the scope it was given")
+	}
+	if st := got["src/deep/b.txt"].State; st != StateModified {
+		t.Errorf("src/deep/b.txt = %s, want the read to have recursed into it", st)
+	}
+	if cl := got["src/a.txt"].Changelist; cl != "mycl" {
+		t.Errorf("src/a.txt changelist = %q, want mycl", cl)
+	}
+}
+
+// TestIntegrationStatusPathsOnNothingToReport pins the two answers a targeted
+// read gives for a path with no change left: a clean file and one that is no
+// longer there both come back as no entry at all, which is how the caller learns
+// the row is over. A missing path is a warning svn exits zero on, so it must not
+// take the rest of the read down with it.
+func TestIntegrationStatusPathsOnNothingToReport(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	writeFile(t, filepath.Join(wc, "clean.txt"), "x\n")
+	mustRun(t, wc, "svn", "add", "clean.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "initial")
+	mustRun(t, wc, "svn", "update")
+	writeFile(t, filepath.Join(wc, "dirty.txt"), "y\n")
+
+	items, err := c.StatusPaths(ctx, []string{"clean.txt", "gone.txt", "dirty.txt"})
+	if err != nil {
+		t.Fatalf("StatusPaths: %v", err)
+	}
+	if len(items) != 1 || items[0].Path != "dirty.txt" {
+		t.Fatalf("StatusPaths = %v, want only dirty.txt", items)
+	}
+}
+
+// TestStatusPathsRunsNothingForNoPaths pins the guard: `svn status` with no
+// target reads the whole working copy, which is the opposite of what a caller
+// asking for a few paths wants. A stub that fails on any invocation proves none
+// was made.
+func TestStatusPathsRunsNothingForNoPaths(t *testing.T) {
+	c := &Client{Bin: "false"}
+	items, err := c.StatusPaths(context.Background(), nil)
+	if err != nil || items != nil {
+		t.Errorf("StatusPaths(nil) = %v, %v; want no command run", items, err)
+	}
+}
