@@ -93,9 +93,12 @@ func (g *loadGens) stopAll() {
 // real failure and still surfaces.
 func superseded(ctx context.Context) bool { return errors.Is(ctx.Err(), context.Canceled) }
 
-// statusLoadedMsg carries the result of a successful status refresh.
+// statusLoadedMsg carries the result of a successful status refresh. scope, when
+// set, names the paths the read covered, so its entries stand in for that part
+// of the status rather than for all of it.
 type statusLoadedMsg struct {
 	items []svn.StatusItem
+	scope []string
 	gen   uint64
 }
 
@@ -533,6 +536,23 @@ func loadStatusCmd(ctx context.Context, client *svn.Client, gen uint64) tea.Cmd 
 			return errMsg{err}
 		}
 		return statusLoadedMsg{items: items, gen: gen}
+	}
+}
+
+// loadStatusPathsCmd re-reads only the paths in scope, which costs a crawl of
+// those subtrees rather than of the whole working copy. It reports itself the
+// same way a full read does, carrying the scope so its entries are put in place
+// of the ones the status on screen holds for it.
+func loadStatusPathsCmd(ctx context.Context, client *svn.Client, scope []string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		items, err := client.StatusPaths(ctx, scope)
+		if superseded(ctx) {
+			return nil
+		}
+		if err != nil {
+			return errMsg{err}
+		}
+		return statusLoadedMsg{items: items, scope: scope, gen: gen}
 	}
 }
 

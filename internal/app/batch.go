@@ -68,6 +68,18 @@ func (b *batchOutcome) add(path string, err error) bool {
 	return false
 }
 
+// paths names every path the fan-out attempted, whichever way each went. It is
+// what a caller re-reading the working copy needs: a path svn refused can still
+// have moved, since a refusal is per path and says nothing about the file.
+func (b batchOutcome) paths() []string {
+	out := make([]string, 0, len(b.done)+len(b.failed))
+	out = append(out, b.done...)
+	for _, f := range b.failed {
+		out = append(out, f.path)
+	}
+	return out
+}
+
 // singleOutcome is the outcome of an action on one path, so a command acting on
 // a single file reports itself the same way a fan-out does.
 func singleOutcome(path string, err error) batchOutcome {

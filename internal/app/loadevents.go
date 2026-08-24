@@ -22,6 +22,11 @@ func (m *Model) loadEvent(msg tea.Msg) (tea.Cmd, bool) {
 		m.loading = false
 		m.err = nil
 		items, leaked := withoutShelfStore(msg.items)
+		if len(msg.scope) > 0 {
+			// A targeted read carries the truth for its own paths only; the rest of
+			// the status was not looked at and still stands.
+			items = spliceStatus(m.fileItems, msg.scope, items)
+		}
 		m.fileItems = items
 		m.noteShelfStoreVisible(leaked)
 		// The poller watches the paths svn reports, so the rows this reload added are
