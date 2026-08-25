@@ -829,8 +829,14 @@ func TestFilterNarrowsTheDrilledTree(t *testing.T) {
 		t.Errorf("footer = %q, want the hidden files counted", got)
 	}
 
-	// The state the diff reported is filterable too. Spelled out rather than as
-	// "D", which stateMatches also reads as a substring of "added".
+	// The state the diff reported is filterable too, by code or by name.
+	m.setFilter(panelLog, "state:D")
+	if !hasNodePath(m, "src/b.go") {
+		t.Errorf("the deleted file should stay, got %+v", m.revFiles.Items())
+	}
+	if hasNodePath(m, "src/a.go") || hasNodePath(m, "readme.md") {
+		t.Errorf("only the deleted file should stay, got %+v", m.revFiles.Items())
+	}
 	m.setFilter(panelLog, "state:deleted")
 	if !hasNodePath(m, "src/b.go") {
 		t.Errorf("the deleted file should stay, got %+v", m.revFiles.Items())
