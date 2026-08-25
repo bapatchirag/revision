@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -265,6 +266,37 @@ func TestRevertKeepsADiffItDidNotTouch(t *testing.T) {
 	}
 }
 
+// TestDeleteReReadsOnlyWhatItTouched pins the wiring a delete now shares with a
+// revert: the reload it triggers used to crawl the entire working copy and blank
+// Main first, however little was deleted and whatever Main was showing.
+func TestDeleteReReadsOnlyWhatItTouched(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "other/c.go", State: svn.StateModified},
+		{Path: "src/a.go", State: svn.StateUnversioned},
+		{Path: "src/b.go", State: svn.StateModified},
+	})
+	client, calls := recordingClient(t)
+	m.client = client
+	m.applyDiff(diffKey{path: "src/b.go"}, diffEntry{text: "@@ -1 +1 @@\n-old\n+new\n"})
+
+	next, cmd := m.Update(deletedMsg{outcome: singleOutcome("src/a.go", nil)})
+	m = next.(*Model)
+	run(t, cmd)
+
+	got := calls()
+	if len(got) != 1 || !strings.Contains(got[0], "src/a.go") || strings.Contains(got[0], "other/c.go") {
+		t.Errorf("commands = %v, want one read naming only the deleted path", got)
+	}
+	if m.diffPath != "src/b.go" || m.diffText == "" {
+		t.Errorf("diff = %q/%q, want the untouched file's diff still on screen", m.diffPath, m.diffText)
+	}
+
+	next, _ = m.Update(deletedMsg{outcome: singleOutcome("src/b.go", nil)})
+	if m = next.(*Model); m.diffPath != "" || m.diffText != "" {
+		t.Errorf("diff = %q/%q, want the deleted file's diff dropped", m.diffPath, m.diffText)
+	}
+}
+
 // TestDiffTouchedByCoversADirectoryRow pins the other shape Main can be showing:
 // a directory diff spans every change beneath it, so a revert of any one of them
 // discards content it is displaying.
@@ -291,17 +323,11 @@ func svnRun(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// TestRevertRefreshMatchesAFullStatusRead is the claim both halves of the revert
-// refresh rest on, checked against a real svn rather than a stub. Neither the
-// state settled from svn's own per-path verdict nor the one spliced in from a
-// targeted read may differ from re-reading the working copy whole.
-//
-// The fixture holds every shape a revert leaves behind: a file that comes clean,
-// a plain add that un-schedules to untracked, an added directory that collapses
-// to the one row at its head, a copy destination svn takes away with the add, a
-// restored deletion, and a move whose halves are reverted apart — beside changes
-// the revert never touches, which must survive it.
-func TestRevertRefreshMatchesAFullStatusRead(t *testing.T) {
+// scratchWC creates a repository and a working copy checked out from it, holding
+// files at the given paths committed as r1. It returns the working copy and a
+// helper for writing a file in it, and skips the test when svn is not installed.
+func scratchWC(t *testing.T, committed ...string) (string, func(rel, text string)) {
+	t.Helper()
 	for _, bin := range []string{"svn", "svnadmin"} {
 		if _, err := exec.LookPath(bin); err != nil {
 			t.Skipf("%s not found on PATH; skipping integration test", bin)
@@ -321,12 +347,48 @@ func TestRevertRefreshMatchesAFullStatusRead(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, rel := range []string{"src/edited.txt", "src/moved.txt", "src/gone.txt", "src/origin.txt", "other/kept.txt"} {
+	tops := map[string]bool{}
+	for _, rel := range committed {
 		write(rel, "one\n")
+		tops[strings.SplitN(rel, "/", 2)[0]] = true
 	}
-	svnRun(t, wc, "svn", "add", "src", "other")
+	add := make([]string, 0, len(tops))
+	for top := range tops {
+		add = append(add, top)
+	}
+	sort.Strings(add)
+	svnRun(t, wc, append([]string{"svn", "add"}, add...)...)
 	svnRun(t, wc, "svn", "commit", "-m", "initial")
 	svnRun(t, wc, "svn", "update")
+	return wc, write
+}
+
+// sameStatus fails the test when got differs from a full status read.
+func sameStatus(t *testing.T, label string, got, want []svn.StatusItem) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s has %d rows, a full read has %d:\n got %+v\nwant %+v",
+			label, len(got), len(want), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("%s row %d = %+v, want %+v", label, i, got[i], want[i])
+		}
+	}
+}
+
+// TestRevertRefreshMatchesAFullStatusRead is the claim both halves of the revert
+// refresh rest on, checked against a real svn rather than a stub. Neither the
+// state settled from svn's own per-path verdict nor the one spliced in from a
+// targeted read may differ from re-reading the working copy whole.
+//
+// The fixture holds every shape a revert leaves behind: a file that comes clean,
+// a plain add that un-schedules to untracked, an added directory that collapses
+// to the one row at its head, a copy destination svn takes away with the add, a
+// restored deletion, and a move whose halves are reverted apart — beside changes
+// the revert never touches, which must survive it.
+func TestRevertRefreshMatchesAFullStatusRead(t *testing.T) {
+	wc, write := scratchWC(t, "src/edited.txt", "src/moved.txt", "src/gone.txt", "src/origin.txt", "other/kept.txt")
 
 	write("src/edited.txt", "one\ntwo\n")
 	write("src/fresh.txt", "new\n")
@@ -362,24 +424,12 @@ func TestRevertRefreshMatchesAFullStatusRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status after revert: %v", err)
 	}
-	same := func(label string, got []svn.StatusItem) {
-		t.Helper()
-		if len(got) != len(want) {
-			t.Fatalf("%s has %d rows, a full read has %d:\n got %+v\nwant %+v",
-				label, len(got), len(want), got, want)
-		}
-		for i := range want {
-			if got[i] != want[i] {
-				t.Errorf("%s row %d = %+v, want %+v", label, i, got[i], want[i])
-			}
-		}
-	}
 
 	settled, changed := revertedStatus(before, res.Reverted)
 	if !changed {
 		t.Error("a revert that discarded eight paths must have changed the status")
 	}
-	same("settled", settled)
+	sameStatus(t, "settled", settled, want)
 
 	scope := statusScope(attempted, before)
 	if !scopeCovers(scope, "src/moved.txt") {
@@ -389,8 +439,87 @@ func TestRevertRefreshMatchesAFullStatusRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StatusPaths: %v", err)
 	}
-	same("spliced", spliceStatus(before, scope, fresh))
+	sameStatus(t, "spliced", spliceStatus(before, scope, fresh), want)
 	// The confirming read must land on the settled state too, or the tree would
 	// flicker between the two.
-	same("settled then spliced", spliceStatus(settled, scope, fresh))
+	sameStatus(t, "settled then spliced", spliceStatus(settled, scope, fresh), want)
+}
+
+// TestDeleteRefreshMatchesAFullStatusRead is the same claim for the delete
+// refresh, checked against a real svn: neither the state settled from svn's own
+// per-path verdict nor the one spliced in from a targeted read may differ from
+// re-reading the working copy whole.
+//
+// The fixture holds every shape a delete leaves behind: a versioned file that
+// turns deleted and keeps the changelist it was staged into, a property change
+// that goes with the content, a missing file, a plain add and a copy destination
+// svn un-schedules and takes off disk, a directory that collapses to the one row
+// at its head and takes an untracked file with it, a path already scheduled for
+// deletion that a second delete is a silent no-op on, a move whose destination
+// goes and leaves the source unlinked, and an untracked file removed from disk —
+// beside a change the delete never touches, which must survive it.
+func TestDeleteRefreshMatchesAFullStatusRead(t *testing.T) {
+	wc, write := scratchWC(t,
+		"src/edited.txt", "src/props.txt", "src/moved.txt", "src/gone.txt",
+		"src/missing.txt", "src/origin.txt", "dir/a.txt", "dir/b.txt", "other/kept.txt")
+
+	write("src/edited.txt", "one\ntwo\n")
+	write("src/fresh.txt", "new\n")
+	write("src/junk.txt", "junk\n")
+	write("dir/a.txt", "one\ntwo\n") // a row of its own the directory collapses
+	write("dir/loose.txt", "loose\n")
+	write("other/kept.txt", "one\ntwo\n") // untouched by the delete below
+	svnRun(t, wc, "svn", "add", "src/fresh.txt")
+	svnRun(t, wc, "svn", "propset", "ok", "yes", "src/props.txt")
+	svnRun(t, wc, "svn", "propset", "ok", "yes", "dir")
+	svnRun(t, wc, "svn", "delete", "src/gone.txt")
+	svnRun(t, wc, "svn", "move", "src/moved.txt", "src/renamed.txt")
+	svnRun(t, wc, "svn", "copy", "src/origin.txt", "src/copied.txt")
+	if err := os.Remove(filepath.Join(wc, "src/missing.txt")); err != nil {
+		t.Fatal(err)
+	}
+	svnRun(t, wc, "svn", "changelist", "revision:staged", "src/edited.txt", "src/fresh.txt")
+
+	ctx := context.Background()
+	c := svn.New(wc)
+	before, err := c.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+
+	// What a directory row's delete sends: every file under it named, an untracked
+	// one removed from disk and a versioned one scheduled to go.
+	acts := []deleteAction{
+		{path: "dir"}, {path: "dir/a.txt"}, {path: "dir/loose.txt", unversioned: true},
+		{path: "src/copied.txt"}, {path: "src/edited.txt"}, {path: "src/fresh.txt"},
+		{path: "src/gone.txt"}, {path: "src/junk.txt", unversioned: true},
+		{path: "src/missing.txt"}, {path: "src/props.txt"}, {path: "src/renamed.txt"},
+	}
+	out := msgOf[deletedMsg](t, deleteManyCmd(c, acts, 0)).outcome
+	if err := out.err(); err != nil {
+		t.Fatalf("deleteManyCmd: %v", err)
+	}
+
+	want, err := c.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status after delete: %v", err)
+	}
+
+	settled, changed := deletedStatus(before, out.done)
+	if !changed {
+		t.Error("a delete that removed eleven paths must have changed the status")
+	}
+	sameStatus(t, "settled", settled, want)
+
+	attempted := out.paths()
+	scope := statusScope(attempted, before)
+	if !scopeCovers(scope, "src/moved.txt") {
+		t.Fatalf("scope %v leaves out the other half of the move", scope)
+	}
+	fresh, err := c.StatusPaths(ctx, scope)
+	if err != nil {
+		t.Fatalf("StatusPaths: %v", err)
+	}
+	sameStatus(t, "spliced", spliceStatus(before, scope, fresh), want)
+	sameStatus(t, "settled then spliced", spliceStatus(settled, scope, fresh), want)
 }
