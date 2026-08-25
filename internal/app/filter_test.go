@@ -119,6 +119,28 @@ func TestMatchStatusItemStateAndPath(t *testing.T) {
 	}
 }
 
+// A one-letter state is a status code, never a substring of a state name: the
+// letters of "modified" would otherwise answer to state:D, state:I and state:F.
+func TestMatchStatusItemSingleLetterStateIsACode(t *testing.T) {
+	mod := svn.StatusItem{Path: "a.go", State: svn.StateModified}
+	for _, q := range []string{"state:D", "state:d", "state:i", "state:f", "state:e", "state:o"} {
+		if matchStatusItem(mod, parseFilter(q, fileFilterKeys)) {
+			t.Errorf("%s should not match a modified file", q)
+		}
+	}
+	del := svn.StatusItem{Path: "b.go", State: svn.StateDeleted}
+	if !matchStatusItem(del, parseFilter("state:D", fileFilterKeys)) {
+		t.Error("state:D should match a deleted file")
+	}
+	// A longer value still reads as a name, which is what makes state:mod work.
+	if !matchStatusItem(mod, parseFilter("state:mod", fileFilterKeys)) {
+		t.Error("state:mod should still match a modified file by name")
+	}
+	if matchStatusItem(mod, parseFilter("state:del", fileFilterKeys)) {
+		t.Error("state:del should not match a modified file")
+	}
+}
+
 // TestMatchStatusItemHistorySuffix covers the "+" the rows carry: it narrows a
 // state to the paths scheduled with history, which is what makes a move's
 // destination findable.
@@ -140,10 +162,17 @@ func TestMatchStatusItemHistorySuffix(t *testing.T) {
 	if matchStatusItem(moved, parseFilter("state:M+", fileFilterKeys)) {
 		t.Error("state:M+ should not match an added file")
 	}
-	// Without the suffix the code alone still matches both, as it always did.
+	// A bare code means the row as drawn, so the A+ row answers to state:A+ alone.
+	if matchStatusItem(moved, parseFilter("state:A", fileFilterKeys)) {
+		t.Error("state:A should not match a file scheduled with history")
+	}
+	if !matchStatusItem(plain, parseFilter("state:A", fileFilterKeys)) {
+		t.Error("state:A should match a plain add")
+	}
+	// The state name is "added" either way, so it still takes both.
 	for _, it := range []svn.StatusItem{moved, plain} {
-		if !matchStatusItem(it, parseFilter("state:A", fileFilterKeys)) {
-			t.Errorf("state:A should still match %s", it.Path)
+		if !matchStatusItem(it, parseFilter("state:added", fileFilterKeys)) {
+			t.Errorf("state:added should match %s whatever its history", it.Path)
 		}
 	}
 }

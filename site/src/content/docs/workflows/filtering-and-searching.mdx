@@ -53,7 +53,7 @@ matching.
 |---|---|---|---|
 | Log | filter | `rev:` (exact revision, with or without the leading `r`), `user:` / `author:`, `path:` (a changed path), `date:` (`YYYY-MM-DD`) | The **full** commit message, not just its first line |
 | Log — [a compared range](/workflows/diffs/#comparing-revisions) | filter | `state:` (what the range did to the file: `A`, `M`, `D`, or part of a state name) | The file path |
-| Files — Changes, Changelists, Diffs, Rejects | filter | `state:` (a status code such as `M`, or part of a state name such as `modified`, optionally suffixed `+` for copy history), `cl:` / `changelist:` | The file path |
+| Files — Changes, Changelists, Diffs, Rejects | filter | `state:` (a status code such as `M`, exactly as the row draws it, or part of a state name such as `modified`; a code may be suffixed `+` for copy history), `cl:` / `changelist:` | The file path |
 | Main / Status | highlight + jump | — | The visible lines |
 
 Anything that is not a recognised `key:value` pair — including an unknown key — is treated
@@ -75,6 +75,14 @@ Files scheduled with history — the `A+` rows, which are where a copy or a move
 content. `state:+` drops the code and takes any of them. Note that this finds the
 destination of a move; its source is a separate `D` row, which Main names when either half
 is highlighted.
+
+A code matches the row as it is drawn, so `state:A` is the plain adds only and leaves the
+`A+` rows to `state:A+`. A state name covers both, since it is `added` either way:
+`state:added` takes the plain adds and the copies together.
+
+A single letter is always read as a status code, never as part of a state name — `state:D`
+is the deleted rows, not everything with a `d` in its name. Two letters or more read as a
+name, which is what makes `state:mod` work.
 
 ```text
 cl:staged

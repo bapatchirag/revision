@@ -2,6 +2,7 @@ package app
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/bapatchirag/revision/internal/svn"
 )
@@ -126,7 +127,9 @@ func revEquals(rev, v string) bool {
 
 // stateMatches reports whether a file state matches the user-typed value, by its
 // single-letter status code (case-insensitive) or a substring of the state name
-// (so state:M and state:mod both select modified files).
+// (so state:M and state:mod both select modified files). A one-character value is
+// read as a code and nothing else: no state is named with a single letter, and
+// falling back to a substring would have state:D also take in "modified".
 func stateMatches(st svn.FileState, v string) bool {
 	if v == "" {
 		return true
@@ -134,17 +137,25 @@ func stateMatches(st svn.FileState, v string) bool {
 	if strings.EqualFold(st.Code(), v) {
 		return true
 	}
+	if utf8.RuneCountInString(v) == 1 {
+		return false
+	}
 	return containsFold(string(st), v)
 }
 
 // itemStateMatches reads a state filter against a working-copy item, extending
 // stateMatches with the "+" history suffix the rows are drawn with: state:A+
 // picks out the destinations of a copy or a move, and state:+ those of any code.
-// The suffix has no counterpart on the file sections of a revision diff, which
-// carry no record of where their content came from.
+// A bare code means the row as it is drawn, so state:A leaves the A+ rows to
+// state:A+; a state name is the same either way and still takes both. The suffix
+// has no counterpart on the file sections of a revision diff, which carry no
+// record of where their content came from.
 func itemStateMatches(it svn.StatusItem, v string) bool {
 	if code, ok := strings.CutSuffix(v, "+"); ok {
 		return it.Copied && stateMatches(it.State, code)
+	}
+	if it.Copied && strings.EqualFold(it.State.Code(), v) {
+		return false
 	}
 	return stateMatches(it.State, v)
 }
