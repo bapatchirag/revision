@@ -35,6 +35,18 @@ All three must pass before a PR is ready. CI runs the same checks.
 `make lint` needs
 [`golangci-lint`](https://golangci-lint.run/welcome/install/) installed separately.
 
+CI also runs a cross-compile of every release target, `shellcheck` over `install.sh`, a
+build and link check of this website, and three security gates a PR has to be clean of:
+
+| Gate | What it reads |
+|---|---|
+| `govulncheck` over `./...`, after `go mod tidy -diff` and `go mod verify` | Known advisories against code the build can actually reach, standard library included |
+| Dependency review, on pull requests, failing at moderate severity | A vulnerable dependency in the PR that adds it — `go.mod` and the site's npm tree alike |
+| CodeQL with the `security-extended` queries, plus a weekly run | This repository's own code, which the other two never look at |
+
+Only the first can be run locally, with
+[`govulncheck`](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck).
+
 ## Conventions
 
 **Respect the layering.** `internal/tui` may not import `internal/svn` or `internal/app`.

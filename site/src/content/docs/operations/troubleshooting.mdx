@@ -220,9 +220,14 @@ svn status --xml: timed out after 30s
 ```
 
 Every `svn` call runs under a deadline, and `revision` kills the process once it expires.
-Reads — status, log and diff — get 30 seconds, the `svn info` at startup gets 15, and a
-commit, an update or an action over a whole directory gets 60. None of them is
-configurable.
+None of them is configurable:
+
+| Command | Deadline |
+|---|---|
+| Reads — status, log and diff | 30 seconds |
+| The `svn info` at startup | 15 seconds |
+| A commit or an update | 60 seconds |
+| An action over a set of files — add, stage, assign, revert, delete, shelve, restore | 30 seconds, plus 2 more per file, capped at 10 minutes |
 
 Hitting one means `svn` was slow, not that `revision` stalled. A very large working copy, a
 repository reached over a slow link, and a network filesystem are the usual causes. Nothing
@@ -230,17 +235,41 @@ is left half-applied by `revision` itself: the reads change nothing, and a write
 killed leaves the working copy wherever `svn` had got to. Press <KeyCap key="R" /> to see
 where that is.
 
-Two things help:
-
-- **Scope the session smaller.** `svn` is always run from the source directory, so
-  <KeyCap key="P" /> — [change source path](/reference/cli/#--path) — narrows status and
-  diff to one subtree instead of the whole checkout.
-- **Act on fewer files at once.** A directory-wide stage, revert or delete is a single
-  `svn` invocation under a single deadline; the same files one at a time each get their
-  own.
+Acting on more files at once does not bring the deadline closer. An action over a set is
+one `svn` invocation rather than one per file, and its deadline grows with the set — so
+splitting a directory-wide revert into single files buys nothing but more invocations.
+What does help is scoping the session smaller: `svn` is always run from the source
+directory, so <KeyCap key="P" /> — [change source path](/reference/cli/#--path) — narrows
+status and diff to one subtree instead of the whole checkout.
 
 The [Command Log](/guides/panels/#command-log) records the timeout against the command that
 hit it, so you can re-run that command in a shell and time it yourself.
+
+:::note[Timeouts are recoverable]
+A killed `svn` takes its whole process group with it, and its output pipes are closed two
+seconds later whatever is still holding them. That matters over `svn+ssh`, where `svn`
+forks an `ssh` that outlives it: left alone, that child would keep the reply from ever
+arriving, so the panel would sit on its spinner and <KeyCap key="R" /> would only start a
+second read that hung the same way. Refresh genuinely recovers the session.
+:::
+
+## The working copy is locked
+
+```text
+working copy locked — run `svn cleanup`, then retry
+```
+
+`svn` refuses to work in a working copy that still carries a lock from an earlier
+operation. The usual source is an operation that never finished — including one `revision`
+abandoned at its deadline, since an `svn` killed mid-write has no chance to release it.
+
+Run `svn cleanup` in the working copy and press <KeyCap key="R" />. The lock is not
+`revision`'s own bookkeeping and nothing in the app can clear it, so the command has to be
+run in a shell.
+
+An action over several files stops at the first path that fails this way rather than
+trying the rest: the lock is a fact about the working copy, not about the path it happened
+to be reported for, so every other file would be refused too.
 
 ## Where is my config file?
 
