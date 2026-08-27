@@ -1,5 +1,37 @@
 [
   {
+    "tag": "v1.7.1",
+    "name": "v1.7.1",
+    "date": "2026-08-27T14:12:27Z",
+    "url": "https://github.com/bapatchirag/revision/releases/tag/v1.7.1",
+    "prerelease": false,
+    "entries": [
+      "Updated changelog for v1.7.0 (@bapatchirag)",
+      "Revert the whole of an added directory (@bapatchirag)",
+      "Carry on past the file svn will not take (@bapatchirag)",
+      "Measure the optimistic update path (@bapatchirag)",
+      "Group changelists in one pass (@bapatchirag)",
+      "Measure file-tree rows without rendering them (@bapatchirag)",
+      "Stage a set in one svn invocation, not one each (@bapatchirag)",
+      "Hold live refresh while a stage is in flight (@bapatchirag)",
+      "Implement svn add (@bapatchirag)",
+      "Document adding as its own operation, not part of staging (@bapatchirag)",
+      "Finish the Shelf panel's mouse handling (@bapatchirag)",
+      "Give the settings editor its mouse operations (@bapatchirag)",
+      "Document the mouse in the Shelf panel and the settings editor (@bapatchirag)",
+      "Make SVN timeouts recoverable via Refresh (@bapatchirag)",
+      "Show a move as a move, not an unrelated add and delete (@bapatchirag)",
+      "Filter the Files panel by copy history (@bapatchirag)",
+      "Show which version is running on the About screen (@bapatchirag)",
+      "Re-read only what a revert touched, not the whole working copy (@bapatchirag)",
+      "Change the tree on the revert, not on the read that confirms it (@bapatchirag)",
+      "Fail a patch that introduces a known vulnerability (@bapatchirag)",
+      "Change the tree on the delete, not on the read that confirms it (@bapatchirag)",
+      "Read a state filter as the code the row draws (@bapatchirag)",
+      "Update documentation for v1.7.1 (@bapatchirag)"
+    ]
+  },
+  {
     "tag": "v1.7.0",
     "name": "v1.7.0",
     "date": "2026-08-19T16:42:19Z",
