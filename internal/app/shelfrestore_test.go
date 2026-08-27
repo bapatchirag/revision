@@ -145,6 +145,38 @@ func TestRestorePutsUntrackedFilesBack(t *testing.T) {
 	}
 }
 
+// TestRestorePutsUntrackedFilesBackWhenThePatchFails pins that the two halves of
+// an entry are independent: svn refusing the patch says nothing about files it
+// never sees, so the unversioned ones go back regardless. The failure is still
+// reported, and the entry is still kept.
+func TestRestorePutsUntrackedFilesBackWhenThePatchFails(t *testing.T) {
+	src := t.TempDir()
+	payload := wcFile(t, src, "docs/new.md", "brand new\n")
+	wc, store, e := shelvedStore(t, shelf.Entry{Name: "wip"},
+		"Index: a.txt\n--- a.txt\t(revision 1)\n+++ a.txt\t(working copy)\n@@ -1 +1 @@\n+x\n",
+		[]shelf.Payload{{Rel: "docs/new.md", Src: payload}})
+	wcFile(t, wc, "a.txt", "x\n")
+	c, _ := restoreStub(t, wc, "", 1)
+
+	msg := msgOf[shelfRestoredMsg](t, restoreShelfCmd(c, store, e, true))
+
+	if msg.err == nil {
+		t.Fatal("a patch svn refused must still be reported")
+	}
+	if !slices.Equal(msg.restored, []string{"docs/new.md"}) {
+		t.Errorf("restored = %v, want the unversioned file put back all the same", msg.restored)
+	}
+	if _, err := os.Stat(filepath.Join(wc, "docs", "new.md")); err != nil {
+		t.Errorf("docs/new.md was never written — the patch failure blocked it: %v", err)
+	}
+	if msg.dropped {
+		t.Error("a restore that did not come back whole must keep the entry")
+	}
+	if entries, _ := shelf.Scan(store); len(entries) != 1 {
+		t.Errorf("store holds %d entries, want the entry kept", len(entries))
+	}
+}
+
 func TestRestoreWillNotOverwriteAFileInTheWay(t *testing.T) {
 	src := t.TempDir()
 	payload := wcFile(t, src, "docs/new.md", "shelved\n")
@@ -195,6 +227,35 @@ func TestRestoreReplaysChangelistMembership(t *testing.T) {
 	}
 	if len(changelisted) != 1 || !strings.Contains(changelisted[0], "feature-x a.txt") {
 		t.Errorf("changelist calls = %v, want only a.txt put back in feature-x", changelisted)
+	}
+}
+
+// TestRestoreReplaysEveryChangelistPastARefusal pins that a file svn will not
+// assign no longer leaves the files after it out of the changelists they were
+// shelved from.
+func TestRestoreReplaysEveryChangelistPastARefusal(t *testing.T) {
+	wc, store, e := shelvedStore(t, shelf.Entry{
+		Name: "wip",
+		Files: []shelf.FileRec{
+			{Path: "a.txt", State: "modified", Changelist: "feature-x"},
+			{Path: "bad.txt", State: "modified", Changelist: "feature-x"},
+			{Path: "c.txt", State: "modified", Changelist: "feature-x"},
+		},
+	}, "", nil)
+	for _, rel := range []string{"a.txt", "bad.txt", "c.txt"} {
+		wcFile(t, wc, rel, "x\n")
+	}
+	c, calls := pickyClient(t, "bad.txt")
+	c.Dir = wc
+
+	msg := msgOf[shelfRestoredMsg](t, restoreShelfCmd(c, store, e, false))
+
+	if msg.err == nil {
+		t.Fatal("a changelist svn refused must be reported")
+	}
+	argv := strings.Join(calls(), "\n")
+	if !strings.Contains(argv, "feature-x c.txt") {
+		t.Errorf("c.txt was never assigned — the refusal blocked it:\n%s", argv)
 	}
 }
 

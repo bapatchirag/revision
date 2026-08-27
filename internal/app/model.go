@@ -314,9 +314,12 @@ func New(client *svn.Client, info *svn.Info, build selfupdate.Build, cfg config.
 	pending := func(n fileNode) int { return m.pendingCount(n) }
 	picked := func(n fileNode) bool { return m.nodePicked(n) }
 	groupPicked := func(g changelistGroup) int { return m.groupPicked(g) }
+	nodeWidth := func(n fileNode) int { return fileNodeWidth(n, pending(n)) }
 	files := component.NewList[fileNode]("files", renderFileNode(th, pending, picked), th, keys)
+	files.SetWidthFunc(nodeWidth)
 	changelists := component.NewList[changelistGroup](changelistsListID, renderChangelistGroup(th, groupPicked), th, keys)
 	clFiles := component.NewList[fileNode](changelistFilesID, renderFileNode(th, pending, picked), th, keys)
+	clFiles.SetWidthFunc(nodeWidth)
 	savedDiffs := component.NewList[savedDiff](savedDiffsListID, renderSavedDiff(th), th, keys)
 	rejects := component.NewList[rejectNode](rejectsListID, renderRejectNode(th), th, keys)
 	filesViews := component.NewViews(filesViewsID, []component.View{

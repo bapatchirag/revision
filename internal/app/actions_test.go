@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -121,6 +122,30 @@ func TestDirectoryRevertPathsSelectsDirtyFiles(t *testing.T) {
 	}
 	if got["docs/readme.md"] {
 		t.Error("a file outside src/ should be excluded")
+	}
+}
+
+// TestDirectoryRevertPathsIncludesTheDirectoryItself covers an added directory:
+// svn tracks it as a change of its own, but the tree renders it as the directory
+// row rather than a leaf, so it has to come along with its children or the
+// revert strands it.
+func TestDirectoryRevertPathsIncludesTheDirectoryItself(t *testing.T) {
+	items := []svn.StatusItem{
+		{Path: "mpte", State: svn.StateAdded},
+		{Path: "mpte/Makefile", State: svn.StateAdded},
+		{Path: "mpte/rust-crate/src/lib.rs", State: svn.StateAdded},
+		{Path: "mpte-compute/notes.md", State: svn.StateModified},
+	}
+	paths := directoryRevertPaths(fileNode{Name: "mpte", Path: "mpte"}, items)
+
+	want := []string{"mpte", "mpte/Makefile", "mpte/rust-crate/src/lib.rs"}
+	if len(paths) != len(want) {
+		t.Fatalf("paths = %v, want %v", paths, want)
+	}
+	for i := range want {
+		if paths[i] != want[i] {
+			t.Fatalf("paths = %v, want %v (the row's own path first)", paths, want)
+		}
 	}
 }
 
@@ -602,12 +627,55 @@ func TestRevertResultShowsToast(t *testing.T) {
 	m := loadItems(t, sizedModel(t), []svn.StatusItem{
 		{Path: "modified.go", State: svn.StateModified},
 	})
-	next, cmd := m.Update(revertedMsg{path: "modified.go"})
+	next, cmd := m.Update(revertedMsg{outcome: singleOutcome("modified.go", nil)})
 	m = next.(*Model)
 	if cmd == nil {
 		t.Error("a revert should trigger a status reload")
 	}
 	if view := stripANSI(m.View()); !strings.Contains(view, "reverted modified.go") {
 		t.Errorf("expected the revert toast, got:\n%s", view)
+	}
+}
+
+// TestPartialRevertStillReloadsStatus pins what a fan-out failure leaves behind:
+// a revert acts on each path on its own, so a run that refused one has still
+// discarded the changes to the rest. Reporting the failure and stopping there
+// leaves the Files panel showing files that are no longer modified.
+func TestPartialRevertStillReloadsStatus(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "gone.go", State: svn.StateModified},
+		{Path: "stuck.go", State: svn.StateModified},
+	})
+	var out batchOutcome
+	out.ok("gone.go")
+	out.add("stuck.go", errors.New("svn: E155010"))
+
+	next, cmd := m.Update(revertedMsg{outcome: out})
+	m = next.(*Model)
+
+	if cmd == nil {
+		t.Fatal("the paths that did revert have to be re-read, or the panel goes stale")
+	}
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "stuck.go") {
+		t.Errorf("expected the refused path named, got:\n%s", view)
+	}
+	if !strings.Contains(view, "reverted 1 file") {
+		t.Errorf("expected what did land reported too, got:\n%s", view)
+	}
+}
+
+// TestPartialDeleteStillReloadsStatus is the same guarantee for a delete.
+func TestPartialDeleteStillReloadsStatus(t *testing.T) {
+	m := loadItems(t, sizedModel(t), []svn.StatusItem{
+		{Path: "gone.go", State: svn.StateModified},
+		{Path: "stuck.go", State: svn.StateModified},
+	})
+	var out batchOutcome
+	out.ok("gone.go")
+	out.add("stuck.go", errors.New("svn: E155007"))
+
+	if _, cmd := m.Update(deletedMsg{outcome: out}); cmd == nil {
+		t.Fatal("the paths that were deleted have to be re-read, or the panel goes stale")
 	}
 }

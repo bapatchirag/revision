@@ -203,6 +203,19 @@ func (m *Model) submitSettings() tea.Cmd {
 // changes, and submitSettings reads the same position back as the theme.
 const themeFieldIndex = 2
 
+// withThemePreview runs an edit of the settings form and applies the palette
+// live when the edit moved the Theme field, which is what shows each scheme as
+// it is picked. Every way the form is edited goes through here, so the preview
+// cannot be left off one of them.
+func (m *Model) withThemePreview(edit func() tea.Cmd) tea.Cmd {
+	before := m.form.Value(themeFieldIndex)
+	cmd := edit()
+	if after := m.form.Value(themeFieldIndex); after != before {
+		m.previewTheme(after)
+	}
+	return cmd
+}
+
 // hideRulesFieldIndex is the position of the Hide rules field within
 // settingsFields. It is an action field: activating it opens the rules editor,
 // and its value is the summary shown on the row.

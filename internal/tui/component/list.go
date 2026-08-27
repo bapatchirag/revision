@@ -21,6 +21,7 @@ type List[T any] struct {
 	id           string
 	items        []T
 	render       func(T) string
+	widthOf      func(T) int
 	cursor       int
 	offset       int
 	xOffset      int
@@ -137,6 +138,19 @@ func (l *List[T]) ClickRow(row int) tea.Cmd {
 // changes at runtime, so row glyph colors follow a live theme switch.
 func (l *List[T]) SetRender(render func(T) string) {
 	l.render = render
+	l.contentWidth = l.measureContentWidth()
+}
+
+// SetWidthFunc supplies a way to size a row without rendering it. Every row is
+// measured whenever the items change but only the visible window is drawn, so on
+// a long list the measurement is the greater cost by far.
+//
+// widthOf must agree with the render func to the column, styling included: too
+// small a width stops the horizontal scroll short of the longest row, too large
+// scrolls past it. It sizes the row alone — the cursor prefix is the list's own.
+// Left unset, each row is rendered to be measured.
+func (l *List[T]) SetWidthFunc(widthOf func(T) int) {
+	l.widthOf = widthOf
 	l.contentWidth = l.measureContentWidth()
 }
 
@@ -291,9 +305,18 @@ func (l *List[T]) clampXOffset() {
 func (l *List[T]) measureContentWidth() int {
 	m := 0
 	for _, it := range l.items {
-		if w := ansi.StringWidth(l.render(it)) + 2; w > m {
+		if w := l.rowWidth(it) + 2; w > m {
 			m = w
 		}
 	}
 	return m
+}
+
+// rowWidth is the display width of one row on its own, taken from the width func
+// when one was supplied and from the rendered row otherwise.
+func (l *List[T]) rowWidth(it T) int {
+	if l.widthOf != nil {
+		return l.widthOf(it)
+	}
+	return ansi.StringWidth(l.render(it))
 }

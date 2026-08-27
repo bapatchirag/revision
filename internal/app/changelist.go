@@ -51,9 +51,10 @@ func displayCL(name string) string {
 // unstaged group; empty buckets are omitted. This ordering keeps the actionable,
 // addressable changelists at the top of the view.
 func groupChangelists(items []svn.StatusItem) []changelistGroup {
+	containers := containerDirs(items)
 	byName := map[string][]svn.StatusItem{}
 	for _, it := range items {
-		if isContainerDirEntry(it.Path, items) {
+		if _, structural := containers[it.Path]; structural {
 			continue
 		}
 		byName[it.Changelist] = append(byName[it.Changelist], it)
@@ -80,18 +81,35 @@ func groupChangelists(items []svn.StatusItem) []changelistGroup {
 	return groups
 }
 
-// isContainerDirEntry reports whether path is a directory status entry that has
-// descendants in the same status set (path/...). Such entries are structural:
-// they duplicate a directory row already present in the tree and cannot be
+// containerDirs is the set of paths in items that are directory status entries
+// with descendants in the same set (path/...). Such entries are structural: they
+// duplicate a directory row already present in the tree and cannot be
 // changelisted reliably, so changelist views ignore them.
-func isContainerDirEntry(path string, items []svn.StatusItem) bool {
-	prefix := path + "/"
+//
+// It answers for the whole set in one pass rather than per path. A path can only
+// be a container of the ancestors written into the paths beneath it, so walking
+// each path's own separators finds every container there is, where asking one
+// path at a time rescans the set for each.
+func containerDirs(items []svn.StatusItem) map[string]struct{} {
+	have := make(map[string]struct{}, len(items))
 	for _, it := range items {
-		if it.Path != path && strings.HasPrefix(it.Path, prefix) {
-			return true
+		have[it.Path] = struct{}{}
+	}
+	containers := map[string]struct{}{}
+	for _, it := range items {
+		// Every ancestor, not only the parent: "a/b/c.go" makes a container of
+		// "a" as much as of "a/b", and the set need not hold what lies between.
+		for i := 0; i < len(it.Path); i++ {
+			if it.Path[i] != '/' {
+				continue
+			}
+			ancestor := it.Path[:i]
+			if _, ok := have[ancestor]; ok {
+				containers[ancestor] = struct{}{}
+			}
 		}
 	}
-	return false
+	return containers
 }
 
 // renderChangelistGroup is the domain adapter that turns a changelistGroup into
@@ -262,9 +280,10 @@ func isNamedChangelist(cl string) bool {
 // the full (unfiltered) status set, so a drill snapshot stays independent of any
 // Files filter currently narrowing the view.
 func (m *Model) changelistItems(name string) []svn.StatusItem {
+	containers := containerDirs(m.fileItems)
 	var items []svn.StatusItem
 	for _, it := range m.fileItems {
-		if isContainerDirEntry(it.Path, m.fileItems) {
+		if _, structural := containers[it.Path]; structural {
 			continue
 		}
 		if it.Changelist == name {

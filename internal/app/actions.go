@@ -56,8 +56,16 @@ func (m *Model) requestRevertDirectory(n fileNode, items []svn.StatusItem) tea.C
 
 // directoryRevertPaths collects the revertable file paths beneath a directory
 // row: every versioned pending change, matching the single-file revert guard.
+// The row's own status item counts too, since a directory svn tracks as a change
+// of its own (a scheduled add, say) renders as the directory row and has no leaf
+// to select; leaving it out would revert its children and strand it.
 func directoryRevertPaths(n fileNode, items []svn.StatusItem) []string {
 	var paths []string
+	for _, it := range items {
+		if it.Path == n.Path && it.State.IsDirty() {
+			paths = append(paths, it.Path)
+		}
+	}
 	for _, it := range filesUnder(n, items) {
 		if it.State.IsDirty() {
 			paths = append(paths, it.Path)
@@ -124,7 +132,9 @@ func (m *Model) requestDeleteDirectory(n fileNode, items []svn.StatusItem) tea.C
 // directoryDeleteActions builds the delete actions for the files beneath a
 // directory row: each versioned file is scheduled for deletion (svn delete) and
 // each unversioned one is removed from disk, skipping ignored files the same way
-// the single-file delete does.
+// the single-file delete does. It names every file, including any a directory in
+// the set already covers, so the confirmation counts what will go rather than
+// how few commands it takes to shift them.
 func directoryDeleteActions(n fileNode, items []svn.StatusItem) []deleteAction {
 	var acts []deleteAction
 	for _, it := range filesUnder(n, items) {

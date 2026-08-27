@@ -48,6 +48,24 @@ All three must pass before a PR is ready. CI runs the same checks, plus a cross-
 every release target, `shellcheck` over `install.sh`, and a build and link check of the
 website.
 
+Three more run on the security side, and a PR has to be clean of all of them:
+
+- **govulncheck** over `./...`, after `go mod tidy -diff` and `go mod verify`. It is
+  call-graph aware, so it only fails on advisories your build can actually reach — the
+  standard library included. A red run is usually the Go patch line having moved rather
+  than anything in the patch.
+- **Dependency review**, on pull requests only, failing at moderate severity. It catches a
+  vulnerable dependency in the PR that adds it, and covers the website's npm tree as well
+  as `go.mod`.
+- **CodeQL** with the `security-extended` queries, and again weekly on a schedule. The
+  other two read advisories filed against someone else's code; this one reads ours, which
+  matters for a binary that execs `svn`, `ssh-add` and your editor and rewrites itself
+  during a self-update.
+
+You can run the first locally with
+[`govulncheck`](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck); the other two are
+GitHub-side only.
+
 ## Conventions
 
 **Respect the layering.** `internal/tui` may not import `internal/svn` or `internal/app`.

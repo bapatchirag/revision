@@ -4,8 +4,87 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
+
 	"github.com/bapatchirag/revision/internal/svn"
 )
+
+// TestFileNodeWidthMatchesRenderedWidth holds fileNodeWidth to renderFileNode.
+// The two describe one layout and nothing but this test stops them drifting: a
+// width that disagrees with the row does not crash, it mis-sizes the horizontal
+// scroll, which is the kind of fault that reaches a release.
+//
+// It runs under a color profile that emits escape sequences as well as one that
+// emits none, since the arithmetic assumes styling costs no display width.
+func TestFileNodeWidthMatchesRenderedWidth(t *testing.T) {
+	th := sizedModel(t).theme
+
+	type row struct {
+		node    fileNode
+		pending int
+		picked  bool
+	}
+	var rows []row
+	for _, name := range []string{fileTreeRoot, "internal", "a-very-long-directory-name", "ünïcödé", "図書"} {
+		for _, depth := range []int{0, 1, 3} {
+			for _, collapsed := range []bool{false, true} {
+				for _, pending := range []int{0, 1, 9, 42, 1234} {
+					for _, picked := range []bool{false, true} {
+						rows = append(rows, row{
+							node:    fileNode{Path: name, Name: name, Depth: depth, Collapsed: collapsed},
+							pending: pending,
+							picked:  picked,
+						})
+					}
+				}
+			}
+		}
+	}
+	states := []svn.FileState{
+		svn.StateModified, svn.StateAdded, svn.StateDeleted, svn.StateReplaced,
+		svn.StateUnversioned, svn.StateMissing, svn.StateConflicted, svn.StateIgnored,
+		svn.StateExternal, svn.StateObstructed, svn.StateIncomplete, svn.StateMerged,
+		svn.StateNormal, svn.StateUnknown, "",
+	}
+	for _, state := range states {
+		for _, cl := range []string{"", stagedChangelist, "feature"} {
+			for _, name := range []string{"b.go", "ünïcödé.go", "図書.go"} {
+				for _, pending := range []int{0, 1, 7} {
+					for _, picked := range []bool{false, true} {
+						it := svn.StatusItem{Path: "a/" + name, State: state, Changelist: cl}
+						rows = append(rows, row{
+							node:    fileNode{Path: it.Path, Name: name, Depth: 2, Item: &it},
+							pending: pending,
+							picked:  picked,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	for _, profile := range []struct {
+		name string
+		p    termenv.Profile
+	}{{"ascii", termenv.Ascii}, {"truecolor", termenv.TrueColor}} {
+		t.Run(profile.name, func(t *testing.T) {
+			lipgloss.SetColorProfile(profile.p)
+			defer lipgloss.SetColorProfile(termenv.Ascii)
+			for _, r := range rows {
+				render := renderFileNode(th,
+					func(fileNode) int { return r.pending },
+					func(fileNode) bool { return r.picked })
+				want := ansi.StringWidth(render(r.node))
+				if got := fileNodeWidth(r.node, r.pending); got != want {
+					t.Errorf("fileNodeWidth(%s, %d) = %d, rendered width is %d\n%q",
+						nodeTag(r.node), r.pending, got, want, stripANSI(render(r.node)))
+				}
+			}
+		})
+	}
+}
 
 // nodeTag renders a node as "<depth><d|f> <name>" for compact ordering asserts.
 func nodeTag(n fileNode) string {

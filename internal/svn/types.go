@@ -72,12 +72,20 @@ func (s FileState) IsDirty() bool {
 }
 
 // StatusItem is a single entry from `svn status`.
+//
+// A move is reported as two entries, not one: the destination is added with
+// Copied set and MovedFrom naming the source, and the source is deleted with
+// MovedTo naming the destination. Copied alone means a plain `svn copy`, which
+// has a source but no counterpart entry to pair with.
 type StatusItem struct {
 	Path       string    // path relative to the working-copy target
 	State      FileState // wc-status item
 	PropState  FileState // wc-status props
 	Revision   string    // working-copy revision, if reported
 	Changelist string    // changelist name, if the item belongs to one
+	Copied     bool      // scheduled with history, by a copy or a move
+	MovedFrom  string    // where a move brought this path from, target-relative
+	MovedTo    string    // where a move took this path to, target-relative
 }
 
 // Info is the subset of `svn info` we care about for a working copy.

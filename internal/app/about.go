@@ -19,8 +19,22 @@ const revisionLogo = `             _    _
 | '_/ -_) V / (_-< / _ \ ' \
 |_| \___|\_/|_/__/_\___/_||_|`
 
+// versionLabel is the running binary's version as shown on the about screen: the
+// release tag for an official build, and whatever the build was stamped with
+// otherwise. A binary built without those stamps reports itself as development.
+func (m *Model) versionLabel() string {
+	v := strings.TrimSpace(m.build.Version)
+	if v == "" {
+		return "dev"
+	}
+	if m.build.IsRelease() {
+		return "v" + strings.TrimPrefix(v, "v")
+	}
+	return v
+}
+
 // statusDetail renders the Main panel shown while the Status panel is focused:
-// the logo, license, project links, and a pointer to Settings.
+// the logo, running version, license, project links, and a pointer to Settings.
 func (m *Model) statusDetail() string {
 	accent := lipgloss.NewStyle().Foreground(m.theme.Accent).Bold(true)
 	label := lipgloss.NewStyle().Foreground(m.theme.Text).Bold(true)
@@ -32,6 +46,9 @@ func (m *Model) statusDetail() string {
 
 	lines := []string{
 		accent.Render(revisionLogo),
+		"",
+		label.Render("Version"),
+		"  " + accent.Render(m.versionLabel()),
 		"",
 		muted.Render("MIT © Chirag Bapat"),
 		"",

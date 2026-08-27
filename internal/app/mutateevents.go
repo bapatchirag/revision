@@ -14,21 +14,30 @@ import (
 func (m *Model) mutationEvent(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case stagedMsg:
-		if msg.err != nil {
-			m.showToast(failureText("stage", msg.err), component.LevelError)
+		err := msg.outcome.err()
+		if err != nil {
+			m.showToast(msg.outcome.toast("stage", "staged"))
 			if msg.token == 0 {
 				return nil, true
 			}
 			// Put the change back the way it was, then ask svn for the truth: a fan-out
-			// over several files stops at the first failure, so some may have landed.
-			m.settleOptimistic(msg.token, msg.err)
+			// over several files acts on each on its own, so some may have landed.
+			m.settleOptimistic(msg.token, err)
 			return m.reloadStatus(), true
 		}
 		m.settleOptimistic(msg.token, nil)
 		if msg.changelist != "" {
-			m.showToast("added "+msg.path+" to "+msg.changelist, component.LevelSuccess)
+			m.showToast("added "+msg.outcome.label()+" to "+msg.changelist, component.LevelSuccess)
 		}
 		// Reload status so the changelist grouping (and staged marker) refresh.
+		return m.reloadStatus(), true
+
+	case addedMsg:
+		err := msg.outcome.err()
+		m.settleOptimistic(msg.token, err)
+		m.showToast(msg.outcome.toast("add", "added"))
+		// Reload either way: the add acts on each path on its own, so a run that
+		// refused one has still versioned the rest.
 		return m.reloadStatus(), true
 
 	case committedMsg:
@@ -53,23 +62,35 @@ func (m *Model) mutationEvent(msg tea.Msg) (tea.Cmd, bool) {
 
 	case revertedMsg:
 		m.clearPending(msg.token)
-		if msg.err != nil {
-			m.showToast(failureText("revert", msg.err), component.LevelError)
-			return nil, true
+		m.showToast(msg.outcome.toast("revert", "reverted"))
+		paths := msg.outcome.paths()
+		// Main is showing changes the revert has just discarded: drop them now
+		// rather than leave a diff of content that is gone. A diff of anything else
+		// still stands, and the reload re-derives it.
+		if m.diffTouchedBy(paths) {
+			m.clearDiff()
 		}
-		m.showToast("reverted "+msg.path, component.LevelSuccess)
-		m.clearDiff()
-		return m.reloadStatus(), true
+		m.settleRevert(msg.outcome.done)
+		// Reload either way: a revert acts on each path on its own, so a run that
+		// refused one has still discarded the changes to the rest. Only the paths it
+		// attempted can have moved, so only those are re-read.
+		return m.reloadStatusFor(paths), true
 
 	case deletedMsg:
 		m.clearPending(msg.token)
-		if msg.err != nil {
-			m.showToast(failureText("delete", msg.err), component.LevelError)
-			return nil, true
+		m.showToast(msg.outcome.toast("delete", "deleted"))
+		paths := msg.outcome.paths()
+		// Main is showing a file the delete has just taken off disk: drop it now
+		// rather than leave a diff of content that is gone. A diff of anything else
+		// still stands, and the reload re-derives it.
+		if m.diffTouchedBy(paths) {
+			m.clearDiff()
 		}
-		m.showToast("deleted "+msg.path, component.LevelSuccess)
-		m.clearDiff()
-		return m.reloadStatus(), true
+		m.settleDelete(msg.outcome.done)
+		// Reload either way: a delete acts on each path on its own, so a run that
+		// refused one has still removed the rest. Only the paths it attempted can
+		// have moved, so only those are re-read.
+		return m.reloadStatusFor(paths), true
 
 	case updatedMsg:
 		m.updatingWC = false

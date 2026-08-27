@@ -37,6 +37,11 @@ Press <KeyCap key="S" />:
 | <KeyCap key="ctrl+s" /> | Save |
 | <KeyCap key="esc" /> | Cancel |
 
+With [`allowMouse`](#allowmouse) on, clicking a row moves to it and double-clicking one
+changes it: a switch flips, the theme and editor take their next option, and **Hide rules**
+opens its editor. A text field is typed into rather than acted on, so a double click there
+only moves to it.
+
 Cycling the theme applies it live so you can preview each scheme in place;
 <KeyCap key="esc" /> reverts the preview and <KeyCap key="ctrl+s" /> keeps it. Saving
 writes the same `config.json`, and the theme, directory-diff, hide-untracked, hide-rule,
@@ -213,11 +218,14 @@ With `allowMouse` on the panels answer the pointer, and every gesture is a key a
 | Double-click a directory | <KeyCap key="enter" /> — fold or unfold it |
 | Double-click a changelist | <KeyCap key="enter" /> — [drill into it](/workflows/changelists/#drilling-into-a-list) |
 | Double-click a revision | <KeyCap key="space" /> — [update the working copy to it](/workflows/updating/#to-a-specific-revision) |
+| Double-click a shelf | <KeyCap key="enter" /> — [apply it, keeping the entry](/workflows/shelving/#restoring) |
 | Double-click a diff line | <KeyCap key="e" /> — open the file at that line |
+| Double-click a setting | <KeyCap key="space" /> — flip a switch, or take a choice's next option |
 | Wheel | The scroll keys, on the panel under the pointer |
 
 The wheel scrolls sideways with <KeyCap key="shift" /> held and never moves focus. The
-overlays — the side-by-side view, the resolution window, every prompt — stay on the
+settings editor is the one overlay the pointer reaches — its rows are acted on rather than
+read; the rest — the side-by-side view, the resolution window, every prompt — stay on the
 keyboard.
 
 It is off by default because reporting the pointer takes it from the terminal: while it is

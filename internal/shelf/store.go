@@ -2,6 +2,7 @@ package shelf
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -147,8 +148,10 @@ func PatchPath(dir, id string) (string, error) {
 //
 // A payload whose path is already taken is reported rather than written: the
 // file there now is somebody's current work, and no shelf is worth overwriting
-// it unasked. The entry keeps its copy either way, so a blocked payload can
-// still be recovered by hand.
+// it unasked. One that cannot be written is reported the same way, and the rest
+// are still put back — a single unwritable path is not a reason to strand every
+// payload behind it. The entry keeps its copy either way, so a blocked payload
+// can still be recovered by hand.
 func Restore(dir, id, root string) (restored, blocked []string, err error) {
 	e, err := readMeta(filepath.Join(dir, id))
 	if err != nil {
@@ -158,10 +161,12 @@ func Restore(dir, id, root string) (restored, blocked []string, err error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	var failed []error
 	for _, rel := range e.Untracked {
 		clean, err := safeRel(rel)
 		if err != nil {
-			return restored, blocked, err
+			failed = append(failed, err)
+			continue
 		}
 		dst := filepath.Join(root, filepath.FromSlash(clean))
 		if _, err := os.Lstat(dst); err == nil {
@@ -169,11 +174,13 @@ func Restore(dir, id, root string) (restored, blocked []string, err error) {
 			continue
 		}
 		if err := copyFile(filepath.Join(payloads, filepath.FromSlash(clean)), dst); err != nil {
-			return restored, blocked, err
+			blocked = append(blocked, clean)
+			failed = append(failed, err)
+			continue
 		}
 		restored = append(restored, clean)
 	}
-	return restored, blocked, nil
+	return restored, blocked, errors.Join(failed...)
 }
 
 // Drop removes an entry and everything it holds.

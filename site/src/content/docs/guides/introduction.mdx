@@ -30,17 +30,18 @@ your existing SVN configuration. Nothing is cached behind your back, and anythin
 
 **Layout and navigation**
 
-- A left column of Status, Files and Log panels beside a Main detail view, with a Command
-  Log beneath it. Switch panels with the number keys or <kbd>Tab</kbd>, click the Command
-  Log or show it with <kbd>x</kbd>, and scroll any panel on both axes.
+- A left column of Status, Files, Log and Shelf panels beside a Main detail view, with a
+  Command Log beneath it. Switch panels with the number keys or <kbd>Tab</kbd>, click the
+  Command Log or show it with <kbd>x</kbd>, and scroll any panel on both axes.
 - Changed files as a collapsible directory tree, each change grouped under its folder.
 - A contextual hint bar at the bottom, plus a full <kbd>?</kbd> help menu.
-- Optional mouse support: turn it on and the panels can be clicked and scrolled, with
-  every gesture still on a key.
+- Optional mouse support: turn it on and the panels answer the pointer, as does the
+  settings editor, with every gesture still on a key.
 
 <HintBar
 	hints={[
 		{ keys: 'space', label: 'stage' },
+		{ keys: 'a', label: 'add' },
 		{ keys: 'n', label: 'changelist' },
 		{ keys: 'c', label: 'commit' },
 		{ keys: 'r', label: 'revert' },
@@ -74,8 +75,9 @@ your existing SVN configuration. Nothing is cached behind your back, and anythin
   <kbd>v</kbd>, set them aside with <kbd>z</kbd>, and merge them back with <kbd>enter</kbd>
   or <kbd>p</kbd>. Shelves sit in an ignored directory beside the working copy, so there is
   nothing to configure and nothing for `svn` to trip over.
-- Commit through an inline message editor; add, revert and delete with confirmation
-  prompts before anything destructive.
+- [Adding](/workflows/staging-and-commit/#adding-a-file) an untracked file or a whole
+  untracked directory with <kbd>a</kbd>. Commit through an inline message editor; revert
+  and delete confirm first, since those are the destructive ones.
 - [Update](/workflows/updating/) to HEAD, or to any revision picked in the Log panel.
 
 **Finding things**

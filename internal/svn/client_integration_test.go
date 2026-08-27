@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -398,8 +399,8 @@ func TestIntegrationRevert(t *testing.T) {
 	if got := statusByPath(t, c, ctx)["file.txt"].State; got != StateModified {
 		t.Fatalf("file.txt state = %s, want modified", got)
 	}
-	if err := c.Revert(ctx, "file.txt"); err != nil {
-		t.Fatalf("Revert: %v", err)
+	if res := c.RevertPaths(ctx, []string{"file.txt"}); res.Err() != nil {
+		t.Fatalf("RevertPaths: %v", res.Err())
 	}
 	if _, ok := statusByPath(t, c, ctx)["file.txt"]; ok {
 		t.Error("file.txt should be clean after revert (absent from status)")
@@ -410,6 +411,64 @@ func TestIntegrationRevert(t *testing.T) {
 	}
 	if string(data) != "one\n" {
 		t.Errorf("file.txt = %q after revert, want %q", string(data), "one\n")
+	}
+}
+
+// TestIntegrationRevertPathsClearsAnAddedDirectory pins the case that a revert
+// naming one path at a time cannot do. svn refuses to revert a directory
+// scheduled for addition at the default depth (E155038), and once the recursive
+// revert has taken the directory, every path still queued beneath it is gone
+// too: reverting those in turn fails with E155010 more than one level down.
+func TestIntegrationRevertPathsClearsAnAddedDirectory(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	if err := os.MkdirAll(filepath.Join(wc, "mpte", "rust-crate", "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(wc, "mpte", "Makefile"), "all:\n")
+	writeFile(t, filepath.Join(wc, "mpte", "rust-crate", "src", "lib.rs"), "fn main() {}\n")
+	mustRun(t, wc, "svn", "add", "mpte")
+
+	var added []string
+	for p, it := range statusByPath(t, c, ctx) {
+		if it.State == StateAdded {
+			added = append(added, p)
+		}
+	}
+	sort.Strings(added)
+	want := []string{"mpte", "mpte/Makefile", "mpte/rust-crate", "mpte/rust-crate/src", "mpte/rust-crate/src/lib.rs"}
+	if !equalPaths(added, want) {
+		t.Fatalf("added = %v, want %v", added, want)
+	}
+
+	// The whole set in status order is what a directory-level revert in the app
+	// hands over, parent first.
+	res := c.RevertPaths(ctx, added)
+	if res.Err() != nil {
+		t.Fatalf("RevertPaths: %v", res.Err())
+	}
+	// Every path asked for is accounted for, including the ones the recursive
+	// revert of their parent took with it.
+	reverted := append([]string(nil), res.Reverted...)
+	sort.Strings(reverted)
+	if !equalPaths(reverted, want) {
+		t.Errorf("Reverted = %v, want every path asked for: %v", reverted, want)
+	}
+
+	after := statusByPath(t, c, ctx)
+	for p, it := range after {
+		if it.State == StateAdded {
+			t.Errorf("%s is still scheduled for addition after the revert", p)
+		}
+	}
+	if got := after["mpte"].State; got != StateUnversioned {
+		t.Errorf("mpte state = %s after the revert, want unversioned", got)
+	}
+	// The revert un-schedules the add but leaves the tree where it was.
+	if _, err := os.Stat(filepath.Join(wc, "mpte", "rust-crate", "src", "lib.rs")); err != nil {
+		t.Errorf("the added tree should still be on disk after a revert: %v", err)
 	}
 }
 
@@ -710,8 +769,8 @@ func TestIntegrationDiffForPatchingCarriesAMovedFile(t *testing.T) {
 	}
 
 	// The patch has to be able to put the move back with nothing else to go on.
-	if err := c.RevertPaths(ctx, []string{"."}); err != nil {
-		t.Fatalf("RevertPaths: %v", err)
+	if res := c.RevertPaths(ctx, []string{"."}); res.Err() != nil {
+		t.Fatalf("RevertPaths: %v", res.Err())
 	}
 	patch := filepath.Join(t.TempDir(), "move.patch")
 	writeFile(t, patch, full)
@@ -753,6 +812,39 @@ func TestIntegrationDiffLeavesBinaryContentOut(t *testing.T) {
 	}
 }
 
+// TestIntegrationRevertPathsCarriesOnPastARefusal is the failure this whole
+// mechanism exists for, against a real svn: it walks a multi-target revert in
+// order and abandons the process at the first target it refuses, so every target
+// after it is never looked at. Retrying a path at a time is what gets the rest
+// reverted.
+func TestIntegrationRevertPathsCarriesOnPastARefusal(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	writeFile(t, filepath.Join(wc, "tracked.txt"), "committed\n")
+	mustRun(t, wc, "svn", "add", "tracked.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "seed")
+	writeFile(t, filepath.Join(wc, "tracked.txt"), "edited\n")
+
+	// A path outside the working copy is refused outright (E155007), and it is
+	// named first, so the whole invocation dies before reaching tracked.txt.
+	outside := filepath.Join(t.TempDir(), "elsewhere.txt")
+	writeFile(t, outside, "not ours\n")
+
+	res := c.RevertPaths(ctx, []string{outside, "tracked.txt"})
+
+	if got := readString(t, filepath.Join(wc, "tracked.txt")); got != "committed\n" {
+		t.Errorf("tracked.txt = %q, want the committed content back — the earlier refusal blocked it", got)
+	}
+	if !equalPaths(res.Reverted, []string{"tracked.txt"}) {
+		t.Errorf("Reverted = %v, want the path svn did take", res.Reverted)
+	}
+	if len(res.Failed) != 1 || res.Failed[0].Path != outside {
+		t.Errorf("Failed = %v, want only the path svn refused", res.Failed)
+	}
+}
+
 // TestIntegrationRevertPathsLeavesAScheduledAddOnDisk pins the trace a revert
 // leaves: the add is un-scheduled, but the file stays, so a caller clearing a
 // working copy has to remove it itself.
@@ -769,8 +861,8 @@ func TestIntegrationRevertPathsLeavesAScheduledAddOnDisk(t *testing.T) {
 	writeFile(t, filepath.Join(wc, "added.txt"), "brand new\n")
 	mustRun(t, wc, "svn", "add", "added.txt")
 
-	if err := c.RevertPaths(ctx, []string{"."}); err != nil {
-		t.Fatalf("RevertPaths: %v", err)
+	if res := c.RevertPaths(ctx, []string{"."}); res.Err() != nil {
+		t.Fatalf("RevertPaths: %v", res.Err())
 	}
 	if got := readString(t, filepath.Join(wc, "tracked.txt")); got != "committed\n" {
 		t.Errorf("tracked.txt = %q, want the committed content back", got)
@@ -784,5 +876,196 @@ func TestIntegrationRevertPathsLeavesAScheduledAddOnDisk(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Path != "added.txt" || items[0].State != StateUnversioned {
 		t.Errorf("Status = %+v, want added.txt left behind unversioned", items)
+	}
+}
+
+// TestIntegrationBatchedStaging drives the batched wrappers against real svn:
+// the whole set moves in one invocation each, and svn agrees with what the app
+// then shows.
+func TestIntegrationBatchedStaging(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	// A directory of unversioned files, added and staged as a set.
+	if err := os.MkdirAll(filepath.Join(wc, "src", "deep"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{"src/a.txt", "src/b.txt", "src/deep/c.txt"}
+	for _, p := range paths {
+		writeFile(t, filepath.Join(wc, p), "x\n")
+	}
+
+	if errs := c.AddPaths(ctx, []string{"src"}); len(errs) != 0 {
+		t.Fatalf("AddPaths: %v", errs)
+	}
+	if errs := c.AddToChangelistPaths(ctx, "revision:staged", paths); len(errs) != 0 {
+		t.Fatalf("AddToChangelistPaths: %v", errs)
+	}
+	byPath := statusByPath(t, c, ctx)
+	for _, p := range paths {
+		if got := byPath[p].Changelist; got != "revision:staged" {
+			t.Errorf("%s changelist = %q, want revision:staged", p, got)
+		}
+		if got := byPath[p].State; got != StateAdded {
+			t.Errorf("%s state = %s, want added", p, got)
+		}
+	}
+
+	if errs := c.RemoveFromChangelistPaths(ctx, paths); len(errs) != 0 {
+		t.Fatalf("RemoveFromChangelistPaths: %v", errs)
+	}
+	byPath = statusByPath(t, c, ctx)
+	for _, p := range paths {
+		if got := byPath[p].Changelist; got != "" {
+			t.Errorf("%s changelist = %q after remove, want empty", p, got)
+		}
+	}
+
+	// Naming no path runs no command; svn refuses an invocation without one.
+	if errs := c.AddToChangelistPaths(ctx, "revision:staged", nil); len(errs) != 0 {
+		t.Errorf("AddToChangelistPaths(nil) = %v, want no error and no command", errs)
+	}
+	if errs := c.AddPaths(ctx, nil); len(errs) != 0 {
+		t.Errorf("AddPaths(nil) = %v, want no error and no command", errs)
+	}
+}
+
+// TestIntegrationBatchedStagingIsolatesARefusal is the reason the batch falls
+// back to a path at a time. svn walks its targets in order and abandons the run
+// at the first it will not take, so a set holding one bad path would otherwise
+// leave every path after it untouched.
+func TestIntegrationBatchedStagingIsolatesARefusal(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	for _, p := range []string{"a.txt", "b.txt"} {
+		writeFile(t, filepath.Join(wc, p), "x\n")
+	}
+	mustRun(t, wc, "svn", "add", "a.txt", "b.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "seed")
+
+	// "ghost.txt" is in the set but not in the working copy, and sits between
+	// the two real files so it would strand b.txt.
+	errs := c.AddToChangelistPaths(ctx, "revision:staged", []string{"a.txt", "ghost.txt", "b.txt"})
+	if len(errs) != 1 || errs[0].Path != "ghost.txt" {
+		t.Fatalf("errors = %v, want only the path svn could not find", errs)
+	}
+	byPath := statusByPath(t, c, ctx)
+	for _, p := range []string{"a.txt", "b.txt"} {
+		if got := byPath[p].Changelist; got != "revision:staged" {
+			t.Errorf("%s changelist = %q, want it staged despite the bad path beside it", p, got)
+		}
+	}
+}
+
+// TestIntegrationAddPathsForgivesAVersionedPath pins why the add carries
+// --force: a set can name a directory and something under it, and the recursive
+// add reaches the child first. Without it svn refuses the whole invocation, and
+// the retry a path at a time would fail on everything the first pass added.
+func TestIntegrationAddPathsForgivesAVersionedPath(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	if err := os.MkdirAll(filepath.Join(wc, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(wc, "src", "a.txt"), "x\n")
+
+	if errs := c.AddPaths(ctx, []string{"src", "src/a.txt"}); len(errs) != 0 {
+		t.Fatalf("AddPaths over a directory and its child: %v", errs)
+	}
+	// Naming an already-added path again is equally harmless.
+	if errs := c.AddPaths(ctx, []string{"src", "src/a.txt"}); len(errs) != 0 {
+		t.Errorf("AddPaths repeated: %v", errs)
+	}
+	if got := statusByPath(t, c, ctx)["src/a.txt"].State; got != StateAdded {
+		t.Errorf("src/a.txt state = %s, want added", got)
+	}
+}
+
+// TestIntegrationStatusPaths pins what a targeted read is relied on for: it
+// recurses into a named directory, reports nothing outside the paths it was
+// given, and groups changelist members exactly as a full read does.
+func TestIntegrationStatusPaths(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	for _, dir := range []string{"src", "src/deep", "other"} {
+		if err := os.MkdirAll(filepath.Join(wc, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, filepath.Join(wc, "src", "a.txt"), "a\n")
+	writeFile(t, filepath.Join(wc, "src", "deep", "b.txt"), "b\n")
+	writeFile(t, filepath.Join(wc, "other", "c.txt"), "c\n")
+	mustRun(t, wc, "svn", "add", "src", "other")
+	mustRun(t, wc, "svn", "commit", "-m", "initial")
+	mustRun(t, wc, "svn", "update")
+
+	writeFile(t, filepath.Join(wc, "src", "a.txt"), "a2\n")
+	writeFile(t, filepath.Join(wc, "src", "deep", "b.txt"), "b2\n")
+	writeFile(t, filepath.Join(wc, "other", "c.txt"), "c2\n")
+	mustRun(t, wc, "svn", "changelist", "mycl", "src/a.txt")
+
+	items, err := c.StatusPaths(ctx, []string{"src"})
+	if err != nil {
+		t.Fatalf("StatusPaths: %v", err)
+	}
+	got := make(map[string]StatusItem, len(items))
+	for _, it := range items {
+		got[it.Path] = it
+	}
+	if len(got) != 2 {
+		t.Fatalf("StatusPaths(src) reported %d paths, want only the two under src: %v", len(got), got)
+	}
+	if _, ok := got["other/c.txt"]; ok {
+		t.Error("a targeted read must not report a path outside the scope it was given")
+	}
+	if st := got["src/deep/b.txt"].State; st != StateModified {
+		t.Errorf("src/deep/b.txt = %s, want the read to have recursed into it", st)
+	}
+	if cl := got["src/a.txt"].Changelist; cl != "mycl" {
+		t.Errorf("src/a.txt changelist = %q, want mycl", cl)
+	}
+}
+
+// TestIntegrationStatusPathsOnNothingToReport pins the two answers a targeted
+// read gives for a path with no change left: a clean file and one that is no
+// longer there both come back as no entry at all, which is how the caller learns
+// the row is over. A missing path is a warning svn exits zero on, so it must not
+// take the rest of the read down with it.
+func TestIntegrationStatusPathsOnNothingToReport(t *testing.T) {
+	wc := setupWC(t)
+	ctx := context.Background()
+	c := New(wc)
+
+	writeFile(t, filepath.Join(wc, "clean.txt"), "x\n")
+	mustRun(t, wc, "svn", "add", "clean.txt")
+	mustRun(t, wc, "svn", "commit", "-m", "initial")
+	mustRun(t, wc, "svn", "update")
+	writeFile(t, filepath.Join(wc, "dirty.txt"), "y\n")
+
+	items, err := c.StatusPaths(ctx, []string{"clean.txt", "gone.txt", "dirty.txt"})
+	if err != nil {
+		t.Fatalf("StatusPaths: %v", err)
+	}
+	if len(items) != 1 || items[0].Path != "dirty.txt" {
+		t.Fatalf("StatusPaths = %v, want only dirty.txt", items)
+	}
+}
+
+// TestStatusPathsRunsNothingForNoPaths pins the guard: `svn status` with no
+// target reads the whole working copy, which is the opposite of what a caller
+// asking for a few paths wants. A stub that fails on any invocation proves none
+// was made.
+func TestStatusPathsRunsNothingForNoPaths(t *testing.T) {
+	c := &Client{Bin: "false"}
+	items, err := c.StatusPaths(context.Background(), nil)
+	if err != nil || items != nil {
+		t.Errorf("StatusPaths(nil) = %v, %v; want no command run", items, err)
 	}
 }

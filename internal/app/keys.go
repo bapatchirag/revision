@@ -107,12 +107,7 @@ func (m *Model) routeKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		// The settings editor live-previews the palette while its Theme field
 		// changes, so scrolling that field re-themes the UI immediately. The
 		// choice is only persisted on ctrl+s; esc reverts it via closeSettings.
-		before := m.form.Value(themeFieldIndex)
-		cmd := m.form.Update(msg)
-		if after := m.form.Value(themeFieldIndex); after != before {
-			m.previewTheme(after)
-		}
-		return cmd, true
+		return m.withThemePreview(func() tea.Cmd { return m.form.Update(msg) }), true
 	}
 	if m.confirming {
 		return m.modal.Update(msg), true
@@ -289,6 +284,13 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		// the Rejects view; nowhere else has anything to resolve.
 		if m.focus.Index() == panelFiles {
 			return m.openMerge(), true
+		}
+		return nil, false
+	case "a":
+		// Adding acts on untracked working-copy paths, which only the Files panel
+		// shows.
+		if m.focus.Index() == panelFiles {
+			return m.addSelected(), true
 		}
 		return nil, false
 	case "r":

@@ -94,6 +94,14 @@ one shows its patch in Main. <KeyCap key="/" /> filters the list by name.
 | <KeyCap key="d" /> | Drop the entry |
 | <KeyCap key="n" /> | Rename the entry |
 
+With [`allowMouse`](/reference/configuration/#allowmouse) on, clicking a row selects it and
+double-clicking one applies it — the prompt <KeyCap key="enter" /> opens, never the pop, so
+a mis-aimed click costs a revert rather than the only copy of the change set.
+
+An entry's patch is read rather than worked in: <KeyCap key="e" /> opens nothing from it,
+and neither does double-clicking one of its lines. It describes the files as they were when
+they were set aside, not as the working copy holds them now.
+
 ## Restoring
 
 Both <KeyCap key="enter" /> and <KeyCap key="p" /> ask first, and put the entry's patch

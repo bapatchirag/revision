@@ -39,7 +39,22 @@ func statusRow(th theme.Theme, it svn.StatusItem, label string, picked bool) str
 	default:
 		mark = lipgloss.NewStyle().Foreground(th.Info).Bold(true).Render("●")
 	}
-	return pickCell(th, picked) + mark + " " + code + " " + label
+	history := historyMark(it)
+	if history != " " {
+		history = lipgloss.NewStyle().Foreground(th.Info).Bold(true).Render(history)
+	}
+	return pickCell(th, picked) + mark + " " + code + history + label
+}
+
+// historyMark is the cell between the status code and the label, following svn's
+// own status output: "+" where a path was scheduled with history, by a copy or a
+// move, and blank otherwise. It takes the space that separated the two rather
+// than a column of its own, so marking a row shifts nothing beside it.
+func historyMark(it svn.StatusItem) string {
+	if it.Copied {
+		return "+"
+	}
+	return " "
 }
 
 // pendingStatusRow renders a file row whose action svn has been asked for but
@@ -52,7 +67,7 @@ func pendingStatusRow(th theme.Theme, it svn.StatusItem, label string) string {
 	}
 	return " " + lipgloss.NewStyle().
 		Foreground(th.Muted).
-		Render(mark+" "+it.State.Code()+" "+label+" "+pendingMarker)
+		Render(mark+" "+it.State.Code()+historyMark(it)+label+" "+pendingMarker)
 }
 
 // stateColor maps an SVN working-copy state onto a theme color.

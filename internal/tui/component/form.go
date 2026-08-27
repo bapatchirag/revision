@@ -191,23 +191,55 @@ func (f *Form) editActive(km tea.KeyMsg) tea.Cmd {
 	case FieldBool:
 		switch km.Type {
 		case tea.KeySpace, tea.KeyLeft, tea.KeyRight, tea.KeyEnter:
-			f.toggleBool(fld)
+			return f.Activate()
 		}
 	case FieldChoice:
 		switch km.Type {
 		case tea.KeyLeft:
 			f.cycleChoice(fld, -1)
 		case tea.KeyRight, tea.KeySpace, tea.KeyEnter:
-			f.cycleChoice(fld, 1)
+			return f.Activate()
 		}
 	case FieldAction:
 		switch km.Type {
 		case tea.KeySpace, tea.KeyEnter:
-			id, idx := f.id, f.cursor
-			return func() tea.Msg { return msg.ActivatedMsg{ID: id, Index: idx} }
+			return f.Activate()
 		}
 	default: // FieldText, FieldInt
 		f.editText(fld, km)
+	}
+	return nil
+}
+
+// ClickField moves the active-field cursor to the field drawn on row (0 being
+// the first row inside the box's border) and reports whether a field was there
+// at all: the blank and the key hint below the last one carry none.
+func (f *Form) ClickField(row int) bool {
+	if row < 0 || row >= len(f.fields) {
+		return false
+	}
+	f.cursor = row
+	f.col = f.valueLen(row)
+	return true
+}
+
+// Activate is what the active field does when it is acted on rather than typed
+// into — what space means on it: a bool flips, a choice takes its next option,
+// and an action row reports itself activated. A text or integer field is written
+// a rune at a time and has nothing to act on, so it answers nothing.
+func (f *Form) Activate() tea.Cmd {
+	if len(f.fields) == 0 {
+		return nil
+	}
+	fld := &f.fields[f.cursor]
+	switch fld.Kind {
+	case FieldBool:
+		f.toggleBool(fld)
+	case FieldChoice:
+		f.cycleChoice(fld, 1)
+	case FieldAction:
+		id, idx := f.id, f.cursor
+		return func() tea.Msg { return msg.ActivatedMsg{ID: id, Index: idx} }
 	}
 	return nil
 }

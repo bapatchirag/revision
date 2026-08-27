@@ -42,6 +42,53 @@ func cmdClientIn(t *testing.T, dir, out string, code int) *svn.Client {
 	return &svn.Client{Dir: dir, Bin: bin}
 }
 
+// pickyClient returns a client whose svn stub records every invocation and
+// refuses any that names one of bad, together with a reader for what it was
+// asked to run. It is what a fan-out is checked against: that the files after
+// the one svn would not take were still attempted.
+//
+// It expands --targets the way svn does, reading the paths out of the file it
+// names, so a batched invocation is judged on the paths it actually carries
+// rather than on the temporary file it carries them in.
+func pickyClient(t *testing.T, bad ...string) (*svn.Client, func() []string) {
+	t.Helper()
+	dir := t.TempDir()
+	argv := filepath.Join(t.TempDir(), "argv.txt")
+	bin := filepath.Join(t.TempDir(), "svn-stub")
+	// An empty set has to match nothing, and an empty case pattern is a syntax
+	// error, so it falls back to a path no test uses.
+	pattern := "\x00none\x00"
+	if len(bad) > 0 {
+		pattern = strings.Join(bad, "|")
+	}
+	script := fmt.Sprintf(`#!/bin/sh
+echo "$@" >> %s
+named=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--targets" ]; then named="$named $(cat "$a")"; fi
+  prev="$a"
+done
+for a in "$@" $named; do
+  case "$a" in
+  %s) echo "svn: E155007: '$a'" >&2; exit 1 ;;
+  esac
+done
+exit 0
+`, argv, pattern)
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub binary: %v", err)
+	}
+	calls := func() []string {
+		b, err := os.ReadFile(argv)
+		if err != nil {
+			return nil
+		}
+		return strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
+	}
+	return &svn.Client{Dir: dir, Bin: bin}, calls
+}
+
 // run executes a command's closure, failing when the command is nil.
 func run(t *testing.T, cmd tea.Cmd) tea.Msg {
 	t.Helper()
@@ -84,14 +131,18 @@ func TestSuperseded(t *testing.T) {
 	}
 }
 
-func TestAssignedLabel(t *testing.T) {
-	one := []changelistTarget{{path: "a.txt"}}
-	if got := assignedLabel(one); got != "a.txt" {
-		t.Errorf("assignedLabel(1) = %q, want the sole path", got)
+func TestBatchOutcomeLabel(t *testing.T) {
+	var one batchOutcome
+	one.ok("a.txt")
+	if got := one.label(); got != "a.txt" {
+		t.Errorf("label(1) = %q, want the sole path", got)
 	}
-	many := []changelistTarget{{path: "a.txt"}, {path: "b.txt"}, {path: "c.txt"}}
-	if got := assignedLabel(many); got != "3 files" {
-		t.Errorf("assignedLabel(3) = %q, want a count", got)
+	var many batchOutcome
+	for _, p := range []string{"a.txt", "b.txt", "c.txt"} {
+		many.ok(p)
+	}
+	if got := many.label(); got != "3 files" {
+		t.Errorf("label(3) = %q, want a count", got)
 	}
 }
 
@@ -550,23 +601,75 @@ func TestStageCmd(t *testing.T) {
 	ok := cmdClient(t, "", 0)
 
 	staged := msgOf[stagedMsg](t, stageCmd(ok, "revision:staged", stageAction{path: "a.txt", stage: true}, 11))
-	if staged.err != nil || !staged.staged || staged.token != 11 || staged.path != "a.txt" {
+	if staged.outcome.err() != nil || staged.token != 11 || staged.outcome.label() != "a.txt" {
 		t.Errorf("msg = %+v, want a clean stage", staged)
 	}
 
 	unstaged := msgOf[stagedMsg](t, stageCmd(ok, "revision:staged", stageAction{path: "a.txt"}, 12))
-	if unstaged.err != nil || unstaged.staged {
+	if unstaged.outcome.err() != nil {
 		t.Errorf("msg = %+v, want a clean unstage", unstaged)
 	}
 
 	added := msgOf[stagedMsg](t, stageCmd(ok, "revision:staged", stageAction{path: "new.txt", add: true, stage: true}, 13))
-	if added.err != nil {
-		t.Errorf("staging an untracked file should svn add it first: %v", added.err)
+	if added.outcome.err() != nil {
+		t.Errorf("staging an untracked file should svn add it first: %v", added.outcome.err())
 	}
 
 	failed := msgOf[stagedMsg](t, stageCmd(cmdClient(t, "", 1), "revision:staged", stageAction{path: "new.txt", add: true, stage: true}, 14))
-	if failed.err == nil || failed.token != 14 {
+	if failed.outcome.err() == nil || failed.token != 14 {
 		t.Errorf("msg = %+v, want the failure carrying its token so the optimistic change can be undone", failed)
+	}
+}
+
+// TestAddManyCmdBatchesAndCarriesOnPastARefusal pins both halves of the add
+// fan-out: the whole set goes in one invocation, and a path svn will not take
+// is reported without stranding the paths listed after it.
+func TestAddManyCmdBatchesAndCarriesOnPastARefusal(t *testing.T) {
+	client, calls := pickyClient(t, "bad.txt")
+
+	got := msgOf[addedMsg](t, addManyCmd(client, []string{"a.txt", "bad.txt", "c.txt"}, 31))
+	if got.token != 31 {
+		t.Errorf("token = %d, want it carried back so the optimistic change can be settled", got.token)
+	}
+	if len(got.outcome.failed) != 1 || got.outcome.failed[0].path != "bad.txt" {
+		t.Errorf("failed = %+v, want only the path svn refused", got.outcome.failed)
+	}
+	if len(got.outcome.done) != 2 {
+		t.Errorf("done = %q, want the other two versioned regardless", got.outcome.done)
+	}
+	ran := calls()
+	if len(ran) == 0 || !strings.HasPrefix(ran[0], "add --force ") {
+		t.Fatalf("first invocation = %q, want a single forced add over the set", ran)
+	}
+	if !strings.Contains(ran[0], "--targets ") {
+		t.Errorf("invocation %q names its paths inline, want them in a targets file", ran[0])
+	}
+	if !strings.Contains(strings.Join(ran, "\n"), "c.txt") {
+		t.Errorf("svn was never asked about c.txt — the refusal blocked it:\n%s", strings.Join(ran, "\n"))
+	}
+}
+
+// TestAddManyCmdRunsNothingForAnEmptySet locks the early return: svn refuses an
+// invocation naming no path.
+func TestAddManyCmdRunsNothingForAnEmptySet(t *testing.T) {
+	client, calls := pickyClient(t)
+	got := msgOf[addedMsg](t, addManyCmd(client, nil, 32))
+	if got.outcome.err() != nil || len(got.outcome.done) != 0 {
+		t.Errorf("outcome = %+v, want nothing done and nothing refused", got.outcome)
+	}
+	if ran := calls(); len(ran) != 0 {
+		t.Errorf("svn ran %d times for an empty set:\n%s", len(ran), strings.Join(ran, "\n"))
+	}
+}
+
+// TestAddManyCmdKeepsASinglePathReadable pins that adding one file still names
+// it on the command line, so the command log shows the file rather than a
+// temporary targets path.
+func TestAddManyCmdKeepsASinglePathReadable(t *testing.T) {
+	client, calls := pickyClient(t)
+	msgOf[addedMsg](t, addManyCmd(client, []string{"a.txt"}, 33))
+	if ran := calls(); len(ran) != 1 || ran[0] != "add --force a.txt --non-interactive" {
+		t.Errorf("ran %q, want one invocation naming the file itself", ran)
 	}
 }
 
@@ -578,20 +681,119 @@ func TestStageManyCmd(t *testing.T) {
 	}
 
 	got := msgOf[stagedMsg](t, stageManyCmd(cmdClient(t, "", 0), "revision:staged", acts, 21))
-	if got.err != nil || !got.staged || got.token != 21 || got.path != "" {
-		t.Errorf("msg = %+v, want a single unnamed success", got)
+	if got.outcome.err() != nil || got.token != 21 || len(got.outcome.done) != 3 {
+		t.Errorf("msg = %+v, want every file staged", got)
+	}
+}
+
+// TestStageManyCmdCarriesOnPastARefusal pins that one file svn will not stage no
+// longer strands the files listed after it: the run reports what it could not do
+// and the rest are staged all the same.
+func TestStageManyCmdCarriesOnPastARefusal(t *testing.T) {
+	client, calls := pickyClient(t, "b.txt")
+	acts := []stageAction{{path: "a.txt", stage: true}, {path: "b.txt", stage: true}, {path: "c.txt", stage: true}}
+
+	got := msgOf[stagedMsg](t, stageManyCmd(client, "revision:staged", acts, 22))
+	if got.outcome.err() == nil {
+		t.Fatal("a file svn refused has to be reported")
+	}
+	if len(got.outcome.failed) != 1 || got.outcome.failed[0].path != "b.txt" {
+		t.Errorf("failed = %+v, want only the file svn refused", got.outcome.failed)
+	}
+	if len(got.outcome.done) != 2 {
+		t.Errorf("done = %q, want the other two staged regardless", got.outcome.done)
+	}
+	argv := strings.Join(calls(), "\n")
+	if !strings.Contains(argv, "c.txt") {
+		t.Errorf("svn was never asked about c.txt — the refusal blocked it:\n%s", argv)
+	}
+}
+
+// TestStageManyCmdBatchesTheInvocations pins the shape of what runs: a mixed set
+// costs three invocations rather than one or two per file, with the add ahead of
+// the changelist assignment, since svn will not changelist a file it does not
+// yet track.
+func TestStageManyCmdBatchesTheInvocations(t *testing.T) {
+	client, calls := pickyClient(t)
+	acts := []stageAction{
+		{path: "new1.txt", add: true, stage: true},
+		{path: "mod1.txt", stage: true},
+		{path: "new2.txt", add: true, stage: true},
+		{path: "off1.txt"},
+		{path: "mod2.txt", stage: true},
+		{path: "off2.txt"},
 	}
 
-	// The first svn add fails, so the run stops on the file that failed.
-	failedAdd := msgOf[stagedMsg](t, stageManyCmd(cmdClient(t, "", 1), "revision:staged", acts, 22))
-	if failedAdd.err == nil || failedAdd.path != "a.txt" {
-		t.Errorf("msg = %+v, want the failure to name the file it stopped on", failedAdd)
+	got := msgOf[stagedMsg](t, stageManyCmd(client, "revision:staged", acts, 51))
+	if got.outcome.err() != nil || len(got.outcome.done) != len(acts) {
+		t.Fatalf("outcome = %+v, want every action landed", got.outcome)
+	}
+	ran := calls()
+	if len(ran) != 3 {
+		t.Fatalf("svn ran %d times, want one invocation per kind:\n%s", len(ran), strings.Join(ran, "\n"))
+	}
+	if !strings.HasPrefix(ran[0], "add --force ") {
+		t.Errorf("first invocation = %q, want the add ahead of the rest", ran[0])
+	}
+	if !strings.HasPrefix(ran[1], "changelist revision:staged ") {
+		t.Errorf("second invocation = %q, want the changelist assignment", ran[1])
+	}
+	if !strings.HasPrefix(ran[2], "changelist --remove ") {
+		t.Errorf("third invocation = %q, want the changelist removal", ran[2])
+	}
+	for _, call := range ran {
+		if !strings.Contains(call, "--targets ") {
+			t.Errorf("invocation %q names its paths inline, want them in a targets file", call)
+		}
+	}
+}
+
+// TestStageManyCmdRunsNothingForAnEmptySet locks the early return: svn refuses an
+// invocation naming no path, so a kind with nothing in it must not be run at all.
+func TestStageManyCmdRunsNothingForAnEmptySet(t *testing.T) {
+	client, calls := pickyClient(t)
+	got := msgOf[stagedMsg](t, stageManyCmd(client, "revision:staged", nil, 52))
+	if got.outcome.err() != nil || len(got.outcome.done) != 0 {
+		t.Errorf("outcome = %+v, want nothing done and nothing refused", got.outcome)
+	}
+	if ran := calls(); len(ran) != 0 {
+		t.Errorf("svn ran %d times for an empty set:\n%s", len(ran), strings.Join(ran, "\n"))
+	}
+}
+
+// TestStageManyCmdKeepsASinglePathReadable pins that staging one file still
+// names it on the command line: it is the common case, and a targets file would
+// leave the command log showing a temporary path instead of the file staged.
+func TestStageManyCmdKeepsASinglePathReadable(t *testing.T) {
+	client, calls := pickyClient(t)
+	msgOf[stagedMsg](t, stageManyCmd(client, "revision:staged", []stageAction{{path: "a.txt", stage: true}}, 53))
+	ran := calls()
+	if len(ran) != 1 || ran[0] != "changelist revision:staged a.txt --non-interactive" {
+		t.Errorf("ran %q, want one invocation naming the file itself", ran)
+	}
+}
+
+// TestStageManyCmdSkipsTheChangelistWhenTheAddIsRefused pins the ordering
+// dependency: a file svn would not add is not then asked to join a changelist,
+// which it is not yet tracked well enough to do.
+func TestStageManyCmdSkipsTheChangelistWhenTheAddIsRefused(t *testing.T) {
+	client, calls := pickyClient(t, "bad.txt")
+	acts := []stageAction{
+		{path: "bad.txt", add: true, stage: true},
+		{path: "good.txt", add: true, stage: true},
 	}
 
-	// With nothing to add, the changelist call is what fails instead.
-	failedList := msgOf[stagedMsg](t, stageManyCmd(cmdClient(t, "", 1), "revision:staged", acts[1:], 23))
-	if failedList.err == nil || failedList.path != "b.txt" {
-		t.Errorf("msg = %+v, want the changelist failure named", failedList)
+	got := msgOf[stagedMsg](t, stageManyCmd(client, "revision:staged", acts, 54))
+	if len(got.outcome.failed) != 1 || got.outcome.failed[0].path != "bad.txt" {
+		t.Errorf("failed = %+v, want only the file svn would not add", got.outcome.failed)
+	}
+	if len(got.outcome.done) != 1 || got.outcome.done[0] != "good.txt" {
+		t.Errorf("done = %q, want the other file added and staged", got.outcome.done)
+	}
+	for _, call := range calls() {
+		if strings.HasPrefix(call, "changelist ") && strings.Contains(call, "bad.txt") {
+			t.Errorf("a file that could not be added was still changelisted: %q", call)
+		}
 	}
 }
 
@@ -611,48 +813,79 @@ func TestAssignChangelistCmd(t *testing.T) {
 	targets := []changelistTarget{{path: "a.txt", add: true}, {path: "b.txt"}}
 
 	got := msgOf[stagedMsg](t, assignChangelistCmd(cmdClient(t, "", 0), "feature", targets, 41))
-	if got.err != nil || got.changelist != "feature" || got.path != "2 files" {
+	if got.outcome.err() != nil || got.changelist != "feature" || got.outcome.label() != "2 files" {
 		t.Errorf("msg = %+v, want a two-file assignment", got)
 	}
 
 	one := msgOf[stagedMsg](t, assignChangelistCmd(cmdClient(t, "", 0), "feature", targets[1:], 42))
-	if one.err != nil || one.path != "b.txt" {
+	if one.outcome.err() != nil || one.outcome.label() != "b.txt" {
 		t.Errorf("msg = %+v, want the sole path named", one)
 	}
 
-	failedAdd := msgOf[stagedMsg](t, assignChangelistCmd(cmdClient(t, "", 1), "feature", targets, 43))
-	if failedAdd.err == nil || failedAdd.path != "a.txt" {
-		t.Errorf("msg = %+v, want the add failure named", failedAdd)
-	}
-
-	failedList := msgOf[stagedMsg](t, assignChangelistCmd(cmdClient(t, "", 1), "feature", targets[1:], 44))
-	if failedList.err == nil || failedList.path != "b.txt" {
-		t.Errorf("msg = %+v, want the changelist failure named", failedList)
+	// The file svn refuses is named, and the one after it is assigned anyway.
+	picky, _ := pickyClient(t, "a.txt")
+	partial := msgOf[stagedMsg](t, assignChangelistCmd(picky, "feature", targets, 43))
+	if partial.outcome.err() == nil || partial.outcome.label() != "b.txt" {
+		t.Errorf("msg = %+v, want a.txt reported and b.txt assigned regardless", partial)
 	}
 }
 
 func TestRevertCmds(t *testing.T) {
 	got := msgOf[revertedMsg](t, revertCmd(cmdClient(t, "", 0), "a.txt", 51))
-	if got.err != nil || got.path != "a.txt" || got.token != 51 {
+	if got.outcome.err() != nil || got.outcome.label() != "a.txt" || got.token != 51 {
 		t.Errorf("msg = %+v, want a clean revert", got)
 	}
-	if failed := msgOf[revertedMsg](t, revertCmd(cmdClient(t, "", 1), "a.txt", 52)); failed.err == nil {
+	if failed := msgOf[revertedMsg](t, revertCmd(cmdClient(t, "", 1), "a.txt", 52)); failed.outcome.err() == nil {
 		t.Error("a revert svn refused must be reported")
 	}
 
 	many := msgOf[revertedMsg](t, revertManyCmd(cmdClient(t, "", 0), []string{"a.txt", "b.txt"}, 53))
-	if many.err != nil || many.path != "2 files" {
+	if many.outcome.err() != nil || many.outcome.label() != "2 files" {
 		t.Errorf("msg = %+v, want a two-file summary", many)
 	}
 
 	one := msgOf[revertedMsg](t, revertManyCmd(cmdClient(t, "", 0), []string{"a.txt"}, 54))
-	if one.err != nil || one.path != "a.txt" {
+	if one.outcome.err() != nil || one.outcome.label() != "a.txt" {
 		t.Errorf("msg = %+v, want the sole path named", one)
 	}
+}
 
-	failedMany := msgOf[revertedMsg](t, revertManyCmd(cmdClient(t, "", 1), []string{"a.txt", "b.txt"}, 55))
-	if failedMany.err == nil || failedMany.path != "a.txt" {
-		t.Errorf("msg = %+v, want the run to stop on the first failure", failedMany)
+// TestRevertManyCmdCarriesOnPastARefusal pins the failure that started all this:
+// svn walks a multi-target revert in order and abandons the process at the first
+// target it refuses, leaving everything after it untouched. The retry a path at
+// a time is what rescues the rest.
+func TestRevertManyCmdCarriesOnPastARefusal(t *testing.T) {
+	client, calls := pickyClient(t, "b.txt")
+
+	got := msgOf[revertedMsg](t, revertManyCmd(client, []string{"a.txt", "b.txt", "c.txt"}, 55))
+	if len(got.outcome.failed) != 1 || got.outcome.failed[0].path != "b.txt" {
+		t.Errorf("failed = %+v, want only the path svn refused", got.outcome.failed)
+	}
+	if len(got.outcome.done) != 2 {
+		t.Errorf("done = %q, want a.txt and c.txt reverted regardless", got.outcome.done)
+	}
+	argv := calls()
+	if len(argv) != 4 {
+		t.Errorf("argv = %q, want the batch attempt and then one invocation per path", argv)
+	}
+}
+
+// TestRevertReportsWhatSvnPassedOver pins the quiet half of the same failure: a
+// path svn skips is announced on stdout and the command still exits zero, so
+// taking the exit code for the whole answer reports a revert that discarded
+// nothing as a success.
+func TestRevertReportsWhatSvnPassedOver(t *testing.T) {
+	client := cmdClient(t, "Reverted 'a.txt'\nSkipped 'gone.txt'\n", 0)
+
+	got := msgOf[revertedMsg](t, revertManyCmd(client, []string{"a.txt", "gone.txt"}, 56))
+	if got.outcome.err() == nil {
+		t.Fatal("a path svn passed over has to be reported, not counted as reverted")
+	}
+	if len(got.outcome.failed) != 1 || got.outcome.failed[0].path != "gone.txt" {
+		t.Errorf("failed = %+v, want the skipped path", got.outcome.failed)
+	}
+	if got.outcome.label() != "a.txt" {
+		t.Errorf("done = %q, want only the path svn actually reverted", got.outcome.done)
 	}
 }
 
@@ -664,20 +897,20 @@ func TestDeleteCmds(t *testing.T) {
 	}
 
 	versioned := msgOf[deletedMsg](t, deleteCmd(client, deleteAction{path: "a.txt"}, 61))
-	if versioned.err != nil || versioned.path != "a.txt" || versioned.token != 61 {
+	if versioned.outcome.err() != nil || versioned.outcome.label() != "a.txt" || versioned.token != 61 {
 		t.Errorf("msg = %+v, want a clean svn delete", versioned)
 	}
 
 	// RemoveUnversioned resolves against the working copy, so the path is relative.
 	removed := msgOf[deletedMsg](t, deleteCmd(client, deleteAction{path: "junk.txt", unversioned: true}, 62))
-	if removed.err != nil {
-		t.Fatalf("removing an untracked file: %v", removed.err)
+	if removed.outcome.err() != nil {
+		t.Fatalf("removing an untracked file: %v", removed.outcome.err())
 	}
 	if _, err := os.Stat(untracked); !os.IsNotExist(err) {
 		t.Error("an untracked file is removed from disk rather than scheduled")
 	}
 
-	if failed := msgOf[deletedMsg](t, deleteCmd(cmdClient(t, "", 1), deleteAction{path: "a.txt"}, 63)); failed.err == nil {
+	if failed := msgOf[deletedMsg](t, deleteCmd(cmdClient(t, "", 1), deleteAction{path: "a.txt"}, 63)); failed.outcome.err() == nil {
 		t.Error("a delete svn refused must be reported")
 	}
 }
@@ -690,18 +923,56 @@ func TestDeleteManyCmd(t *testing.T) {
 	acts := []deleteAction{{path: "a.txt"}, {path: "junk.txt", unversioned: true}}
 
 	got := msgOf[deletedMsg](t, deleteManyCmd(client, acts, 71))
-	if got.err != nil || got.path != "2 files" {
+	if got.outcome.err() != nil || got.outcome.label() != "2 files" {
 		t.Errorf("msg = %+v, want a two-file summary", got)
 	}
 
 	one := msgOf[deletedMsg](t, deleteManyCmd(client, acts[:1], 72))
-	if one.err != nil || one.path != "a.txt" {
+	if one.outcome.err() != nil || one.outcome.label() != "a.txt" {
 		t.Errorf("msg = %+v, want the sole path named", one)
 	}
+}
 
-	failed := msgOf[deletedMsg](t, deleteManyCmd(cmdClient(t, "", 1), acts, 73))
-	if failed.err == nil || failed.path != "a.txt" {
-		t.Errorf("msg = %+v, want the run to stop on the first failure", failed)
+// TestDeleteManyCmdCarriesOnPastARefusal pins that a file svn will not delete no
+// longer strands the files listed after it.
+func TestDeleteManyCmdCarriesOnPastARefusal(t *testing.T) {
+	client, calls := pickyClient(t, "b.txt")
+	acts := []deleteAction{{path: "a.txt"}, {path: "b.txt"}, {path: "c.txt"}}
+
+	got := msgOf[deletedMsg](t, deleteManyCmd(client, acts, 73))
+	if len(got.outcome.failed) != 1 || got.outcome.failed[0].path != "b.txt" {
+		t.Errorf("failed = %+v, want only the file svn refused", got.outcome.failed)
+	}
+	if len(got.outcome.done) != 2 {
+		t.Errorf("done = %q, want the other two deleted regardless", got.outcome.done)
+	}
+	if argv := strings.Join(calls(), "\n"); !strings.Contains(argv, "c.txt") {
+		t.Errorf("svn was never asked to delete c.txt — the refusal blocked it:\n%s", argv)
+	}
+}
+
+// TestDeleteManyCmdLeavesOutWhatADirectoryTakes pins the overlap both ways of
+// deleting recurse into: svn status reports a scheduled-add directory alongside
+// every file under it, and naming a child after its parent has gone fails with
+// E155007 — which used to sink the rest of the run. The child still counts as
+// deleted, because the directory took it.
+func TestDeleteManyCmdLeavesOutWhatADirectoryTakes(t *testing.T) {
+	client, calls := pickyClient(t)
+	acts := []deleteAction{{path: "sub"}, {path: "sub/x.txt"}, {path: "sub/y.txt"}, {path: "other.txt"}}
+
+	got := msgOf[deletedMsg](t, deleteManyCmd(client, acts, 74))
+	if got.outcome.err() != nil {
+		t.Fatalf("delete: %v", got.outcome.err())
+	}
+	if len(got.outcome.done) != 4 {
+		t.Errorf("done = %q, want every path counted, children included", got.outcome.done)
+	}
+	argv := calls()
+	if len(argv) != 2 {
+		t.Errorf("argv = %q, want one delete for sub and one for other.txt", argv)
+	}
+	if strings.Contains(strings.Join(argv, "\n"), "sub/x.txt") {
+		t.Errorf("sub/x.txt was named to svn after its parent had gone:\n%q", argv)
 	}
 }
 

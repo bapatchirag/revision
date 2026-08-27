@@ -131,6 +131,33 @@ file and a cyan `●` a file in a [named changelist](/workflows/changelists/); a
 file has no marker. A `✓` in the leading cell marks a file [held for
 shelving](/workflows/shelving/).
 
+A `+` between the code and the name — `A+config.go` — marks a path scheduled **with
+history**, which is `svn status`'s own notation for one a copy or a move put there. It
+takes the space that would have separated the two rather than a column of its own, so
+marking a row shifts nothing beside it.
+
+#### Copies and moves
+
+SVN records a move as two entries rather than one, and the tree shows both:
+
+| Row | What it is |
+|---|---|
+| `A+` at the destination | Where the content landed. Main heads it `moved from <path>`. |
+| `D` at the source | Where it came from. Main heads it `moved to <path>`. |
+
+Only the destination carries a diff. The source's would be the whole file as removed
+lines, which reads as the file having been destroyed, so Main shows `(no textual diff — the
+file moved)` instead. A move nothing was edited after has nothing to show either way and
+says `(unchanged from <path>)`; edit the file after moving it and the destination diffs
+against what was copied, which is the one place that delta appears.
+
+A plain `svn copy` draws the same `+` but has no `D` row to pair with, since nothing was
+taken away.
+
+[`state:A+`](/workflows/filtering-and-searching/#files) filters the tree down to these
+rows. Move detection needs `svn` 1.9 or newer; an older client omits the attributes and
+every move reads as an unrelated add and delete.
+
 The footer counts the position and the number of files in view. When a
 [filter](/workflows/filtering-and-searching/),
 [`hideUntracked`](/reference/configuration/#hideuntracked) or a

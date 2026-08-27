@@ -36,15 +36,16 @@ SVN's command line is powerful but verbose for day-to-day work. `revision` wraps
 ## Features
 
 - **lazygit-style layout** — Status, Files, Log and Shelf panels down the left, a Main detail view beside them, and the `svn` command log beneath; switch with the number keys or `Tab`
-- **Changed files as a collapsible directory tree**, grouped under their folders, with the visible count in the panel footer
+- **Changed files as a collapsible directory tree**, grouped under their folders, with the visible count in the panel footer — and a move drawn as a move, its destination marked `+` and each half naming the other
 - **Colour-coded diffs** that follow your selection — read one side by side with `s`, save it to a file with `w`, or highlight a directory for the combined diff of everything beneath it
 - **Staging** built on a native SVN changelist — `space` stages a file or a whole subtree, `c` commits the set through an inline message editor
 - **Named changelists** — group the staged set into real SVN changelists, drill into one in a tabbed view, and commit it on its own
 - **Shelving** — the `git stash` SVN never shipped: pick files with `v`, set them aside with `z`, and merge them back with `enter` or `p`. Shelves live in an ignored directory beside the working copy, so there is nothing to configure
 - **Update** to HEAD with `u`, or to any revision picked in the Log panel — conflicts are spelled out before you confirm
 - **Resolve conflicts side by side** with `m` — each conflict, or each hunk a patch could not place, laid out two panes wide with a key to take either side, both, or your editor
-- **Add, revert and delete** a single file or every change beneath a directory, with confirmation prompts
+- **Add** an untracked file or a whole untracked directory with `a`, and **revert or delete** a single file or every change beneath a directory — the destructive two confirm first
 - **Instant staging** — the row restyles on the keypress while `svn` confirms behind it, and a failure puts the previous state back; revert, delete and commit mark their rows as in flight rather than claiming a success they do not have yet
+- **A set is one `svn` invocation**, not one per file, and the run carries on past a file `svn` will not take — the toast names what landed and what was refused
 - **Live refresh** — an edit made outside `revision` reaches the Files and diff panels on its own, with the cursor and scroll where you left them; `L` turns the watcher off
 - **Reads once, and only what you look at** — diffs and history pages are cached for the session, so startup costs a single `svn status` and revisiting a file is instant
 - **Filter or search any panel** with `/` — `rev:`, `user:`, `state:` and `cl:` parameters plus free text, and `n` / `N` to jump between matches
@@ -93,8 +94,9 @@ cd /path/to/working-copy
 revision                 # or from anywhere: revision --path /path/to/working-copy
 ```
 
-- `1` `2` `3` `0` or `Tab` — move between the Status, Files, Log and Main panels
+- `1` `2` `3` `4` `0` or `Tab` — move between the Status, Files, Log, Shelf and Main panels
 - `space` — stage the selected file, or every change beneath the selected directory
+- `a` — put an untracked file or directory under version control
 - `c` — commit the staged set · `u` — update the working copy
 - `/` — filter or search the focused panel · `R` — refresh
 - `S` — settings and themes · `?` — every keybinding

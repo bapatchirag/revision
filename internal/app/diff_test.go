@@ -695,3 +695,40 @@ svn:mime-type = application/octet-stream
 		})
 	}
 }
+
+func TestPatchIsHeaderOnly(t *testing.T) {
+	const headerOnly = `Index: renamed.txt
+===================================================================
+`
+	// A property change carries no "@@" of its own, so it is the case a hunk
+	// check most easily mistakes for nothing at all.
+	const propsOnly = `Index: script.sh
+===================================================================
+
+Property changes on: script.sh
+___________________________________________________________________
+Added: svn:executable
+## -0,0 +1 ##
++*
+`
+	cases := map[string]struct {
+		diff string
+		want bool
+	}{
+		"empty":              {"", true},
+		"header only":        {headerOnly, true},
+		"content hunk":       {"Index: a.txt\n@@ -1 +1 @@\n-old\n+new\n", false},
+		"property hunk":      {propsOnly, false},
+		"hunk with no Index": {"@@ -1 +1 @@\n-old\n+new", false},
+		// A hunk marker inside a hunk is a removed line, not a header, and is
+		// preceded by the "-" that says so.
+		"marker within a hunk": {"Index: a.txt\n@@ -1 +1 @@\n-@@ not a header\n", false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := patchIsHeaderOnly(tc.diff); got != tc.want {
+				t.Errorf("patchIsHeaderOnly() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

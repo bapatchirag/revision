@@ -145,6 +145,10 @@ func HelpSections() []Section {
 				Description: "Stage or unstage the selected file, or every change under the selected directory. An untracked file is `svn add`ed first.",
 			},
 			{
+				Action: "Add to version control", Keys: []string{"a"}, Context: "Files",
+				Description: "Put the selection under version control with `svn add`. On a file row it adds that file, on a directory row everything untracked beneath it, and an untracked directory is added with its whole contents, since that is how `svn add` reads one. Anything already versioned, and anything ignored, is left alone. The rows restyle on the keypress and go back if svn refuses them; `r` undoes an add, leaving the file on disk and untracked again.",
+			},
+			{
 				Action: "Assign changelist", Keys: []string{"n"}, Context: "Files",
 				Description: "Assign the staged set — or just the selected file when nothing is staged — to a named changelist.",
 			},

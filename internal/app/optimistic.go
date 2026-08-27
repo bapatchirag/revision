@@ -39,6 +39,18 @@ func stageMutations(acts []stageAction, changelist string) []mutation {
 	return muts
 }
 
+// addMutations turns the paths an add keypress resolved to into the change they
+// make to the status on screen: each becomes scheduled for addition. Nothing
+// unversioned belongs to a changelist, so the empty changelist they carry leaves
+// every one of them where it is listed.
+func addMutations(paths []string) []mutation {
+	muts := make([]mutation, 0, len(paths))
+	for _, p := range paths {
+		muts = append(muts, mutation{path: p, add: true})
+	}
+	return muts
+}
+
 // changelistMutations turns an assign-to-changelist action into the change it
 // makes to the status on screen: every target moves into the named changelist,
 // an unversioned one becoming added with it.

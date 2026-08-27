@@ -193,10 +193,13 @@ func (m *Model) filesShowDiff() bool {
 		return m.dirDiff && m.diffPath == n.Path && strings.TrimSpace(m.diffText) != ""
 	}
 	it, ok := m.selectedFile()
-	if !ok || !it.State.IsDirty() {
+	if !ok || !it.State.IsDirty() || it.MovedTo != "" {
 		return false
 	}
-	return m.diffPath == it.Path && strings.TrimSpace(m.diffText) != ""
+	if m.diffPath != it.Path || strings.TrimSpace(m.diffText) == "" {
+		return false
+	}
+	return it.MovedFrom == "" || !patchIsHeaderOnly(m.diffText)
 }
 
 // changelistDetail summarizes the selected changelist: its label, file count and
@@ -244,6 +247,12 @@ func (m *Model) directoryDetail(n fileNode) string {
 // fileDetail renders the selected file's diff, prefixed by its changelist when
 // it belongs to one, or a placeholder while the diff loads or when the state has
 // no textual diff.
+//
+// Each half of a move says where its counterpart is, since neither reads as a
+// move on its own. Only the source's diff is dropped with it: it is the whole
+// file as removed lines whatever else is going on, which reads as the file being
+// destroyed. The destination's is kept, because a move the file was edited after
+// diffs against what was copied — and that delta appears nowhere else.
 func (m *Model) fileDetail() string {
 	it, ok := m.selectedFile()
 	if !ok {
@@ -259,11 +268,22 @@ func (m *Model) fileDetail() string {
 		// files it applies to.
 		head = append(head, "conflict — press m to resolve it side by side", "")
 	}
+	// No entry carries both: a path is one end of a move or the other.
+	switch {
+	case it.MovedFrom != "":
+		head = append(head, "moved from "+it.MovedFrom, "")
+	case it.MovedTo != "":
+		head = append(head, "moved to "+it.MovedTo, "")
+	}
 	switch {
 	case !it.State.IsDirty():
 		return strings.Join(append(head, "(no textual diff for this state)"), "\n")
+	case it.MovedTo != "":
+		return strings.Join(append(head, "(no textual diff — the file moved)"), "\n")
 	case m.diffPath != it.Path:
 		return strings.Join(append(head, "Loading diff…"), "\n")
+	case it.MovedFrom != "" && patchIsHeaderOnly(m.diffText):
+		return strings.Join(append(head, "(unchanged from "+it.MovedFrom+")"), "\n")
 	case strings.TrimSpace(m.diffText) == "":
 		return strings.Join(append(head, "(no changes to display)"), "\n")
 	default:

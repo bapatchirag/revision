@@ -77,6 +77,13 @@ func (m *Model) editTarget() (path, name string, line int, ok bool) {
 	if m.showingRevDiff() {
 		return "", "", 0, false
 	}
+	// A shelf holds changes the working copy does not: its patch describes files
+	// as they were when they were set aside, so nothing on screen names a file to
+	// open — least of all the Files panel's own selection, which the reader is not
+	// even looking at.
+	if m.source == sourceShelf {
+		return "", "", 0, false
+	}
 	if m.filesViewIsDiffs() {
 		d, ok := m.savedDiffs.Selected()
 		if !ok {

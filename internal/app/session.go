@@ -357,6 +357,9 @@ func itemsDigest(items []svn.StatusItem) uint64 {
 		writeDigest(&h, string(items[i].PropState))
 		writeDigest(&h, items[i].Revision)
 		writeDigest(&h, items[i].Changelist)
+		writeDigest(&h, strconv.FormatBool(items[i].Copied))
+		writeDigest(&h, items[i].MovedFrom)
+		writeDigest(&h, items[i].MovedTo)
 	}
 	return h.Sum64()
 }

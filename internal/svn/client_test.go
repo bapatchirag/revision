@@ -107,3 +107,56 @@ func TestRunDoesNotReportCancellationAsTimeout(t *testing.T) {
 		t.Errorf("error = %q, a cancellation is not a timeout", err)
 	}
 }
+
+// TestRunReturnsWhenAChildOutlivesTheKill is the one that makes a timeout
+// recoverable. svn over svn+ssh forks ssh, which inherits the output pipes; the
+// deadline kills svn alone, so without the process group and the wait delay the
+// surviving child holds the pipe open and run blocks forever — the reply never
+// reaches the UI, and refreshing only stacks up another stuck read.
+func TestRunReturnsWhenAChildOutlivesTheKill(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found on PATH")
+	}
+	c := &Client{Bin: "sh"}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		// The backgrounded sleep inherits stdout and is not the process the
+		// deadline kills.
+		_, err := c.run(ctx, "-c", "sleep 60 & sleep 60")
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected the overrun to fail")
+		}
+		if !strings.Contains(err.Error(), "timed out after") {
+			t.Errorf("error = %q, want the deadline reported as a timeout", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("run never returned: a child outliving the kill still holds the output pipe")
+	}
+}
+
+// TestRunSucceedsWhenAChildLingersPastExit is the other side of the wait delay:
+// svn ran to completion and its output is whole, so a child still holding the
+// pipe open behind it must not turn that into a failure.
+func TestRunSucceedsWhenAChildLingersPastExit(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found on PATH")
+	}
+	c := &Client{Bin: "sh"}
+
+	out, err := c.run(context.Background(), "-c", "echo hello; sleep 60 &")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.Contains(string(out), "hello") {
+		t.Errorf("output = %q, want the command's own output", out)
+	}
+}

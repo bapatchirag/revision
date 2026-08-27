@@ -64,9 +64,16 @@ func (m *Model) View() string {
 
 // overlayCenter floats popup in the middle of the base view.
 func (m *Model) overlayCenter(base, popup string) string {
-	x := max((m.width-lipgloss.Width(popup))/2, 0)
-	y := max((m.height-lipgloss.Height(popup))/2, 0)
-	return layout.Overlay(base, popup, x, y)
+	r := m.overlayRect(popup)
+	return layout.Overlay(base, popup, r.x, r.y)
+}
+
+// overlayRect is the cells overlayCenter puts a popup on, so a click can be
+// tested against where the popup actually landed rather than against a second
+// description of the same arithmetic.
+func (m *Model) overlayRect(popup string) rect {
+	w, h := lipgloss.Width(popup), lipgloss.Height(popup)
+	return rect{max((m.width-w)/2, 0), max((m.height-h)/2, 0), w, h}
 }
 
 // overlayToast floats the toast in the bottom-right corner, just above the

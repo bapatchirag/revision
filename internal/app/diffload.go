@@ -17,6 +17,24 @@ func (m *Model) reloadStatus() tea.Cmd {
 	return loadStatusCmd(ctx, m.client, gen)
 }
 
+// reloadStatusFor re-reads only the paths an action has just changed, which
+// costs a crawl of those subtrees rather than of the whole working copy — the
+// difference between a tree that refreshes on the reply and one that waits on
+// svn walking every file the user has.
+//
+// It falls back to a full read when the set is too large to be worth targeting,
+// and while a change shown ahead of svn is still in flight: the snapshot behind
+// that change describes the whole status, and a read covering part of it has
+// nothing to say about the rest.
+func (m *Model) reloadStatusFor(paths []string) tea.Cmd {
+	scope := statusScope(paths, m.fileItems)
+	if len(scope) == 0 || m.optimistic != nil {
+		return m.reloadStatus()
+	}
+	ctx, gen := m.gens.status.begin(loadTimeout)
+	return loadStatusPathsCmd(ctx, m.client, scope, gen)
+}
+
 // loadDiff puts the diff for k on screen. One the session already holds for the
 // working copy's current state is applied on the spot and costs no command; a
 // miss is debounced, so passing over a row does not spawn an svn process for it.
@@ -58,6 +76,25 @@ func (m *Model) applyDiff(k diffKey, e diffEntry) {
 // until a fresh one lands.
 func (m *Model) clearDiff() {
 	m.diffPath, m.diffText, m.diffErr, m.diffOfDir = "", "", false, false
+}
+
+// diffTouchedBy reports whether the diff on screen describes any of paths — the
+// file itself, or, for a directory row, a file beneath it. It is what tells an
+// action that has just discarded content whether Main is showing that content or
+// something else entirely.
+func (m *Model) diffTouchedBy(paths []string) bool {
+	if m.diffPath == "" {
+		return false
+	}
+	if !m.diffOfDir {
+		return scopeCovers(paths, m.diffPath)
+	}
+	for _, p := range paths {
+		if dirContains(m.diffPath, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // rederiveDiff re-reads the diff on screen from the session once the status
@@ -154,8 +191,9 @@ func (m *Model) diffLoadForSelection() tea.Cmd {
 }
 
 // diffSelection returns the diff the Files selection calls for, or ok=false when
-// it calls for none: no selection, a file with no textual diff, or a directory
-// row while directory diffs are off.
+// it calls for none: no selection, a file with no textual diff, the source half
+// of a move (whose diff Main does not show, so fetching it would cost an svn run
+// for output nothing reads), or a directory row while directory diffs are off.
 func (m *Model) diffSelection() (diffKey, bool) {
 	if n, _, ok := m.selectedTreeNode(); ok && n.Item == nil {
 		if !m.dirDiff {
@@ -164,7 +202,7 @@ func (m *Model) diffSelection() (diffKey, bool) {
 		return diffKey{path: n.Path, dir: true}, true
 	}
 	it, ok := m.selectedFile()
-	if !ok || !it.State.IsDirty() {
+	if !ok || !it.State.IsDirty() || it.MovedTo != "" {
 		return diffKey{}, false
 	}
 	return diffKey{path: it.Path}, true

@@ -124,3 +124,60 @@ func stageable(s svn.FileState) bool {
 		return false
 	}
 }
+
+// addSelected puts the current Files-panel selection under version control. On a
+// directory row it adds everything untracked beneath; on a file leaf it adds
+// that file — and an untracked directory is one such leaf, since svn status
+// reports it as a single entry with no children of its own, so svn's recursive
+// add takes what is inside it. Anything already versioned, or ignored, is left
+// alone, as is a row already waiting on svn.
+func (m *Model) addSelected() tea.Cmd {
+	if n, items, ok := m.selectedDirectory(); ok {
+		return m.addDirectory(n, m.withoutPending(items))
+	}
+	if m.selectionPending() {
+		return nil
+	}
+	it, ok := m.selectedFile()
+	if !ok {
+		return nil
+	}
+	if it.State != svn.StateUnversioned {
+		m.showToast("can't add "+it.Path+" ("+it.State.Code()+")", component.LevelWarning)
+		return nil
+	}
+	paths := []string{it.Path}
+	return addManyCmd(m.client, paths, m.applyOptimistic(addMutations(paths)))
+}
+
+// addDirectory puts every untracked file beneath the selected directory row
+// under version control. A directory with nothing untracked under it has
+// nothing to do and warns instead of running svn.
+func (m *Model) addDirectory(n fileNode, items []svn.StatusItem) tea.Cmd {
+	paths := directoryAddPaths(n, items)
+	if len(paths) == 0 {
+		m.showToast("nothing to add under "+dirLabel(n), component.LevelWarning)
+		return nil
+	}
+	return addManyCmd(m.client, paths, m.applyOptimistic(addMutations(paths)))
+}
+
+// directoryAddPaths collects the untracked paths beneath a directory row,
+// matching the single-file add guard. The row's own status item counts too,
+// since an untracked directory svn also reports children for renders as the
+// directory row and has no leaf to select; leaving it out would ask svn to add
+// files whose parent it does not track yet. items is the tree's source set.
+func directoryAddPaths(n fileNode, items []svn.StatusItem) []string {
+	var paths []string
+	for _, it := range items {
+		if it.Path == n.Path && it.State == svn.StateUnversioned {
+			paths = append(paths, it.Path)
+		}
+	}
+	for _, it := range filesUnder(n, items) {
+		if it.State == svn.StateUnversioned {
+			paths = append(paths, it.Path)
+		}
+	}
+	return paths
+}

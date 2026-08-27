@@ -1,11 +1,38 @@
 ---
 title: Staging & commit
-description: How revision emulates a staging index on top of SVN, and how to commit.
+description: How to put files under version control, how revision emulates a staging index on top of SVN, and how to commit.
 ---
 
 import AppScreen from '../../../components/AppScreen.astro';
 import DemoVideo from '../../../components/DemoVideo.astro';
 import KeyCap from '../../../components/KeyCap.astro';
+
+## Adding a file
+
+<KeyCap key="a" /> puts the selection under version control — `svn add`, nothing more.
+
+- On a file row it adds that file.
+- On a *directory* row it adds everything untracked beneath it.
+- An untracked directory is added with its whole contents, which is how `svn add` reads
+  one.
+
+Only untracked paths can be added: a file SVN already tracks, one it ignores, or a
+directory with nothing untracked under it says so in a toast and nothing runs. However
+many files are involved, the add costs a single `svn add` invocation.
+
+Adding is not destructive, so it neither confirms first nor marks the rows as
+[in flight](#rows-in-flight) — they restyle to `A` on the keypress and
+[come back](#instant-then-confirmed) if `svn` refuses them.
+
+<KeyCap key="r" /> undoes an add: reverting one un-schedules it and leaves the file on
+disk, untracked again.
+
+<DemoVideo
+	name="adding"
+	width={1600}
+	height={900}
+	label="Pressing a on an untracked file to schedule it, r to un-schedule it again, and a on the root row to add every untracked path in the working copy at once"
+/>
 
 ## How staging works
 
@@ -26,8 +53,8 @@ Unstage a file before moving it into a [named changelist](/workflows/changelists
 <KeyCap key="n" />, which moves the whole staged set at once.
 :::
 
-An untracked (unversioned) file is `svn add`ed first, then staged, so a new file takes the
-same single keystroke as a modified one.
+An untracked (unversioned) file is [added](#adding-a-file) first, then staged, so a new
+file takes the same single keystroke as a modified one.
 
 ## Staging a directory
 
@@ -42,6 +69,10 @@ Files that are ignored or clean are skipped. The root `/` row covers the whole t
 
 Step 2 removes files from *any* changelist, not just the staged bucket — the same as
 pressing <KeyCap key="space" /> on a single file.
+
+However many files a directory holds, staging it costs at most three `svn` invocations —
+one `svn add`, one `svn changelist`, one `svn changelist --remove` — rather than one per
+file. The [command log](/guides/panels/#command-log) shows them.
 
 <DemoVideo
 	name="staging"
@@ -120,6 +151,11 @@ Both are destructive, so both confirm first:
 <KeyCap key="n" /> cancels. Reverting discards uncommitted work and cannot be undone —
 save the diff with <KeyCap key="w" /> first if you might want it back.
 
+A revert always recurses, which is what an [added](#adding-a-file) directory needs: `svn`
+refuses to un-schedule one without its children, so reverting the directory row takes the
+whole subtree back out of version control in one go rather than failing on the directory
+itself. The files stay on disk, untracked.
+
 ## Rows in flight
 
 A revert, a delete or a commit is destructive, so — unlike staging — it is never shown as
@@ -133,6 +169,27 @@ directory action skips over it rather than acting on it twice. The marks clear w
 answers — on success and on failure alike, with a toast either way.
 
 Cancelling the confirmation prompt marks nothing.
+
+## When some files are refused
+
+An action over a set does not stop at the first file `svn` will not take. Every path is
+attempted, and the toast says what happened either way:
+
+| Outcome | Toast |
+|---|---|
+| All of them landed | `reverted 4 files` — or the file's own name, when it was the only one |
+| None of them did | The failure, as `svn` reported it |
+| Some did | `reverted 3 files, 1 file refused — …`, as a warning |
+
+The third is the one to read. The working copy has moved for the files that landed and not
+for the rest, so the tree is left in a state neither the keypress nor a plain failure
+would describe. The refused path is named, with a count of any others behind it, and the
+[Command Log](/guides/panels/#command-log) holds the invocation.
+
+The exception is a failure that is about the working copy rather than about a path —
+[authentication](/operations/authentication/), or a
+[lock](/operations/troubleshooting/#the-working-copy-is-locked). Those stop the run where
+they are, since every remaining file would be refused for the same reason.
 
 Every key on this page is in the
 [Changes section](/reference/keybindings/#changes) of the keybindings reference.

@@ -1,0 +1,40 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # govulncheck and dependency review only know about advisories filed against
+    # someone else's code. This one reads ours, so it is re-run weekly to pick up
+    # new queries without waiting for a commit.
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+          cache: true
+
+      # Go has no build-mode: none, so the database is built from source.
+      # security-extended over the default set: this binary execs svn, ssh-add
+      # and the user's editor, and replaces itself on disk during self-update,
+      # so the command-injection and path-traversal queries are the point.
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: go
+          build-mode: autobuild
+          queries: security-extended
+
+      - uses: github/codeql-action/analyze@v4

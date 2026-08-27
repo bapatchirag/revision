@@ -119,6 +119,64 @@ func TestMatchStatusItemStateAndPath(t *testing.T) {
 	}
 }
 
+// A one-letter state is a status code, never a substring of a state name: the
+// letters of "modified" would otherwise answer to state:D, state:I and state:F.
+func TestMatchStatusItemSingleLetterStateIsACode(t *testing.T) {
+	mod := svn.StatusItem{Path: "a.go", State: svn.StateModified}
+	for _, q := range []string{"state:D", "state:d", "state:i", "state:f", "state:e", "state:o"} {
+		if matchStatusItem(mod, parseFilter(q, fileFilterKeys)) {
+			t.Errorf("%s should not match a modified file", q)
+		}
+	}
+	del := svn.StatusItem{Path: "b.go", State: svn.StateDeleted}
+	if !matchStatusItem(del, parseFilter("state:D", fileFilterKeys)) {
+		t.Error("state:D should match a deleted file")
+	}
+	// A longer value still reads as a name, which is what makes state:mod work.
+	if !matchStatusItem(mod, parseFilter("state:mod", fileFilterKeys)) {
+		t.Error("state:mod should still match a modified file by name")
+	}
+	if matchStatusItem(mod, parseFilter("state:del", fileFilterKeys)) {
+		t.Error("state:del should not match a modified file")
+	}
+}
+
+// TestMatchStatusItemHistorySuffix covers the "+" the rows carry: it narrows a
+// state to the paths scheduled with history, which is what makes a move's
+// destination findable.
+func TestMatchStatusItemHistorySuffix(t *testing.T) {
+	moved := svn.StatusItem{Path: "dest.txt", State: svn.StateAdded, Copied: true, MovedFrom: "src.txt"}
+	plain := svn.StatusItem{Path: "fresh.txt", State: svn.StateAdded}
+
+	for _, q := range []string{"state:A+", "state:a+", "state:+"} {
+		if !matchStatusItem(moved, parseFilter(q, fileFilterKeys)) {
+			t.Errorf("%s should match a file scheduled with history", q)
+		}
+		if matchStatusItem(plain, parseFilter(q, fileFilterKeys)) {
+			t.Errorf("%s should not match a plain add", q)
+		}
+	}
+
+	// The suffix narrows rather than replaces: a code that does not match is
+	// still excluded, history or not.
+	if matchStatusItem(moved, parseFilter("state:M+", fileFilterKeys)) {
+		t.Error("state:M+ should not match an added file")
+	}
+	// A bare code means the row as drawn, so the A+ row answers to state:A+ alone.
+	if matchStatusItem(moved, parseFilter("state:A", fileFilterKeys)) {
+		t.Error("state:A should not match a file scheduled with history")
+	}
+	if !matchStatusItem(plain, parseFilter("state:A", fileFilterKeys)) {
+		t.Error("state:A should match a plain add")
+	}
+	// The state name is "added" either way, so it still takes both.
+	for _, it := range []svn.StatusItem{moved, plain} {
+		if !matchStatusItem(it, parseFilter("state:added", fileFilterKeys)) {
+			t.Errorf("state:added should match %s whatever its history", it.Path)
+		}
+	}
+}
+
 func TestMatchStatusItemChangelistLabels(t *testing.T) {
 	staged := svn.StatusItem{Path: "a.txt", State: svn.StateModified, Changelist: stagedChangelist}
 	if !matchStatusItem(staged, parseFilter("cl:staged", fileFilterKeys)) {
