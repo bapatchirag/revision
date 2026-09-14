@@ -1,5 +1,18 @@
 [
   {
+    "tag": "v1.7.3",
+    "name": "v1.7.3",
+    "date": "2026-09-14T08:20:30Z",
+    "url": "https://github.com/bapatchirag/revision/releases/tag/v1.7.3",
+    "prerelease": false,
+    "entries": [
+      "Updated changelog for v1.7.2 (@bapatchirag)",
+      "site: bump svgo from 4.0.2 to 4.1.0 in /site (@dependabot[bot])",
+      "site: bump js-yaml from 4.3.1 to 4.3.2 in /site (@dependabot[bot])",
+      "site: bump the astro group in /site with 3 updates (@dependabot[bot])"
+    ]
+  },
+  {
     "tag": "v1.7.2",
     "name": "v1.7.2",
     "date": "2026-09-07T03:25:58Z",
