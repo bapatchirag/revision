@@ -1,5 +1,16 @@
 [
   {
+    "tag": "v1.7.4",
+    "name": "v1.7.4",
+    "date": "2026-09-24T04:24:53Z",
+    "url": "https://github.com/bapatchirag/revision/releases/tag/v1.7.4",
+    "prerelease": false,
+    "entries": [
+      "Updated changelog for v1.7.3 (@bapatchirag)",
+      "site: bump devalue from 5.8.2 to 5.9.2 in /site (@dependabot[bot])"
+    ]
+  },
+  {
     "tag": "v1.7.3",
     "name": "v1.7.3",
     "date": "2026-09-14T08:20:30Z",
