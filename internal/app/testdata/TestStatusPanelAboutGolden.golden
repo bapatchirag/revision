@@ -6,7 +6,7 @@
 │Revision  r42                         ││                                                          │
 │                                      ││Version                                                   │
 ╰──────────────────────────────────────╯│  dev                                                     │
-╭─ [2] ─ Changes ─── Changelists ─── Di╮│                                                          │
+╭─ [2] < Changes ─── Changelists ──── >╮│                                                          │
 │   ▾ /                                ││MIT © Chirag Bapat                                        │
 │       M modified.go                  ││                                                          │
 │                                      ││Documentation                                             │

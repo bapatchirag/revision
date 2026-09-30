@@ -132,6 +132,8 @@ func TestClicksAreIgnoredWhileAnOverlayIsOpen(t *testing.T) {
 
 func TestClickingAViewNameSelectsItAndItsPanel(t *testing.T) {
 	m := mouseModel(t)
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+	m = resized.(*Model)
 	m, _ = pressRune(t, m, ']')
 	if name := m.filesViews.ActiveName(); name != "Changelists" {
 		t.Fatalf("active files view = %q, want ] to have moved off Changes", name)
@@ -148,6 +150,41 @@ func TestClickingAViewNameSelectsItAndItsPanel(t *testing.T) {
 	}
 	if got := m.focus.Index(); got != panelFiles {
 		t.Errorf("focused panel %d, want the clicked view's panel", got)
+	}
+}
+
+func TestClickingNarrowTabArrowsSelectsTheTabAndPanel(t *testing.T) {
+	m := mouseModel(t)
+	for _, width := range []int{160, 80} {
+		resized, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+		m = resized.(*Model)
+	}
+	m, _ = pressRune(t, m, '3')
+	moves := []struct {
+		arrow string
+		name  string
+	}{
+		{"<", "Rejects"},
+		{"<", "Diffs"},
+		{">", "Rejects"},
+		{">", "Changes"},
+	}
+	for _, move := range moves {
+		next, _ := m.Update(click(tabColumn(t, m, move.arrow), filesTop))
+		m = next.(*Model)
+		if name := m.filesViews.ActiveName(); name != move.name {
+			t.Fatalf("arrow %q selected %q, want %q", move.arrow, name, move.name)
+		}
+		if got := m.focus.Index(); got != panelFiles {
+			t.Fatalf("arrow click focused panel %d, want Files", got)
+		}
+		tabColumn(t, m, move.name)
+	}
+
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+	m = resized.(*Model)
+	for _, name := range m.filesViews.Tabs() {
+		tabColumn(t, m, name)
 	}
 }
 
@@ -196,10 +233,11 @@ func tabColumn(t *testing.T, m *Model, name string) int {
 	t.Helper()
 	rows := strings.Split(stripANSI(m.View()), "\n")
 	// The right-hand column shares the row, so only the Files panel is searched.
-	border := []rune(rows[filesTop])[:32]
+	rect := m.panelRects()[panelFiles]
+	border := []rune(rows[rect.y])[rect.x : rect.x+rect.w]
 	for i := range border {
 		if strings.HasPrefix(string(border[i:]), name) {
-			return i
+			return rect.x + i
 		}
 	}
 	t.Fatalf("the Files panel should name %q in its border, got %q", name, string(border))
@@ -281,6 +319,8 @@ func TestDoubleClickingAChangelistOpensIt(t *testing.T) {
 	m := loadItems(t, mouseModel(t), []svn.StatusItem{
 		{Path: "a.go", State: svn.StateModified, Changelist: "feature"},
 	})
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+	m = resized.(*Model)
 	next, _ := m.Update(click(tabColumn(t, m, "Changelist"), filesTop))
 	m = next.(*Model)
 	if !m.filesViewIsChangelists() {

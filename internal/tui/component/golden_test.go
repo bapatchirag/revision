@@ -214,6 +214,12 @@ func TestGoldenViews(t *testing.T) {
 	golden.RequireEqual(t, []byte(p.View()))
 }
 
+func TestGoldenViewsNarrow(t *testing.T) {
+	p, vs := newFilesTabPanel(2, 40)
+	mustCmd(t, vs.Activate(3))
+	golden.RequireEqual(t, []byte(p.View()))
+}
+
 func TestGoldenViewsDrilled(t *testing.T) {
 	base := component.NewList[string]("log", func(s string) string { return s }, testTheme(), testKeys())
 	base.SetItems([]string{"r42 add views", "r41 fix parse"})

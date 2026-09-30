@@ -6,7 +6,7 @@
 │Revision  r42  │> Log limit          100                      │               │
 │               │  Editor             native                   │               │
 ╰───────────────│  Theme              auto                     │               │
-╭─ [2] ─ Changes│  Directory diff     on                       │               │
+╭─ [2] < Changes│  Directory diff     on                       │               │
 │   ▾ /         │  Hide untracked     off                      │               │
 │>      M modifi│  SSH key            ~/.ssh/id_rsa            │               │
 │               │  Display from       cwd                      │               │
