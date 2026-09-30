@@ -6,7 +6,7 @@
 │Revision  r42                 ││                                              │
 │HEAD      r50                 ││                                              │
 ╰──────────────────────────────╯│                                              │
-╭─ [2] ─ Changes ─── Changelist╮│                                              │
+╭─ [2] < Changes ──────────── >╮│                                              │
 │   ▾ /                        ││                                              │
 │>    ● A added.txt            ││                                              │
 │       M modified.go          ││                                              │

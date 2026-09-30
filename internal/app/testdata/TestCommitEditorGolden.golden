@@ -6,7 +6,7 @@
 │Revision  r42                 ││                                              │
 │               ╭─ Commit message ─────────────────────────────╮               │
 ╰───────────────│Fix status parsing                            │               │
-╭─ [2] ─ Changes│                                              │               │
+╭─ [2] < Changes│                                              │               │
 │   ▾ /         │                                              │               │
 │>    ● M modifi│                                              │               │
 │               │                                              │               │

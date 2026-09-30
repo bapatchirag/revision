@@ -6,7 +6,7 @@
 │Revisio│  Commit staged / list       c    Jump top / bottom      g / G│       │
 │       │  Expand changelist      enter    Next / prev history pa n / p│       │
 ╰───────│  Revert / delete file   r / d    Scroll main up / down  K / J│       │
-╭─ [2] ─│  Apply saved patch          p    Scroll main l / r      h / l│       │
+╭─ [2] <│  Apply saved patch          p    Scroll main l / r      h / l│       │
 │   ▾ / │  Resolve conflict           m    Line start / end  home / end│       │
 │>      │Shelf                             Filter panel               /│       │
 │       │  Pick / shelve          v / z  View                          │       │

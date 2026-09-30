@@ -217,6 +217,32 @@ func tabTopBorder(number int, tabs []string, active, depth int, crumb string, in
 	}
 	mutedStyle := lipgloss.NewStyle().Foreground(th.Muted)
 
+	if navigation, compact := narrowTabNavigation(number, tabs, active, innerW); compact && depth == 0 {
+		var labels strings.Builder
+		used := 0
+		for index := navigation.start; index < navigation.end; index++ {
+			if index > navigation.start {
+				labels.WriteString(bs.Render(" " + strings.Repeat(borderHorizontal, tabSeparatorWidth-2) + " "))
+				used += tabSeparatorWidth
+			}
+			label := ansi.Truncate(tabs[index], navigation.labelWidth-used, "")
+			labelStyle := mutedStyle
+			if index == active {
+				labelStyle = activeStyle
+			}
+			labels.WriteString(labelStyle.Render(label))
+			used += ansi.StringWidth(label)
+		}
+		padding := ""
+		if remaining := navigation.labelWidth - used; remaining > 0 {
+			padding = bs.Render(" " + strings.Repeat(borderHorizontal, remaining-1))
+		}
+		return bs.Render(borderTopLeft+borderHorizontal) +
+			numStyle.Render(navigation.prefix) + activeStyle.Render("<") + bs.Render(navigation.gap) +
+			labels.String() + padding + bs.Render(navigation.gap) + activeStyle.Render(">") +
+			bs.Render(borderTopRight)
+	}
+
 	var b strings.Builder
 	used := 0
 	dash := func(n int) {
@@ -287,6 +313,73 @@ func tabColumns(number int, tabs []string) []int {
 		used += ansi.StringWidth(tab)
 	}
 	return cols
+}
+
+const tabSeparatorWidth = 5
+
+type tabNavigation struct {
+	prefix     string
+	gap        string
+	labelWidth int
+	previous   int
+	next       int
+	start      int
+	end        int
+}
+
+func narrowTabNavigation(number int, tabs []string, active, innerW int) (tabNavigation, bool) {
+	if innerW < 4 || len(tabs) < 2 {
+		return tabNavigation{}, false
+	}
+	columns := tabColumns(number, tabs)
+	last := len(tabs) - 1
+	if columns[last]+ansi.StringWidth(tabs[last]) <= innerW {
+		return tabNavigation{}, false
+	}
+
+	prefix := " "
+	if number >= 0 {
+		prefix += "[" + strconv.Itoa(number) + "]"
+	}
+	prefix += " "
+	available := innerW - 1
+	if available-ansi.StringWidth(prefix)-4 < 1 {
+		prefix = ""
+	}
+	gap := " "
+	if available-ansi.StringWidth(prefix)-4 < 1 {
+		gap = ""
+	}
+	labelWidth := available - ansi.StringWidth(prefix) - 2 - 2*ansi.StringWidth(gap)
+	start := active
+	used := ansi.StringWidth(tabs[active])
+	for start > 0 && used+tabSeparatorWidth+ansi.StringWidth(tabs[start-1]) <= labelWidth {
+		start--
+		used += tabSeparatorWidth + ansi.StringWidth(tabs[start])
+	}
+	first, last := start, active+1
+	for end := active + 1; end < len(tabs); end++ {
+		used += tabSeparatorWidth + ansi.StringWidth(tabs[end])
+		for used > labelWidth && start < active {
+			used -= ansi.StringWidth(tabs[start]) + tabSeparatorWidth
+			start++
+		}
+		if used > labelWidth {
+			break
+		}
+		if end+1-start > last-first {
+			first, last = start, end+1
+		}
+	}
+	return tabNavigation{
+		prefix:     prefix,
+		gap:        gap,
+		labelWidth: labelWidth,
+		previous:   2 + ansi.StringWidth(prefix),
+		next:       innerW,
+		start:      first,
+		end:        last,
+	}, true
 }
 
 // numberedTitleBorder renders a top edge carrying just the panel number and a
