@@ -931,6 +931,220 @@ func TestPanelClickTabIgnoresTheBodyAndDrilledPanels(t *testing.T) {
 	}
 }
 
+func newFilesTabPanel(number, width int) (*component.Panel, *component.Views) {
+	names := []string{"Changes", "Changelists", "Diffs", "Rejects"}
+	views := make([]component.View, len(names))
+	for index, name := range names {
+		views[index] = component.View{Name: name}
+	}
+	vs := component.NewViews("files-views", views, testTheme(), testKeys())
+	p := component.NewPanel("Files", number, vs, testTheme())
+	p.SetSize(width, 6)
+	p.Focus()
+	return p, vs
+}
+
+func TestPanelNarrowTabsKeepActiveVisible(t *testing.T) {
+	p, vs := newFilesTabPanel(2, 80)
+	names := vs.Tabs()
+	mustCmd(t, vs.Activate(3))
+	p.SetSize(24, 6)
+
+	for step := 0; step <= len(names); step++ {
+		border := ansi.Strip(strings.SplitN(p.View(), "\n", 2)[0])
+		if !strings.Contains(border, vs.ActiveName()) {
+			t.Fatalf("active tab %q is hidden after resize: %q", vs.ActiveName(), border)
+		}
+		if !strings.Contains(border, "<") || !strings.Contains(border, ">") {
+			t.Fatalf("narrow tab strip should show navigation arrows: %q", border)
+		}
+		if width := ansi.StringWidth(border); width != 24 {
+			t.Fatalf("border width = %d, want 24", width)
+		}
+		mustCmd(t, p.Update(runes("]")))
+	}
+
+	p.SetSize(80, 6)
+	border := ansi.Strip(strings.SplitN(p.View(), "\n", 2)[0])
+	for _, name := range names {
+		if !strings.Contains(border, name) {
+			t.Errorf("wide tab strip should show %q: %q", name, border)
+		}
+	}
+	if strings.ContainsAny(border, "<>") {
+		t.Errorf("wide tab strip should not show navigation arrows: %q", border)
+	}
+}
+
+func TestPanelTabsUseAvailableWidth(test *testing.T) {
+	panel, tabViews := newFilesTabPanel(2, 24)
+	for _, size := range []struct {
+		width   int
+		visible int
+	}{
+		{24, 1},
+		{40, 2},
+		{50, 3},
+		{56, 4},
+		{40, 2},
+		{24, 1},
+	} {
+		panel.SetSize(size.width, 6)
+		border := ansi.Strip(strings.SplitN(panel.View(), "\n", 2)[0])
+		for index, name := range tabViews.Tabs() {
+			visible := strings.Contains(border, name)
+			if want := index < size.visible; visible != want {
+				test.Fatalf("width %d: tab %q visible = %v, want %v: %q", size.width, name, visible, want, border)
+			}
+		}
+		if arrows := strings.ContainsAny(border, "<>"); arrows != (size.visible < len(tabViews.Tabs())) {
+			test.Fatalf("width %d: navigation arrows do not match tab overflow: %q", size.width, border)
+		}
+	}
+}
+
+func TestPanelVisibleNeighborTabsAreClickable(test *testing.T) {
+	panel, tabViews := newFilesTabPanel(2, 40)
+	for active := range tabViews.Tabs() {
+		tabViews.Activate(active)
+		border := ansi.Strip(strings.SplitN(panel.View(), "\n", 2)[0])
+		if !strings.Contains(border, tabViews.ActiveName()) {
+			test.Fatalf("active tab %q should remain visible: %q", tabViews.ActiveName(), border)
+		}
+		visible := 0
+		for index, name := range tabViews.Tabs() {
+			offset := strings.Index(border, name)
+			if offset < 0 {
+				continue
+			}
+			visible++
+			column := ansi.StringWidth(border[:offset])
+			for _, cell := range []int{column, column + ansi.StringWidth(name) - 1} {
+				cmd, clicked := panel.ClickTab(cell, 0)
+				if !clicked || tabViews.ActiveIndex() != index {
+					test.Fatalf("cell %d should select visible tab %q", cell, name)
+				}
+				if index != active {
+					selected, ok := mustCmd(test, cmd).(msg.ViewSelectedMsg)
+					if !ok || selected.Index != index || selected.Name != name {
+						test.Fatalf("neighbor click emitted %+v, want tab %q", selected, name)
+					}
+				}
+				tabViews.Activate(active)
+			}
+		}
+		if visible < 2 {
+			test.Fatalf("tab %q should have a visible neighbor at width 40: %q", tabViews.ActiveName(), border)
+		}
+	}
+}
+
+func TestPanelTabsPreferMoreVisibleNeighbors(test *testing.T) {
+	for _, middle := range []string{"Two", "\u754c\u9762"} {
+		names := []string{"Long-tab-name", "One", middle, "Three", "Four"}
+		views := make([]component.View, len(names))
+		for index, name := range names {
+			views[index] = component.View{Name: name}
+		}
+		tabViews := component.NewViews("views", views, testTheme(), testKeys())
+		panel := component.NewPanel("Views", 2, tabViews, testTheme())
+		panel.SetSize(40, 6)
+		mustCmd(test, tabViews.Activate(1))
+		border := ansi.Strip(strings.SplitN(panel.View(), "\n", 2)[0])
+		for index, name := range names {
+			if visible, want := strings.Contains(border, name), index >= 1 && index <= 3; visible != want {
+				test.Fatalf("tab %q visible = %v, want %v: %q", name, visible, want, border)
+			}
+		}
+		offset := strings.Index(border, middle)
+		column := ansi.StringWidth(border[:offset])
+		cmd, clicked := panel.ClickTab(column+ansi.StringWidth(middle)-1, 0)
+		if !clicked || tabViews.ActiveIndex() != 2 || cmd == nil {
+			test.Fatalf("the last cell of tab %q should select it", middle)
+		}
+	}
+}
+
+func TestPanelNarrowTabArrowsCycleAndWrap(t *testing.T) {
+	p, vs := newFilesTabPanel(2, 24)
+	moves := []struct {
+		arrow string
+		index int
+	}{
+		{"<", 3},
+		{"<", 2},
+		{">", 3},
+		{">", 0},
+	}
+	for _, move := range moves {
+		border := ansi.Strip(strings.SplitN(p.View(), "\n", 2)[0])
+		offset := strings.Index(border, move.arrow)
+		if offset < 0 {
+			t.Fatalf("missing navigation arrow %q: %q", move.arrow, border)
+		}
+		column := ansi.StringWidth(border[:offset])
+		if _, clicked := p.ClickTab(column, 1); clicked {
+			t.Fatal("a click below an arrow should not switch tabs")
+		}
+		if _, clicked := p.ClickTab(column-1, 0); clicked {
+			t.Fatal("the space before an arrow should not switch tabs")
+		}
+		cmd, clicked := p.ClickTab(column, 0)
+		if !clicked {
+			t.Fatalf("arrow %q should be clickable at column %d", move.arrow, column)
+		}
+		selected, ok := mustCmd(t, cmd).(msg.ViewSelectedMsg)
+		if !ok || selected.ID != "files-views" || selected.Index != move.index || selected.Name != vs.Tabs()[move.index] {
+			t.Fatalf("arrow %q emitted %+v, want tab %d", move.arrow, selected, move.index)
+		}
+		if vs.ActiveIndex() != move.index {
+			t.Fatalf("arrow %q selected tab %d, want %d", move.arrow, vs.ActiveIndex(), move.index)
+		}
+	}
+
+	border := ansi.Strip(strings.SplitN(p.View(), "\n", 2)[0])
+	offset := strings.Index(border, vs.ActiveName())
+	column := ansi.StringWidth(border[:offset])
+	if cmd, clicked := p.ClickTab(column, 0); !clicked || cmd != nil {
+		t.Fatal("clicking the selected label should be handled without changing tabs")
+	}
+	vs.PushTitled("detail", component.NewViewport(testTheme(), testKeys()))
+	if _, clicked := p.ClickTab(column, 0); clicked {
+		t.Fatal("tab switching should remain locked while drilled into a sub-view")
+	}
+}
+
+func TestPanelTabNavigationFitsResizedWidths(t *testing.T) {
+	for _, number := range []int{-1, 2, 123} {
+		p, vs := newFilesTabPanel(number, 24)
+		for _, width := range []int{2, 4, 5, 6, 7, 8, 10, 12, 16, 24, 40, 50, 55, 56, 58, 80} {
+			p.SetSize(width, 6)
+			for index := range vs.Tabs() {
+				vs.Activate(index)
+				lines := strings.Split(p.View(), "\n")
+				for _, line := range lines {
+					if got := ansi.StringWidth(line); got != width {
+						t.Fatalf("panel %d, tab %d: row width = %d, want %d: %q", number, index, got, width, line)
+					}
+				}
+				border := ansi.Strip(lines[0])
+				for _, arrow := range []string{"<", ">"} {
+					offset := strings.Index(border, arrow)
+					if offset < 0 {
+						continue
+					}
+					column := ansi.StringWidth(border[:offset])
+					cmd, clicked := p.ClickTab(column, 0)
+					if !clicked || cmd == nil {
+						t.Fatalf("panel %d at width %d: arrow %q is not clickable", number, width, arrow)
+					}
+					vs.Activate(index)
+				}
+			}
+		}
+	}
+}
+
 func TestPromptEmitsSubmitAndDismiss(t *testing.T) {
 	p := component.NewPrompt("changelist", "Changelist name", "e.g. feature-x", testTheme(), testKeys())
 	p.Focus()

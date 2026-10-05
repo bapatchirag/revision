@@ -6,7 +6,7 @@
 │Revision  r42                 ││                                              │
 │                              ││                                              │
 ╰──────────────────────────────╯│                                              │
-╭─ [2] ─ Changes ─── Changelist╮│                                              │
+╭─ [2] < Changes ──────────── >╮│                                              │
 │   ▾ /             ╭─ Update available: v1.5.0 ───────────╮                   │
 │>      M modified.g│> Update with cURL                    │                   │
 │                   │  Update with Go                      │                   │

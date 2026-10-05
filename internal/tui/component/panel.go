@@ -103,9 +103,9 @@ func (p *Panel) titleText() string {
 	return p.title
 }
 
-// ClickTab selects the view whose name in the top border covers a cell, given in
-// coordinates relative to the panel's top-left corner, and reports whether the
-// cell was a view name at all. It answers false for a panel that draws no tab
+// ClickTab selects the view whose name or navigation arrow covers a cell in the
+// top border, given relative to the panel's top-left corner, and reports whether
+// the cell was handled. It answers false for a panel that draws no tab
 // strip: one without several views, or one drilled into a sub-view, where
 // switching is locked just as it is for the keys.
 func (p *Panel) ClickTab(x, y int) (tea.Cmd, bool) {
@@ -115,6 +115,24 @@ func (p *Panel) ClickTab(x, y int) (tea.Cmd, bool) {
 	}
 	tabs := tb.Tabs()
 	if len(tabs) <= 1 {
+		return nil, false
+	}
+	if navigation, compact := narrowTabNavigation(p.number, tabs, tb.ActiveIndex(), p.width-2); compact {
+		active := tb.ActiveIndex()
+		switch x {
+		case navigation.previous:
+			return tb.Activate((active + len(tabs) - 1) % len(tabs)), true
+		case navigation.next:
+			return tb.Activate((active + 1) % len(tabs)), true
+		}
+		column := navigation.previous + 1 + ansi.StringWidth(navigation.gap)
+		for index := navigation.start; index < navigation.end; index++ {
+			label := ansi.Truncate(tabs[index], navigation.labelWidth, "")
+			if x >= column && x < column+ansi.StringWidth(label) {
+				return tb.Activate(index), true
+			}
+			column += ansi.StringWidth(label) + tabSeparatorWidth
+		}
 		return nil, false
 	}
 	for i, col := range tabColumns(p.number, tabs) {

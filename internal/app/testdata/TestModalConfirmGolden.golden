@@ -6,7 +6,7 @@
 │Revision  r42                 ││                                              │
 │                              ││                                              │
 ╰──────────────────────────────╯│                                              │
-╭─ [2] ─ Changes ───╭─ Delete file? ───────────────────────╮                   │
+╭─ [2] < Changes ───╭─ Delete file? ───────────────────────╮                   │
 │   ▾ /             │internal/app/app.go will be scheduled │                   │
 │     ▾ internal/   │for deletion (removed on the next     │                   │
 │       ▾ app/      │commit).                              │                   │
