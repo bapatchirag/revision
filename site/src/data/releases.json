@@ -1,5 +1,20 @@
 [
   {
+    "tag": "v1.7.5",
+    "name": "v1.7.5",
+    "date": "2026-10-05T05:07:11Z",
+    "url": "https://github.com/bapatchirag/revision/releases/tag/v1.7.5",
+    "prerelease": false,
+    "entries": [
+      "Updated changelog for v1.7.4 (@bapatchirag)",
+      "site: bump the astro group in /site with 3 updates (@dependabot[bot])",
+      "site: bump undici from 8.10.1 to 8.11.2 in /site (@dependabot[bot])",
+      "deps: bump github.com/charmbracelet/x/exp/golden (@dependabot[bot])",
+      "site: bump sharp from 0.35.4 to 0.35.5 in /site (@dependabot[bot])",
+      "site: bump the astro group across 1 directory with 3 updates (@dependabot[bot])"
+    ]
+  },
+  {
     "tag": "v1.7.4",
     "name": "v1.7.4",
     "date": "2026-09-24T04:24:53Z",
