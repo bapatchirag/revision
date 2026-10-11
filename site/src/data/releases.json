@@ -1,5 +1,20 @@
 [
   {
+    "tag": "v1.7.6",
+    "name": "v1.7.6",
+    "date": "2026-10-11T06:29:59Z",
+    "url": "https://github.com/bapatchirag/revision/releases/tag/v1.7.6",
+    "prerelease": false,
+    "entries": [
+      "Keep active tabs visible in narrow terminals (@bapatchirag)",
+      "site: bump devalue to 5.9.3 to address six security advisories (@bapatchirag)",
+      "site: bump http-cache-semantics to 4.3.0 to clear Dependabot alert #17 (@bapatchirag)",
+      "site: bump source-map-js to 1.2.2 to fix an indexed source map DoS (@bapatchirag)",
+      "Updated changelog for v1.7.5 (@bapatchirag)",
+      "site: bump @astrojs/starlight in /site in the astro group (@dependabot[bot])"
+    ]
+  },
+  {
     "tag": "v1.7.5",
     "name": "v1.7.5",
     "date": "2026-10-05T05:07:11Z",
