@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/bapatchirag/revision/internal/svn"
+	"github.com/bapatchirag/revision/internal/tui/layout"
 )
 
 // updateStatus fills the Status panel with the working copy's locations and
@@ -126,6 +127,11 @@ func (m *Model) mainContent() string {
 	// readable while the working copy is still loading or has failed to load.
 	if m.source != sourceFiles || !m.filesViewIsStore() {
 		switch {
+		case m.err != nil && m.loading:
+			// The failed load is being retried. svn can take its whole deadline to
+			// answer again, so the failure recedes and the retry is reported at once:
+			// left as it was, the screen reads as a key that did nothing.
+			return layout.Dim("Error: "+m.err.Error(), m.theme.Muted) + "\n\nRetrying…"
 		case m.err != nil:
 			return "Error: " + m.err.Error() + "\n\nPress R to retry."
 		case m.loading && len(m.fileItems) == 0:
