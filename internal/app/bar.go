@@ -4,15 +4,17 @@ import (
 	"fmt"
 )
 
-// updateBar sets the contextual key hints and the right-aligned load state.
+// updateBar sets the contextual key hints and the right-aligned load state. A
+// load in flight outranks a failure on screen: R retrying a failed load has to
+// read as underway, and the failure only stands again if the retry brings it back.
 func (m *Model) updateBar() {
 	m.bar.SetHints(m.barHints())
 
 	switch {
-	case m.err != nil:
-		m.bar.SetRight("error")
 	case m.loading:
 		m.bar.SetRight("loading…")
+	case m.err != nil:
+		m.bar.SetRight("error")
 	default:
 		m.bar.SetRight("")
 	}
