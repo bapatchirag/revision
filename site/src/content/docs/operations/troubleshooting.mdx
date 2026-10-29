@@ -235,6 +235,12 @@ is left half-applied by `revision` itself: the reads change nothing, and a write
 killed leaves the working copy wherever `svn` had got to. Press <KeyCap key="R" /> to see
 where that is.
 
+A status read that times out leaves its error in Main, above a prompt to press
+<KeyCap key="R" />. Pressing it starts the retry at once: the error dims, `Retrying…` takes
+the prompt's place, and the status bar reads `loading…` until `svn` answers. That can take
+the whole deadline again, and a retry that times out too puts the error and its prompt
+back.
+
 Acting on more files at once does not bring the deadline closer. An action over a set is
 one `svn` invocation rather than one per file, and its deadline grows with the set — so
 splitting a directory-wide revert into single files buys nothing but more invocations.

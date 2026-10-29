@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/bapatchirag/revision/internal/config"
 	"github.com/bapatchirag/revision/internal/selfupdate"
@@ -40,6 +42,92 @@ func TestModelShowsError(t *testing.T) {
 
 	if view := stripANSI(m.View()); !strings.Contains(view, "kaboom") {
 		t.Errorf("expected error in view, got:\n%s", view)
+	}
+}
+
+// TestRetryRecedesTheErrorAtOnce pins what R does to a failed status load: the
+// error dims and its "Press R to retry." gives way to the retry, in Main and in
+// the status bar, the moment the key lands. svn may take the whole deadline to
+// answer, so a screen left as it was reads as a key that did nothing.
+func TestRetryRecedesTheErrorAtOnce(t *testing.T) {
+	// Emit ANSI so the dimming is observable, then restore the Ascii profile.
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+
+	const failure = "svn status --xml: timed out after 30s"
+	errorLine := func(t *testing.T, m *Model) string {
+		t.Helper()
+		for _, ln := range strings.Split(m.mainText, "\n") {
+			if strings.Contains(stripANSI(ln), failure) {
+				return ln
+			}
+		}
+		t.Fatalf("Main should keep the failure on screen, got:\n%s", stripANSI(m.mainText))
+		return ""
+	}
+	barState := func(m *Model) string {
+		return strings.TrimRight(stripANSI(m.bar.View()), " ")
+	}
+
+	for _, tc := range []struct {
+		name  string
+		items []svn.StatusItem
+	}{
+		{"first load", nil},
+		{"later reload", []svn.StatusItem{{Path: "alpha.txt", State: svn.StateModified}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := sizedModel(t)
+			if tc.items != nil {
+				m = loadItems(t, m, tc.items)
+			}
+			next, _ := m.Update(errMsg{err: errors.New(failure)})
+			m = next.(*Model)
+			if ln := errorLine(t, m); stripANSI(ln) != ln {
+				t.Errorf("a failure waiting on R should not be dimmed, got %q", ln)
+			}
+			if !strings.Contains(m.mainText, "Press R to retry.") || !strings.HasSuffix(barState(m), "error") {
+				t.Fatalf("expected the failure to offer a retry, got main:\n%s\nbar: %q", stripANSI(m.mainText), barState(m))
+			}
+
+			m, cmd := pressRune(t, m, 'R')
+			if cmd == nil {
+				t.Fatal("R should re-run the load")
+			}
+			if ln := errorLine(t, m); stripANSI(ln) == ln {
+				t.Errorf("the failure being retried should be dimmed, got plain %q", ln)
+			}
+			main := stripANSI(m.mainText)
+			if strings.Contains(main, "Press R to retry.") || !strings.Contains(main, "Retrying…") {
+				t.Errorf("Main should report the retry in place of the prompt for it, got:\n%s", main)
+			}
+			if bar := barState(m); !strings.HasSuffix(bar, "loading…") {
+				t.Errorf("status bar should report the load in flight, got %q", bar)
+			}
+
+			// The retry failing again puts the failure and its prompt back as they were.
+			next, _ = m.Update(errMsg{err: errors.New(failure)})
+			m = next.(*Model)
+			if ln := errorLine(t, m); stripANSI(ln) != ln {
+				t.Errorf("a failed retry should restore the failure undimmed, got %q", ln)
+			}
+			if main := stripANSI(m.mainText); strings.Contains(main, "Retrying…") || !strings.Contains(main, "Press R to retry.") {
+				t.Errorf("a failed retry should offer R again, got:\n%s", main)
+			}
+			if bar := barState(m); !strings.HasSuffix(bar, "error") {
+				t.Errorf("status bar should report the failure again, got %q", bar)
+			}
+
+			// A retry that lands clears the failure altogether.
+			m, _ = pressRune(t, m, 'R')
+			m = loadItems(t, m, tc.items)
+			if main := stripANSI(m.mainText); strings.Contains(main, failure) || strings.Contains(main, "Retrying…") {
+				t.Errorf("a successful retry should clear the failure, got:\n%s", main)
+			}
+			if bar := barState(m); strings.HasSuffix(bar, "error") || strings.HasSuffix(bar, "loading…") {
+				t.Errorf("status bar should be idle after a successful retry, got %q", bar)
+			}
+		})
 	}
 }
 
