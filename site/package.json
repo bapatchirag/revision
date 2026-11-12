@@ -16,14 +16,14 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/markdown-satteri": "^0.4.4",
-    "@astrojs/starlight": "^0.42.6",
-    "astro": "^7.4.1",
-    "satteri": "^0.10.5",
+    "@astrojs/markdown-satteri": "^0.4.7",
+    "@astrojs/starlight": "^0.42.10",
+    "astro": "^7.4.8",
+    "satteri": "^0.11.7",
     "sharp": "^0.35.5"
   },
   "devDependencies": {
-    "@astrojs/check": "^0.9.11",
+    "@astrojs/check": "^0.9.12",
     "typescript": "^6.0.3"
   }
 }
