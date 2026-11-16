@@ -1,5 +1,16 @@
 [
   {
+    "tag": "v1.7.8",
+    "name": "v1.7.8",
+    "date": "2026-11-16T04:01:42Z",
+    "url": "https://github.com/bapatchirag/revision/releases/tag/v1.7.8",
+    "prerelease": false,
+    "entries": [
+      "Updated changelog for v1.7.7 (@bapatchirag)",
+      "site: bump the astro group in /site with 5 updates (@dependabot[bot])"
+    ]
+  },
+  {
     "tag": "v1.7.7",
     "name": "v1.7.7",
     "date": "2026-10-29T05:55:21Z",
